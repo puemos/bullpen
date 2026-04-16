@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CrazyLines",
+  "version": "0.1.0",
+  "identifier": "dev.puemos.crazylines",
+  "build": {
+    "beforeDevCommand": {
+      "script": "pnpm dev --host 127.0.0.1",
+      "cwd": "frontend"
+    },
+    "beforeBuildCommand": {
+      "script": "pnpm build",
+      "cwd": "frontend"
+    },
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CrazyLines",
+        "width": 1220,
+        "height": 820,
+        "minWidth": 980,
+        "minHeight": 680,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [""]
+  }
+}
