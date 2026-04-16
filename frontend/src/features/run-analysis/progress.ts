@@ -75,6 +75,9 @@ export function handleProgressEvent(payload: ProgressEventPayload, runId: string
     case 'StanceSubmitted':
       addRunProgress(runId, 'submitted', 'Final stance submitted');
       break;
+    case 'ProjectionSubmitted':
+      addRunProgress(runId, 'submitted', 'Projection submitted');
+      break;
     case 'Completed':
       addRunProgress(runId, 'completed', 'Analysis complete');
       break;

@@ -217,6 +217,10 @@ pub struct MetricSnapshot {
     pub as_of: String,
     pub source_id: String,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub prior_value: Option<f64>,
+    #[serde(default)]
+    pub change_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -227,6 +231,7 @@ pub enum ArtifactKind {
     ScenarioMatrix,
     BarChart,
     LineChart,
+    AreaChart,
     #[default]
     Other,
 }
@@ -239,6 +244,7 @@ impl fmt::Display for ArtifactKind {
             Self::ScenarioMatrix => "scenario_matrix",
             Self::BarChart => "bar_chart",
             Self::LineChart => "line_chart",
+            Self::AreaChart => "area_chart",
             Self::Other => "other",
         };
         write!(f, "{value}")
@@ -255,6 +261,7 @@ impl FromStr for ArtifactKind {
             "scenario_matrix" => Ok(Self::ScenarioMatrix),
             "bar_chart" => Ok(Self::BarChart),
             "line_chart" => Ok(Self::LineChart),
+            "area_chart" => Ok(Self::AreaChart),
             _ => Ok(Self::Other),
         }
     }
@@ -431,6 +438,37 @@ pub struct FinalStance {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectionScenario {
+    pub label: String,
+    pub target_value: f64,
+    pub target_label: String,
+    pub upside_pct: f64,
+    pub probability: f64,
+    pub rationale: String,
+    pub catalysts: Vec<String>,
+    pub risks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Projection {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub entity_id: String,
+    pub horizon: String,
+    pub metric: String,
+    pub current_value: f64,
+    pub current_value_label: String,
+    pub unit: String,
+    pub scenarios: Vec<ProjectionScenario>,
+    pub methodology: String,
+    pub key_assumptions: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: f64,
+    pub disclaimer: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisReport {
     pub analysis: Analysis,
     pub runs: Vec<AnalysisRun>,
@@ -441,4 +479,5 @@ pub struct AnalysisReport {
     pub artifacts: Vec<StructuredArtifact>,
     pub blocks: Vec<AnalysisBlock>,
     pub final_stance: Option<FinalStance>,
+    pub projections: Vec<Projection>,
 }

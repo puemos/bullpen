@@ -165,6 +165,8 @@ impl Database {
                 as_of TEXT NOT NULL,
                 source_id TEXT NOT NULL,
                 notes TEXT,
+                prior_value REAL,
+                change_pct REAL,
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE,
                 FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
             );
@@ -215,6 +217,25 @@ impl Database {
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS projections (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                current_value REAL NOT NULL,
+                current_value_label TEXT NOT NULL,
+                unit TEXT NOT NULL,
+                scenarios TEXT NOT NULL,
+                methodology TEXT NOT NULL,
+                key_assumptions TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                disclaimer TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS run_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
@@ -229,46 +250,10 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_metrics_run_id ON metrics(run_id);
             CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON structured_artifacts(run_id);
             CREATE INDEX IF NOT EXISTS idx_blocks_run_id ON analysis_blocks(run_id);
+            CREATE INDEX IF NOT EXISTS idx_projections_run_id ON projections(run_id);
             CREATE INDEX IF NOT EXISTS idx_run_progress_run_id ON run_progress(run_id);
             "#,
         )?;
-        Self::ensure_column(
-            &conn,
-            "research_plans",
-            "decision_criteria",
-            "decision_criteria TEXT NOT NULL DEFAULT '[]'",
-        )?;
-        Self::ensure_column(
-            &conn,
-            "research_plans",
-            "required_artifacts",
-            "required_artifacts TEXT NOT NULL DEFAULT '[]'",
-        )?;
-        Self::ensure_column(&conn, "metrics", "numeric_value", "numeric_value REAL")?;
-        Ok(())
-    }
-
-    fn ensure_column(
-        conn: &Connection,
-        table: &str,
-        column: &str,
-        column_definition: &str,
-    ) -> Result<()> {
-        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-        let mut exists = false;
-        for row in rows {
-            if row? == column {
-                exists = true;
-                break;
-            }
-        }
-        if !exists {
-            conn.execute(
-                &format!("ALTER TABLE {table} ADD COLUMN {column_definition}"),
-                [],
-            )?;
-        }
         Ok(())
     }
 
@@ -446,6 +431,7 @@ impl Database {
                 artifacts: Vec::new(),
                 blocks: Vec::new(),
                 final_stance: None,
+                projections: Vec::new(),
             }));
         };
 
@@ -459,6 +445,7 @@ impl Database {
             artifacts: self.get_structured_artifacts(&run_id)?,
             blocks: self.get_blocks(&run_id)?,
             final_stance: self.get_final_stance(&run_id)?,
+            projections: self.get_projections(&run_id)?,
         }))
     }
 
@@ -578,8 +565,8 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO metrics
-            (id, run_id, entity_id, metric, value, numeric_value, unit, period, as_of, source_id, notes)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            (id, run_id, entity_id, metric, value, numeric_value, unit, period, as_of, source_id, notes, prior_value, change_pct)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 metric.id,
                 metric.run_id,
@@ -591,7 +578,9 @@ impl Database {
                 metric.period,
                 metric.as_of,
                 metric.source_id,
-                metric.notes
+                metric.notes,
+                metric.prior_value,
+                metric.change_pct,
             ],
         )?;
         Ok(())
@@ -639,6 +628,33 @@ impl Database {
                 block.importance,
                 block.display_order,
                 block.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_projection(&self, projection: &Projection) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO projections
+            (id, run_id, entity_id, horizon, metric, current_value, current_value_label, unit, scenarios, methodology, key_assumptions, evidence_ids, confidence, disclaimer, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                projection.id,
+                projection.run_id,
+                projection.entity_id,
+                projection.horizon,
+                projection.metric,
+                projection.current_value,
+                projection.current_value_label,
+                projection.unit,
+                serde_json::to_string(&projection.scenarios)?,
+                projection.methodology,
+                serde_json::to_string(&projection.key_assumptions)?,
+                serde_json::to_string(&projection.evidence_ids)?,
+                projection.confidence,
+                projection.disclaimer,
+                projection.created_at,
             ],
         )?;
         Ok(())
@@ -704,6 +720,7 @@ impl Database {
             ProgressEventPayload::ArtifactSubmitted => "ArtifactSubmitted",
             ProgressEventPayload::BlockSubmitted => "BlockSubmitted",
             ProgressEventPayload::StanceSubmitted => "StanceSubmitted",
+            ProgressEventPayload::ProjectionSubmitted => "ProjectionSubmitted",
             ProgressEventPayload::Completed => "Completed",
             ProgressEventPayload::Error { .. } => "Error",
         };
@@ -747,6 +764,7 @@ impl Database {
         let metrics = self.get_metrics(run_id)?;
         let artifacts = self.get_structured_artifacts(run_id)?;
         let final_stance = self.get_final_stance(run_id)?;
+        let projections = self.get_projections(run_id)?;
         let mut errors = Vec::new();
         let source_ids: HashSet<&str> = sources.iter().map(|source| source.id.as_str()).collect();
         let block_kinds: HashSet<String> =
@@ -889,6 +907,119 @@ impl Database {
             }
         }
 
+        if let Some(plan) = &research_plan {
+            let projection_intent = matches!(
+                plan.intent,
+                AnalysisIntent::SingleEquity | AnalysisIntent::CompareEquities
+            );
+            if projection_intent && projections.is_empty() {
+                errors.push(
+                    "missing forward-looking projection; submit_projection is required for single_equity and compare_equities"
+                        .to_string(),
+                );
+            }
+            if matches!(plan.intent, AnalysisIntent::CompareEquities) && !entities.is_empty() {
+                let mut by_entity: std::collections::HashMap<&str, usize> =
+                    std::collections::HashMap::new();
+                for projection in &projections {
+                    *by_entity.entry(projection.entity_id.as_str()).or_insert(0) += 1;
+                }
+                for entity in &entities {
+                    match by_entity.get(entity.id.as_str()) {
+                        None => errors.push(format!(
+                            "comparison requires one projection per entity; missing projection for '{}'",
+                            entity.name
+                        )),
+                        Some(count) if *count > 1 => errors.push(format!(
+                            "comparison must have exactly one projection per entity; entity '{}' has {count}",
+                            entity.name
+                        )),
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        for projection in &projections {
+            if projection.methodology.trim().is_empty() {
+                errors.push(format!(
+                    "projection '{}' must include methodology",
+                    projection.metric
+                ));
+            }
+            if projection.key_assumptions.is_empty() {
+                errors.push(format!(
+                    "projection '{}' must include key_assumptions",
+                    projection.metric
+                ));
+            }
+            if projection.evidence_ids.is_empty() {
+                errors.push(format!(
+                    "projection '{}' must include evidence_ids",
+                    projection.metric
+                ));
+            }
+            for evidence_id in &projection.evidence_ids {
+                if !source_ids.contains(evidence_id.as_str()) {
+                    errors.push(format!(
+                        "projection '{}' references unknown evidence_id '{}'",
+                        projection.metric, evidence_id
+                    ));
+                }
+            }
+
+            if projection.scenarios.len() < 3 {
+                errors.push(format!(
+                    "projection '{}' must include at least 3 scenarios (bull/base/bear)",
+                    projection.metric
+                ));
+            }
+            let labels: HashSet<String> = projection
+                .scenarios
+                .iter()
+                .map(|scenario| scenario.label.to_ascii_lowercase())
+                .collect();
+            for required in ["bull", "base", "bear"] {
+                if !labels.contains(required) {
+                    errors.push(format!(
+                        "projection '{}' missing required '{required}' scenario",
+                        projection.metric
+                    ));
+                }
+            }
+            let prob_sum: f64 = projection
+                .scenarios
+                .iter()
+                .map(|scenario| scenario.probability)
+                .sum();
+            if (prob_sum - 1.0).abs() > 0.05 {
+                errors.push(format!(
+                    "projection '{}' scenario probabilities sum to {:.2}; must sum to ~1.0",
+                    projection.metric, prob_sum
+                ));
+            }
+            for scenario in &projection.scenarios {
+                if scenario.rationale.trim().is_empty() {
+                    errors.push(format!(
+                        "projection '{}' scenario '{}' must include rationale",
+                        projection.metric, scenario.label
+                    ));
+                }
+                if scenario.catalysts.is_empty() {
+                    errors.push(format!(
+                        "projection '{}' scenario '{}' must include catalysts",
+                        projection.metric, scenario.label
+                    ));
+                }
+                if scenario.risks.is_empty() {
+                    errors.push(format!(
+                        "projection '{}' scenario '{}' must include risks",
+                        projection.metric, scenario.label
+                    ));
+                }
+            }
+        }
+
         Ok(errors)
     }
 
@@ -970,7 +1101,7 @@ impl Database {
     fn get_metrics(&self, run_id: &str) -> Result<Vec<MetricSnapshot>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, entity_id, metric, value, numeric_value, unit, period, as_of, source_id, notes
+            "SELECT id, run_id, entity_id, metric, value, numeric_value, unit, period, as_of, source_id, notes, prior_value, change_pct
              FROM metrics WHERE run_id = ?1 ORDER BY metric",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -986,6 +1117,8 @@ impl Database {
                 as_of: row.get(8)?,
                 source_id: row.get(9)?,
                 notes: row.get(10)?,
+                prior_value: row.get(11)?,
+                change_pct: row.get(12)?,
             })
         })?;
         collect_rows(rows)
@@ -1042,6 +1175,37 @@ impl Database {
                 importance: row.get(8)?,
                 display_order: row.get(9)?,
                 created_at: row.get(10)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub fn get_projections(&self, run_id: &str) -> Result<Vec<Projection>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, entity_id, horizon, metric, current_value, current_value_label, unit, scenarios, methodology, key_assumptions, evidence_ids, confidence, disclaimer, created_at
+             FROM projections WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let scenarios: String = row.get(8)?;
+            let assumptions: String = row.get(10)?;
+            let evidence: String = row.get(11)?;
+            Ok(Projection {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                entity_id: row.get(2)?,
+                horizon: row.get(3)?,
+                metric: row.get(4)?,
+                current_value: row.get(5)?,
+                current_value_label: row.get(6)?,
+                unit: row.get(7)?,
+                scenarios: serde_json::from_str(&scenarios).unwrap_or_default(),
+                methodology: row.get(9)?,
+                key_assumptions: serde_json::from_str(&assumptions).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(12)?,
+                disclaimer: row.get(13)?,
+                created_at: row.get(14)?,
             })
         })?;
         collect_rows(rows)
@@ -1191,6 +1355,68 @@ mod tests {
         .unwrap();
     }
 
+    fn valid_scenarios() -> Vec<ProjectionScenario> {
+        vec![
+            ProjectionScenario {
+                label: "bull".into(),
+                target_value: 230.0,
+                target_label: "$230".into(),
+                upside_pct: 0.26,
+                probability: 0.25,
+                rationale: "Upside thesis pans out.".into(),
+                catalysts: vec!["Product launch".into()],
+                risks: vec!["Execution slip".into()],
+            },
+            ProjectionScenario {
+                label: "base".into(),
+                target_value: 205.0,
+                target_label: "$205".into(),
+                upside_pct: 0.13,
+                probability: 0.55,
+                rationale: "Consensus path holds.".into(),
+                catalysts: vec!["Buyback cadence".into()],
+                risks: vec!["Margin pressure".into()],
+            },
+            ProjectionScenario {
+                label: "bear".into(),
+                target_value: 150.0,
+                target_label: "$150".into(),
+                upside_pct: -0.18,
+                probability: 0.20,
+                rationale: "Demand softens.".into(),
+                catalysts: vec!["Pricing war".into()],
+                risks: vec!["Macro drawdown".into()],
+            },
+        ]
+    }
+
+    fn save_projection(
+        db: &Database,
+        run_id: &str,
+        entity_id: &str,
+        source_id: &str,
+        scenarios: Vec<ProjectionScenario>,
+    ) {
+        db.save_projection(&Projection {
+            id: format!("projection-{entity_id}"),
+            run_id: run_id.into(),
+            entity_id: entity_id.into(),
+            horizon: "12 months".into(),
+            metric: "stock_price".into(),
+            current_value: 182.0,
+            current_value_label: "$182".into(),
+            unit: "USD".into(),
+            scenarios,
+            methodology: "DCF + multiples".into(),
+            key_assumptions: vec!["Steady revenue growth".into()],
+            evidence_ids: vec![source_id.into()],
+            confidence: 0.7,
+            disclaimer: "Research only. Not investment advice.".into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    }
+
     fn save_artifact(db: &Database, run_id: &str, kind: ArtifactKind, source_id: &str) {
         db.save_structured_artifact(&StructuredArtifact {
             id: format!("artifact-{kind}"),
@@ -1268,6 +1494,8 @@ mod tests {
             as_of: "2026-04-16".into(),
             source_id,
             notes: None,
+            prior_value: None,
+            change_pct: None,
         })
         .unwrap();
 
@@ -1295,6 +1523,7 @@ mod tests {
         save_block(&db, &run_id, BlockKind::Risks, &source_id);
         save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
         save_stance(&db, &run_id);
+        save_projection(&db, &run_id, "AAPL", &source_id, valid_scenarios());
 
         let errors = db.validate_finalization(&run_id).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
@@ -1325,6 +1554,7 @@ mod tests {
                 resolution_notes: None,
             })
             .unwrap();
+            save_projection(&db, &run_id, id, &source_id, valid_scenarios());
         }
         save_block(&db, &run_id, BlockKind::Thesis, &source_id);
         save_block(&db, &run_id, BlockKind::Risks, &source_id);
@@ -1333,5 +1563,131 @@ mod tests {
 
         let errors = db.validate_finalization(&run_id).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn finalization_requires_projection_for_single_equity() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(&db, &run_id);
+        save_plan(
+            &db,
+            &run_id,
+            AnalysisIntent::SingleEquity,
+            vec!["metric_table".into()],
+        );
+        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
+        save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
+        save_stance(&db, &run_id);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("forward-looking projection")),
+            "expected missing-projection error, got {errors:?}",
+        );
+    }
+
+    #[test]
+    fn finalization_requires_projection_per_entity_for_comparison() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Compare NVDA to AMD", AnalysisIntent::CompareEquities);
+        let source_id = save_source(&db, &run_id);
+        save_plan(
+            &db,
+            &run_id,
+            AnalysisIntent::CompareEquities,
+            vec!["comparison_matrix".into()],
+        );
+        for (id, name) in [("NVDA", "Nvidia"), ("AMD", "Advanced Micro Devices")] {
+            db.save_entity(&Entity {
+                id: id.into(),
+                run_id: run_id.clone(),
+                symbol: Some(id.into()),
+                name: name.into(),
+                exchange: Some("NASDAQ".into()),
+                asset_type: "equity".into(),
+                sector: Some("Technology".into()),
+                country: Some("US".into()),
+                confidence: 0.95,
+                resolution_notes: None,
+            })
+            .unwrap();
+        }
+        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
+        save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        save_artifact(&db, &run_id, ArtifactKind::ComparisonMatrix, &source_id);
+        save_stance(&db, &run_id);
+        save_projection(&db, &run_id, "NVDA", &source_id, valid_scenarios());
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("missing projection for 'Advanced Micro Devices'")),
+            "expected missing-per-entity projection error, got {errors:?}",
+        );
+    }
+
+    #[test]
+    fn projection_scenarios_must_sum_to_one() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(&db, &run_id);
+        save_plan(
+            &db,
+            &run_id,
+            AnalysisIntent::SingleEquity,
+            vec!["metric_table".into()],
+        );
+        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
+        save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
+        save_stance(&db, &run_id);
+
+        let mut scenarios = valid_scenarios();
+        for scenario in &mut scenarios {
+            scenario.probability = 0.30;
+        }
+        save_projection(&db, &run_id, "AAPL", &source_id, scenarios);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("probabilities sum")),
+            "expected probabilities-sum error, got {errors:?}",
+        );
+    }
+
+    #[test]
+    fn projection_requires_all_scenario_labels() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(&db, &run_id);
+        save_plan(
+            &db,
+            &run_id,
+            AnalysisIntent::SingleEquity,
+            vec!["metric_table".into()],
+        );
+        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
+        save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
+        save_stance(&db, &run_id);
+
+        let mut scenarios = valid_scenarios();
+        scenarios.retain(|scenario| scenario.label != "bear");
+        save_projection(&db, &run_id, "AAPL", &source_id, scenarios);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("missing required 'bear' scenario")),
+            "expected missing-bear error, got {errors:?}",
+        );
     }
 }

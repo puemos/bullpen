@@ -110,6 +110,8 @@ export interface MetricSnapshot {
   as_of: string;
   source_id: string;
   notes: string | null;
+  prior_value: number | null;
+  change_pct: number | null;
 }
 
 export type ArtifactKind =
@@ -118,6 +120,7 @@ export type ArtifactKind =
   | 'scenario_matrix'
   | 'bar_chart'
   | 'line_chart'
+  | 'area_chart'
   | 'other';
 
 export interface ArtifactColumn {
@@ -196,6 +199,35 @@ export interface FinalStance {
   created_at: string;
 }
 
+export interface ProjectionScenario {
+  label: string;
+  target_value: number;
+  target_label: string;
+  upside_pct: number;
+  probability: number;
+  rationale: string;
+  catalysts: string[];
+  risks: string[];
+}
+
+export interface Projection {
+  id: string;
+  run_id: string;
+  entity_id: string;
+  horizon: string;
+  metric: string;
+  current_value: number;
+  current_value_label: string;
+  unit: string;
+  scenarios: ProjectionScenario[];
+  methodology: string;
+  key_assumptions: string[];
+  evidence_ids: string[];
+  confidence: number;
+  disclaimer: string;
+  created_at: string;
+}
+
 export interface AnalysisReport {
   analysis: Analysis;
   runs: AnalysisRun[];
@@ -206,6 +238,7 @@ export interface AnalysisReport {
   artifacts: StructuredArtifact[];
   blocks: AnalysisBlock[];
   final_stance: FinalStance | null;
+  projections: Projection[];
 }
 
 export interface PlanEntry {
@@ -241,6 +274,7 @@ export type ProgressEventPayload =
   | { event: 'ArtifactSubmitted' }
   | { event: 'BlockSubmitted' }
   | { event: 'StanceSubmitted' }
+  | { event: 'ProjectionSubmitted' }
   | { event: 'Completed' }
   | { event: 'Error'; data: { message: string } };
 

@@ -1,8 +1,8 @@
-import { CircleNotch, Copy, Stop, Trash } from '@phosphor-icons/react';
+import { Copy, Stop, Trash } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MarkdownMessage from '@/components/Agent/MarkdownMessage';
 import ToolCallCard from '@/components/Agent/ToolCallCard';
-import { Button } from '@/components/ui/button';
+import { Dot, Eyebrow } from '@/components/ui/editorial';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ReportContent } from '@/features/report-viewer/ReportContent';
 import {
@@ -12,7 +12,13 @@ import {
   stopAnalysis,
 } from '@/shared/api/commands';
 import { addRun, addRunProgress, setRunProgress, setState, useAppStore } from '@/store';
-import type { ProgressItem, RunState } from '@/types';
+import type {
+  Analysis,
+  AnalysisReport,
+  AnalysisSummary,
+  ProgressItem,
+  RunState,
+} from '@/types';
 import { getTimelineBlocks } from '@/features/run-analysis/progress';
 import { WarningCircle } from '@phosphor-icons/react';
 
@@ -81,45 +87,58 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
       className="h-full gap-0"
     >
       <div className="shrink-0 border-b border-border bg-background">
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-8 py-6">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <div className="mx-auto flex max-w-5xl flex-col gap-6 px-8 pt-10 pb-5">
+          <AnalysisMetaLine analysis={selectedAnalysis} report={report} isRunning={isRunning} />
+
+          <div className="space-y-4">
+            <h1 className="text-[34px] font-semibold leading-[1.05] tracking-[-0.02em]">
+              {title}
+            </h1>
             {prompt && (
-              <p className="max-w-3xl text-sm text-muted-foreground">{prompt}</p>
+              <p className="max-w-[62ch] text-[14.5px] leading-[1.55] text-muted-foreground">
+                {prompt}
+              </p>
             )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <TabsList>
-              <TabsTrigger value="report" className="flex-none px-4">
+            <TabsList className="h-auto w-fit gap-6 rounded-none bg-transparent p-0">
+              <TabsTrigger
+                value="report"
+                className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              >
                 Report
               </TabsTrigger>
-              <TabsTrigger value="agent" className="flex-none px-4">
+              <TabsTrigger
+                value="agent"
+                className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              >
                 Agent
                 {isRunning && (
-                  <CircleNotch size={12} className="animate-spin text-primary" />
+                  <Dot className="ml-1 size-1.5 animate-pulse bg-primary" />
                 )}
               </TabsTrigger>
             </TabsList>
 
             {report && (
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-1.5"
+              <div className="flex items-center gap-5 text-[12.5px]">
+                <button
+                  type="button"
                   onClick={copyMarkdown}
+                  className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  <Copy size={14} /> {copyState || 'Markdown'}
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="flex items-center gap-1.5"
+                  <Copy size={13} />
+                  <span>{copyState || 'Copy as markdown'}</span>
+                </button>
+                <span aria-hidden className="h-3 w-px bg-border" />
+                <button
+                  type="button"
                   onClick={remove}
+                  className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
-                  <Trash size={14} /> Delete
-                </Button>
+                  <Trash size={13} />
+                  <span>Delete</span>
+                </button>
               </div>
             )}
           </div>
@@ -139,6 +158,58 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
       </TabsContent>
     </Tabs>
   );
+}
+
+function AnalysisMetaLine({
+  analysis,
+  report,
+  isRunning,
+}: {
+  analysis: Analysis | AnalysisSummary | null;
+  report: AnalysisReport | null;
+  isRunning: boolean;
+}) {
+  const intent = analysis?.intent;
+  const status = report?.analysis.status ?? analysis?.status;
+  const created = report?.analysis.created_at ?? analysis?.created_at;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <Eyebrow>Analysis</Eyebrow>
+      {intent && (
+        <>
+          <Dot />
+          <Eyebrow>{intent.replace(/_/g, ' ')}</Eyebrow>
+        </>
+      )}
+      {status && (
+        <>
+          <Dot />
+          <Eyebrow
+            className={isRunning ? 'text-primary' : undefined}
+          >
+            {isRunning ? 'Running' : status}
+          </Eyebrow>
+        </>
+      )}
+      {created && (
+        <>
+          <Dot />
+          <Eyebrow>{formatCreated(created)}</Eyebrow>
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatCreated(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
 }
 
 function AgentTimeline({
@@ -205,11 +276,11 @@ function AgentTimeline({
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-6 py-6" ref={scrollRef}>
-        <div className="mx-auto max-w-3xl space-y-8">
+        <div className="mx-auto max-w-3xl">
           {timelineBlocks.map(block => {
             if (block.type === 'message') {
               return (
-                <div key={block.id}>
+                <div key={block.id} className="py-4">
                   <MarkdownMessage text={block.content} />
                 </div>
               );
@@ -218,23 +289,21 @@ function AgentTimeline({
             if (block.type === 'tool') {
               return (
                 <div key={block.id}>
-                  <div className="max-w-[400px]">
-                    <ToolCallCard
-                      title={block.title}
-                      toolName={block.toolName}
-                      toolKind={block.kind}
-                      arguments={block.arguments}
-                      result={block.result}
-                      status={block.status}
-                    />
-                  </div>
+                  <ToolCallCard
+                    title={block.title}
+                    toolName={block.toolName}
+                    toolKind={block.kind}
+                    arguments={block.arguments}
+                    result={block.result}
+                    status={block.status}
+                  />
                 </div>
               );
             }
 
             if (block.type === 'error') {
               return (
-                <div key={block.id} className="flex items-center gap-2 text-xs text-destructive">
+                <div key={block.id} className="flex items-center gap-2 py-1 text-xs text-destructive">
                   <WarningCircle size={14} /> {block.content}
                 </div>
               );
@@ -244,8 +313,8 @@ function AgentTimeline({
           })}
 
           {isRunning && (
-            <div className="flex animate-pulse items-center gap-2 text-xs text-muted-foreground">
-              <div className="h-1.5 w-1.5 bg-primary/50" />
+            <div className="flex animate-pulse items-center gap-2 py-2 text-xs text-muted-foreground">
+              <Dot className="size-1.5 bg-primary" />
               Agent is working...
             </div>
           )}
@@ -253,16 +322,17 @@ function AgentTimeline({
       </div>
 
       {isRunning && (
-        <div className="flex shrink-0 justify-center border-t border-border p-4">
-          <Button
-            variant="destructive"
-            size="sm"
-            className="flex items-center gap-1.5"
-            onClick={handleStop}
-          >
-            <Stop size={14} weight="fill" />
-            Stop
-          </Button>
+        <div className="shrink-0 border-t border-border">
+          <div className="mx-auto max-w-3xl px-6 py-3">
+            <button
+              type="button"
+              onClick={handleStop}
+              className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground transition-colors hover:text-destructive"
+            >
+              <Stop size={13} weight="fill" />
+              <span>Stop</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -1,22 +1,17 @@
-import { ChartLine, ChartLineUp, Newspaper, Table as TableIcon } from '@phosphor-icons/react';
+import { ChartLineUp } from '@phosphor-icons/react';
 import { useMemo } from 'react';
-import { Badge } from '@/components/ui/badge';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   getAnalysisReport,
   setActiveRun,
 } from '@/shared/api/commands';
 import { setState, useAppStore } from '@/store';
-import type { Source } from '@/types';
-import { ConfidenceBadge, getStanceClasses } from './badge-styles';
-import { AnalysisBlockCard } from './AnalysisBlockCard';
-import { FinalStanceView } from './FinalStanceView';
+import type { Entity, Source } from '@/types';
+import { AnalysisSection } from './AnalysisSection';
+import { ArgumentSpine } from './ArgumentSpine';
+import { Eyebrow, SectionHeader } from '@/components/ui/editorial';
+import { MetricList } from './MetricList';
+import { ProjectionView } from './ProjectionView';
+import { ReportHero } from './ReportHero';
 import { SourceList } from './SourceList';
 import { StructuredArtifactView } from './StructuredArtifactView';
 
@@ -24,8 +19,18 @@ export function ReportContent() {
   const report = useAppStore(state => state.selectedReport);
   const selectedAnalysisId = useAppStore(state => state.selectedAnalysisId);
   const sourceMap = useMemo(
-    () => report ? new Map<string, Source>(report.sources.map(s => [s.id, s])) : new Map<string, Source>(),
+    () =>
+      report
+        ? new Map<string, Source>(report.sources.map(s => [s.id, s]))
+        : new Map<string, Source>(),
     [report?.sources],
+  );
+  const entityMap = useMemo(
+    () =>
+      report
+        ? new Map<string, Entity>(report.entities.map(e => [e.id, e]))
+        : new Map<string, Entity>(),
+    [report?.entities],
   );
 
   if (!selectedAnalysisId) {
@@ -38,7 +43,11 @@ export function ReportContent() {
   }
 
   if (!report) {
-    return <div className="flex h-full items-center justify-center text-sm">Loading report...</div>;
+    return (
+      <div className="flex h-full items-center justify-center text-sm">
+        Loading report...
+      </div>
+    );
   }
 
   const switchRun = async (runId: string) => {
@@ -47,110 +56,198 @@ export function ReportContent() {
     setState({ selectedReport: updated });
   };
 
-  const hasMultipleRuns = report.runs.length > 1;
-  const activeRunId = report.analysis.active_run_id;
   const plan = report.research_plan;
+  const hasProjections = report.projections.length > 0;
+  const hasMetrics = report.metrics.length > 0;
+  const hasEvidence = report.artifacts.length > 0;
+  const hasAnalysis = report.blocks.length > 0;
+  const hasSources = report.sources.length > 0;
+
+  const sectionFlags = {
+    hasProjections,
+    hasMetrics,
+    hasEvidence,
+    hasAnalysis,
+    hasSources,
+  };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-8 pb-32">
-      <Card>
-        <CardHeader className="gap-0">
-          <div className="flex flex-wrap gap-2">
-            <Badge className={getStanceClasses(report.final_stance?.stance || '')}>
-              {formatLabel(report.final_stance?.stance || 'no stance')}
-            </Badge>
-            <Badge variant="secondary">{formatLabel(report.analysis.intent)}</Badge>
-            {report.final_stance && (
-              <ConfidenceBadge confidence={report.final_stance.confidence} />
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <Separator />
-          <div className="grid gap-4 text-sm sm:grid-cols-3">
-            <ReportMetric label="Sources" value={report.sources.length} icon={<Newspaper size={14} />} />
-            <ReportMetric label="Metrics" value={report.metrics.length} icon={<ChartLine size={14} />} />
-            <ReportMetric label="Artifacts" value={report.artifacts.length} icon={<TableIcon size={14} />} />
-          </div>
-          {plan?.decision_criteria?.length ? (
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium">Decision Criteria</h3>
-              <div className="flex flex-wrap gap-2">
-                {plan.decision_criteria.map(criteria => (
-                  <Badge key={criteria} variant="outline">
-                    {criteria}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {hasMultipleRuns && (
-        <Tabs value={activeRunId ?? undefined} onValueChange={switchRun} className="gap-0">
-          <TabsList>
-            {report.runs.map(run => (
-              <TabsTrigger
-                key={run.id}
-                value={run.id}
-                className="flex-none px-3 text-xs"
-              >
-                {run.agent_id}
-                <span className="ml-1.5 text-[10px] text-muted-foreground">
-                  ({run.status})
-                </span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      )}
-
-      {report.final_stance && <FinalStanceView stance={report.final_stance} />}
-
-      {report.artifacts.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium">Structured Evidence</h3>
-            <Badge variant="secondary">{report.artifacts.length} artifacts</Badge>
-          </div>
-          <div className="space-y-4">
-            {report.artifacts.map(artifact => (
-              <StructuredArtifactView key={artifact.id} artifact={artifact} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {report.blocks.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium">Analysis</h3>
-            <Badge variant="secondary">{report.blocks.length} blocks</Badge>
-          </div>
-          {report.blocks.map(block => (
-            <AnalysisBlockCard key={block.id} block={block} sourceMap={sourceMap} />
-          ))}
-        </section>
-      )}
-
-      <SourceList sources={report.sources} />
-    </div>
-  );
-}
-
-function ReportMetric({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
-  return (
-    <div className="rounded-md border bg-muted/20 px-4 py-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {icon}
-        {label}
+    <article className="mx-auto max-w-5xl px-8 pb-32">
+      <div className="pt-10 pb-14">
+        <ReportHero report={report} onSwitchRun={switchRun} />
       </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+
+      {report.final_stance && (
+        <section className="pb-14">
+          <ArgumentSpine stance={report.final_stance} />
+        </section>
+      )}
+
+      {plan?.decision_criteria?.length ? (
+        <section className="pb-12">
+          <DecisionCriteria criteria={plan.decision_criteria} />
+        </section>
+      ) : null}
+
+      {(hasProjections || hasMetrics || hasEvidence || hasAnalysis || hasSources) && (
+        <SectionJumpNav {...sectionFlags} />
+      )}
+
+      {hasProjections && (
+        <section className="space-y-8 pb-16">
+          <SectionHeader
+            number={sectionNumber(sectionFlags, 'projections')}
+            label="Projection"
+            title="Forward view"
+            meta={<span className="font-mono tabular-nums">{report.projections.length.toString().padStart(2, '0')} {report.projections.length === 1 ? 'target' : 'targets'}</span>}
+            id="projections"
+          />
+          <ProjectionView
+            projections={report.projections}
+            entityMap={entityMap}
+            sourceMap={sourceMap}
+          />
+        </section>
+      )}
+
+      {hasMetrics && (
+        <section className="space-y-8 pb-16">
+          <SectionHeader
+            number={sectionNumber(sectionFlags, 'metrics')}
+            label="Metrics"
+            title="Data points"
+            meta={<span className="font-mono tabular-nums">{report.metrics.length.toString().padStart(2, '0')} tracked</span>}
+            id="metrics"
+          />
+          <MetricList
+            metrics={report.metrics}
+            entityMap={entityMap}
+            sourceMap={sourceMap}
+          />
+        </section>
+      )}
+
+      {hasEvidence && (
+        <section className="space-y-2 pb-16">
+          <SectionHeader
+            number={sectionNumber(sectionFlags, 'evidence')}
+            label="Evidence"
+            title="Structured evidence"
+            meta={<span className="font-mono tabular-nums">{report.artifacts.length.toString().padStart(2, '0')} artifacts</span>}
+            id="evidence"
+          />
+          <div>
+            {report.artifacts.map((artifact, index) => (
+              <StructuredArtifactView
+                key={artifact.id}
+                artifact={artifact}
+                isFirst={index === 0}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {hasAnalysis && (
+        <section className="space-y-8 pb-16">
+          <SectionHeader
+            number={sectionNumber(sectionFlags, 'analysis')}
+            label="Analysis"
+            title="The deeper read"
+            meta={<span className="font-mono tabular-nums">{report.blocks.length.toString().padStart(2, '0')} blocks</span>}
+            id="analysis"
+          />
+          <AnalysisSection blocks={report.blocks} sourceMap={sourceMap} />
+        </section>
+      )}
+
+      {hasSources && (
+        <section className="space-y-8 pb-16">
+          <SectionHeader
+            number={sectionNumber(sectionFlags, 'sources')}
+            label="Sources"
+            title="Bibliography"
+            meta={<span className="font-mono tabular-nums">{report.sources.length.toString().padStart(2, '0')} cited</span>}
+            id="sources"
+          />
+          <SourceList sources={report.sources} />
+        </section>
+      )}
+    </article>
+  );
+}
+
+type SectionFlags = {
+  hasProjections: boolean;
+  hasMetrics: boolean;
+  hasEvidence: boolean;
+  hasAnalysis: boolean;
+  hasSources: boolean;
+};
+
+type SectionKey = 'projections' | 'metrics' | 'evidence' | 'analysis' | 'sources';
+
+function sectionNumber(flags: SectionFlags, which: SectionKey): string {
+  const order: SectionKey[] = ['projections', 'metrics', 'evidence', 'analysis', 'sources'];
+  const present = new Set<SectionKey>();
+  if (flags.hasProjections) present.add('projections');
+  if (flags.hasMetrics) present.add('metrics');
+  if (flags.hasEvidence) present.add('evidence');
+  if (flags.hasAnalysis) present.add('analysis');
+  if (flags.hasSources) present.add('sources');
+  const seq = order.filter(key => present.has(key));
+  const idx = seq.indexOf(which);
+  return String(idx + 1).padStart(2, '0');
+}
+
+function DecisionCriteria({ criteria }: { criteria: string[] }) {
+  return (
+    <div className="flex flex-col gap-3 border-t border-border pt-5">
+      <Eyebrow>Decision criteria</Eyebrow>
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-foreground/80">
+        {criteria.map((criterion, index) => (
+          <span key={criterion} className="inline-flex items-baseline gap-1.5">
+            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
+              {String(index + 1).padStart(2, '0')}
+            </span>
+            {criterion.replace(/^\s*\d+[.)]\s+/, '')}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
 
-function formatLabel(value: string) {
-  return value.replace(/_/g, ' ');
+function SectionJumpNav({
+  hasProjections,
+  hasMetrics,
+  hasEvidence,
+  hasAnalysis,
+  hasSources,
+}: SectionFlags) {
+  const items: { href: string; label: string }[] = [];
+  if (hasProjections) items.push({ href: '#projections', label: 'Projection' });
+  if (hasMetrics) items.push({ href: '#metrics', label: 'Metrics' });
+  if (hasEvidence) items.push({ href: '#evidence', label: 'Evidence' });
+  if (hasAnalysis) items.push({ href: '#analysis', label: 'Analysis' });
+  if (hasSources) items.push({ href: '#sources', label: 'Sources' });
+
+  return (
+    <nav className="sticky top-0 z-20 -mx-8 mb-8 border-y border-border bg-background/90 px-8 py-3 backdrop-blur">
+      <div className="flex items-center gap-6">
+        <Eyebrow>Contents</Eyebrow>
+        <div className="flex items-center gap-5 text-[12.5px]">
+          {items.map(item => (
+            <a
+              key={item.href}
+              href={item.href}
+              className="text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {item.label}
+            </a>
+          ))}
+        </div>
+      </div>
+    </nav>
+  );
 }

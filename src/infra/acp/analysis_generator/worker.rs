@@ -49,6 +49,7 @@ pub enum ProgressEvent {
     ArtifactSubmitted,
     BlockSubmitted,
     StanceSubmitted,
+    ProjectionSubmitted,
     Finalized,
 }
 

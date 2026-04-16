@@ -3,31 +3,72 @@ import { cn } from '@/lib/utils';
 export function getImportanceClasses(importance: string): string {
   switch (importance) {
     case 'high':
-      return 'border-transparent bg-foreground text-background';
+      return 'border-foreground/20 bg-foreground text-background';
     case 'medium':
-      return 'border-transparent bg-secondary text-secondary-foreground';
+      return 'border-border bg-transparent text-foreground';
     case 'low':
-      return 'border-muted-foreground/30 text-muted-foreground';
+      return 'border-border bg-transparent text-muted-foreground';
     default:
       return '';
   }
 }
 
-export function getStanceClasses(stance: string): string {
+export interface StanceAccent {
+  tick: string;
+  text: string;
+  rule: string;
+  dot: string;
+  label: string;
+}
+
+export function getStanceAccent(stance: string): StanceAccent {
   switch (stance) {
     case 'bullish':
-      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400';
+      return {
+        tick: 'bg-emerald-600 dark:bg-emerald-400',
+        text: 'text-emerald-700 dark:text-emerald-400',
+        rule: 'bg-emerald-600/80 dark:bg-emerald-400/80',
+        dot: 'bg-emerald-600 dark:bg-emerald-400',
+        label: 'Bullish',
+      };
     case 'bearish':
-      return 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400';
-    case 'neutral':
-      return 'border-zinc-400/40 bg-zinc-400/10 text-zinc-600 dark:text-zinc-400';
+      return {
+        tick: 'bg-red-600 dark:bg-red-400',
+        text: 'text-red-700 dark:text-red-400',
+        rule: 'bg-red-600/80 dark:bg-red-400/80',
+        dot: 'bg-red-600 dark:bg-red-400',
+        label: 'Bearish',
+      };
     case 'mixed':
-      return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400';
-    case 'insufficient_data':
-      return 'border-muted-foreground/30 bg-muted text-muted-foreground';
+      return {
+        tick: 'bg-amber-500 dark:bg-amber-400',
+        text: 'text-amber-700 dark:text-amber-400',
+        rule: 'bg-amber-500/80 dark:bg-amber-400/80',
+        dot: 'bg-amber-500 dark:bg-amber-400',
+        label: 'Mixed',
+      };
+    case 'neutral':
+      return {
+        tick: 'bg-zinc-500 dark:bg-zinc-400',
+        text: 'text-zinc-700 dark:text-zinc-300',
+        rule: 'bg-zinc-500/70 dark:bg-zinc-400/70',
+        dot: 'bg-zinc-500 dark:bg-zinc-400',
+        label: 'Neutral',
+      };
     default:
-      return '';
+      return {
+        tick: 'bg-muted-foreground/60',
+        text: 'text-muted-foreground',
+        rule: 'bg-muted-foreground/40',
+        dot: 'bg-muted-foreground/60',
+        label: 'Insufficient data',
+      };
   }
+}
+
+export function getStanceClasses(stance: string): string {
+  const accent = getStanceAccent(stance);
+  return cn('border-transparent bg-transparent', accent.text);
 }
 
 export function ConfidenceBadge({
@@ -41,17 +82,42 @@ export function ConfidenceBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs',
+        'inline-flex items-center gap-2 font-mono text-[10.5px] tabular-nums text-muted-foreground',
         className,
       )}
     >
-      <span className="inline-block h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+      <span className="inline-block h-px w-10 bg-border">
         <span
-          className="block h-full rounded-full bg-foreground/60"
+          className="block h-full bg-foreground/70"
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span className="tabular-nums">{pct}%</span>
+      <span>{pct}%</span>
     </span>
+  );
+}
+
+export function ConfidenceRail({
+  confidence,
+  accentClass,
+  className,
+}: {
+  confidence: number;
+  accentClass: string;
+  className?: string;
+}) {
+  const pct = Math.round(confidence * 100);
+  return (
+    <div className={cn('flex items-center gap-3', className)}>
+      <div className="relative h-px flex-1 overflow-hidden bg-border">
+        <div
+          className={cn('absolute inset-y-0 left-0', accentClass)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {pct}%
+      </span>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Eyebrow, SectionHeader } from "@/components/ui/editorial";
 import { Input } from "@/components/ui/input";
 import { getSettings, updateSettings } from "@/shared/api/commands";
 import type { AgentCandidate, AppSettings } from "@/types";
@@ -26,7 +26,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
     try {
       const next = await updateSettings(settings);
       setSettings(next);
-      setSaved("Saved!");
+      setSaved("Saved");
       setTimeout(() => setSaved(null), 1300);
     } catch (err) {
       setError(String(err));
@@ -34,28 +34,47 @@ export function SettingsPage({ agents }: SettingsPageProps) {
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-10 p-8">
+    <div className="mx-auto h-full max-w-3xl space-y-16 overflow-y-auto px-8 pt-10 pb-32">
       <div>
-        <h2 className="mb-2 text-xl font-semibold">Agents</h2>
-        <p className="mb-4 text-xs text-muted-foreground">
-          Crazylines uses local ACP agents. Check PATH or ENV overrides.
-        </p>
-        <AgentStatusList agents={agents} />
+        <Eyebrow>Settings</Eyebrow>
+        <h1 className="mt-3 text-[34px] font-semibold leading-[1.05] tracking-[-0.02em]">
+          Configuration
+        </h1>
       </div>
 
-      <div>
-        <h2 className="mb-4 text-xl font-semibold">Preferences</h2>
-        {error && <div className="mb-4 text-sm text-destructive">{error}</div>}
+      <section className="space-y-6">
+        <SectionHeader
+          number="01"
+          label="Agents"
+          title="Local ACP agents"
+          meta={
+            <span className="font-mono tabular-nums">
+              {String(agents.length).padStart(2, "0")} detected
+            </span>
+          }
+        />
+        <p className="max-w-[60ch] text-[14px] leading-[1.6] text-muted-foreground">
+          Crazylines runs research against ACP-compatible agents on your machine.
+          If an agent is marked unavailable, check your PATH or the documented
+          environment overrides (<code className="font-mono text-[13px]">CODEX_ACP_BIN</code>,{" "}
+          <code className="font-mono text-[13px]">CRAZYLINES_CUSTOM_AGENT</code>).
+        </p>
+        <AgentStatusList agents={agents} />
+      </section>
+
+      <section className="space-y-6">
+        <SectionHeader number="02" label="Preferences" title="Overrides" />
+        {error && (
+          <div className="text-sm text-destructive">{error}</div>
+        )}
         {!settings ? (
-          <div className="text-sm">Loading...</div>
+          <div className="text-sm text-muted-foreground">Loading…</div>
         ) : (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-1.5 text-sm">
-              <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Custom ACP Command
-              </label>
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <Eyebrow>Custom ACP command</Eyebrow>
               <Input
-                className="bg-transparent"
+                className="bg-transparent font-mono text-[13px]"
                 value={settings.custom_agent_command || ""}
                 onChange={(event) =>
                   setSettings({
@@ -63,15 +82,26 @@ export function SettingsPage({ agents }: SettingsPageProps) {
                     custom_agent_command: event.target.value || null,
                   })
                 }
+                placeholder="e.g. /usr/local/bin/my-agent"
               />
+              <p className="max-w-[60ch] text-[12.5px] leading-relaxed text-muted-foreground">
+                Absolute path to a custom ACP agent binary. Leave blank to rely on
+                autodiscovery.
+              </p>
             </div>
 
-            <Button className="mt-4 font-semibold" onClick={save}>
-              {saved || "Save Settings"}
-            </Button>
+            <div className="border-t border-border pt-6">
+              <button
+                type="button"
+                onClick={save}
+                className="group inline-flex items-center gap-2 border border-foreground bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-colors hover:bg-background hover:text-foreground"
+              >
+                <span>{saved || "Save settings"}</span>
+              </button>
+            </div>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

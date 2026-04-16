@@ -17,6 +17,7 @@ const CRAZYLINES_TOOLS: &[&str] = &[
     "submit_structured_artifact",
     "submit_analysis_block",
     "submit_final_stance",
+    "submit_projection",
     "finalize_analysis",
 ];
 
@@ -326,6 +327,11 @@ impl agent_client_protocol::Client for CrazylinesClient {
                             Some("submit_final_stance") => {
                                 if let Some(tx) = &self.progress {
                                     let _ = tx.send(ProgressEvent::StanceSubmitted);
+                                }
+                            }
+                            Some("submit_projection") => {
+                                if let Some(tx) = &self.progress {
+                                    let _ = tx.send(ProgressEvent::ProjectionSubmitted);
                                 }
                             }
                             Some("finalize_analysis") => self.mark_finalization_received(),

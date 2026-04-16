@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { Eyebrow } from "@/components/ui/editorial";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -35,34 +37,35 @@ export function AppSidebar({
       <div data-tauri-drag-region className="h-10 shrink-0" />
 
       <SidebarContent className="gap-0 overflow-hidden">
-        <SidebarGroup className="min-h-0 flex-1 px-3 py-0">
+        <SidebarGroup className="min-h-0 flex-1 px-4 py-0">
           <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="px-1 text-[13px] font-semibold tracking-tight text-sidebar-foreground">
-                Analysis
-              </div>
+            <div className="mb-4 flex items-baseline justify-between">
+              <Eyebrow>Analyses</Eyebrow>
               {analyses.length > 0 && (
-                <span className="px-1 font-mono text-[11px] text-sidebar-foreground/50">
-                  {analyses.length}
+                <span className="font-mono text-[10.5px] tabular-nums text-sidebar-foreground/40">
+                  {String(analyses.length).padStart(2, "0")}
                 </span>
               )}
             </div>
 
-            <SidebarMenu className="mb-3">
+            <SidebarMenu className="mb-5">
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={currentView === "new-analysis"}
                   onClick={() => onViewChange("new-analysis")}
-                  className="h-8 text-[13px]"
+                  className="h-8 text-[13px] font-normal"
                 >
-                  <span>+ New analysis</span>
+                  <span className="flex items-center gap-2">
+                    <span aria-hidden className="font-mono text-muted-foreground">+</span>
+                    <span>New analysis</span>
+                  </span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
 
             {analyses.length > 0 && (
-              <ScrollArea className="min-h-0 flex-1 pr-1">
-                <SidebarMenu className="gap-0.5">
+              <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
+                <SidebarMenu className="gap-1.5">
                   {analyses.map((analysis) => (
                     <SidebarMenuItem key={analysis.id} className="sidebar-report-row">
                       <SidebarMenuButton
@@ -71,19 +74,19 @@ export function AppSidebar({
                           currentView === "analysis" &&
                           selectedAnalysisId === analysis.id
                         }
-                        className="h-8 px-2 text-[13px] font-normal data-[active=true]:font-medium"
+                        className="h-auto items-start px-2 py-2 text-[13px] font-normal data-[active=true]:font-normal data-[active=true]:bg-sidebar-accent/70"
                       >
                         <Button
                           type="button"
                           variant="ghost"
                           size="xs"
-                          className="h-8 min-w-0 justify-start gap-2 px-2 text-[13px]"
+                          className="h-auto min-w-0 flex-col items-stretch justify-start gap-1 px-2 py-0 text-[13px]"
                           onClick={() => {
                             void onSelectAnalysis(analysis.id);
                           }}
                         >
-                          <AnalysisStatus analysis={analysis} />
                           <MarqueeTitle title={analysis.title} />
+                          <AnalysisMeta analysis={analysis} />
                         </Button>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -95,44 +98,68 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-1">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={currentView === "settings"}
-              onClick={() => onViewChange("settings")}
-              className="h-8 text-[13px]"
-            >
-              <span>Settings</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarFooter className="px-4 pb-4 pt-2">
+        <button
+          type="button"
+          onClick={() => onViewChange("settings")}
+          className={cn(
+            "self-start text-[12.5px] transition-colors",
+            currentView === "settings"
+              ? "text-sidebar-foreground"
+              : "text-sidebar-foreground/50 hover:text-sidebar-foreground",
+          )}
+        >
+          Settings
+        </button>
       </SidebarFooter>
     </Sidebar>
   );
 }
 
-function AnalysisStatus({ analysis }: { analysis: AnalysisSummary }) {
-  if (
+function AnalysisMeta({ analysis }: { analysis: AnalysisSummary }) {
+  const running =
     analysis.active_run_status === "running" ||
-    analysis.active_run_status === "queued"
-  ) {
-    return <CircleNotch className="animate-spin text-primary" />;
-  }
-
-  const statusClass =
-    analysis.status === "completed"
-      ? "bg-green-500/50"
-      : analysis.status === "failed"
-        ? "bg-destructive/60"
-        : "bg-primary/45";
+    analysis.active_run_status === "queued";
 
   return (
-    <span
-      aria-hidden="true"
-      className={`size-1.5 shrink-0 rounded-full ${statusClass}`}
-    />
+    <span className="flex items-center gap-1.5 pl-0 font-mono text-[10px] uppercase tracking-[0.14em] text-sidebar-foreground/45">
+      {running ? (
+        <>
+          <CircleNotch size={10} className="animate-spin text-primary" />
+          <span className="text-primary">Running</span>
+        </>
+      ) : (
+        <>
+          <span>{statusLabel(analysis)}</span>
+          <span aria-hidden className="text-sidebar-foreground/25">·</span>
+          <span className="tabular-nums">
+            {String(analysis.block_count).padStart(2, "0")}b
+          </span>
+          <span aria-hidden className="text-sidebar-foreground/25">·</span>
+          <span className="tabular-nums">
+            {String(analysis.source_count).padStart(2, "0")}s
+          </span>
+        </>
+      )}
+    </span>
   );
+}
+
+function statusLabel(analysis: AnalysisSummary): string {
+  switch (analysis.status) {
+    case "completed":
+      return "Done";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Stopped";
+    case "queued":
+      return "Queued";
+    case "running":
+      return "Running";
+    default:
+      return analysis.status;
+  }
 }
 
 function MarqueeTitle({ title }: { title: string }) {
@@ -169,7 +196,7 @@ function MarqueeTitle({ title }: { title: string }) {
   return (
     <span
       ref={containerRef}
-      className="sidebar-report-title"
+      className="sidebar-report-title text-sidebar-foreground"
       data-scrollable={metrics.scrollable ? "true" : undefined}
       style={style}
     >

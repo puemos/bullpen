@@ -79,7 +79,7 @@ pub fn create_submit_research_plan_tool(config: Arc<ServerConfig>) -> impl ToolH
             "decision_criteria": { "type": "array", "items": { "type": "string" } },
             "planned_checks": { "type": "array", "items": { "type": "string" } },
             "required_blocks": { "type": "array", "items": { "type": "string", "enum": ["thesis", "business_quality", "financials", "valuation", "peer_comparison", "sector_context", "catalysts", "risks", "scenario_matrix", "technical_context", "open_questions", "other"] } },
-            "required_artifacts": { "type": "array", "items": { "type": "string", "enum": ["metric_table", "comparison_matrix", "scenario_matrix", "bar_chart", "line_chart"] } }
+            "required_artifacts": { "type": "array", "items": { "type": "string", "enum": ["metric_table", "comparison_matrix", "scenario_matrix", "bar_chart", "line_chart", "area_chart"] } }
         }
     }))
 }
@@ -223,6 +223,10 @@ struct SubmitMetricArgs {
     as_of: String,
     source_id: String,
     notes: Option<String>,
+    #[serde(default)]
+    prior_value: Option<f64>,
+    #[serde(default)]
+    change_pct: Option<f64>,
 }
 
 pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
@@ -246,6 +250,8 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
                 as_of: input.as_of,
                 source_id: input.source_id,
                 notes: input.notes,
+                prior_value: input.prior_value,
+                change_pct: input.change_pct,
             };
             db(&config)
                 .map_err(|err| pmcp::Error::Internal(err.to_string()))?
@@ -254,7 +260,7 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
             Ok(json!({ "status": "ok", "metric_id": metric.id }))
         })
     })
-    .with_description("Submit a normalized market, fundamental, valuation, or macro metric with source and as_of metadata.")
+    .with_description("Submit a normalized market, fundamental, valuation, or macro metric with source and as_of metadata. When a prior-period value is known, include prior_value and change_pct so deltas render visually.")
     .with_schema(json!({
         "type": "object",
         "required": ["metric", "value", "numeric_value", "as_of", "source_id"],
@@ -268,7 +274,9 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
             "period": { "type": "string" },
             "as_of": { "type": "string" },
             "source_id": { "type": "string" },
-            "notes": { "type": "string" }
+            "notes": { "type": "string" },
+            "prior_value": { "type": "number" },
+            "change_pct": { "type": "number" }
         }
     }))
 }
@@ -317,13 +325,13 @@ pub fn create_submit_structured_artifact_tool(config: Arc<ServerConfig>) -> impl
             Ok(json!({ "status": "ok", "artifact_id": artifact.id }))
         })
     })
-    .with_description("Submit a source-backed table, comparison matrix, scenario matrix, or lightweight chart for the report.")
+    .with_description("Submit a source-backed table, comparison matrix, scenario matrix, or lightweight chart for the report. Use area_chart for growth curves and margin-expansion trends that benefit from a filled visual.")
     .with_schema(json!({
         "type": "object",
         "required": ["kind", "title", "summary", "columns", "rows", "evidence_ids"],
         "properties": {
             "id": { "type": "string" },
-            "kind": { "type": "string", "enum": ["metric_table", "comparison_matrix", "scenario_matrix", "bar_chart", "line_chart"] },
+            "kind": { "type": "string", "enum": ["metric_table", "comparison_matrix", "scenario_matrix", "bar_chart", "line_chart", "area_chart"] },
             "title": { "type": "string" },
             "summary": { "type": "string" },
             "columns": {
@@ -494,6 +502,140 @@ pub fn create_submit_final_stance_tool(config: Arc<ServerConfig>) -> impl ToolHa
             "watch_items": { "type": "array", "items": { "type": "string" } },
             "what_would_change": { "type": "array", "items": { "type": "string" } },
             "disclaimer": { "type": "string" }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitProjectionScenarioArgs {
+    label: String,
+    target_value: f64,
+    target_label: Option<String>,
+    upside_pct: Option<f64>,
+    probability: f64,
+    rationale: String,
+    #[serde(default)]
+    catalysts: Vec<String>,
+    #[serde(default)]
+    risks: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitProjectionArgs {
+    id: Option<String>,
+    entity_id: String,
+    horizon: String,
+    metric: String,
+    current_value: f64,
+    current_value_label: Option<String>,
+    unit: Option<String>,
+    scenarios: Vec<SubmitProjectionScenarioArgs>,
+    methodology: String,
+    key_assumptions: Vec<String>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+    disclaimer: Option<String>,
+}
+
+pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_projection", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitProjectionArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let current_value = input.current_value;
+            let scenarios = input
+                .scenarios
+                .into_iter()
+                .map(|scenario| {
+                    let target_label = scenario
+                        .target_label
+                        .unwrap_or_else(|| format!("{:.2}", scenario.target_value));
+                    let upside_pct = scenario.upside_pct.unwrap_or_else(|| {
+                        if current_value.abs() > f64::EPSILON {
+                            (scenario.target_value - current_value) / current_value
+                        } else {
+                            0.0
+                        }
+                    });
+                    ProjectionScenario {
+                        label: scenario.label,
+                        target_value: scenario.target_value,
+                        target_label,
+                        upside_pct,
+                        probability: scenario.probability.clamp(0.0, 1.0),
+                        rationale: scenario.rationale,
+                        catalysts: scenario.catalysts,
+                        risks: scenario.risks,
+                    }
+                })
+                .collect();
+            let projection = Projection {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                entity_id: input.entity_id,
+                horizon: input.horizon,
+                metric: input.metric,
+                current_value,
+                current_value_label: input
+                    .current_value_label
+                    .unwrap_or_else(|| format!("{current_value:.2}")),
+                unit: input.unit.unwrap_or_default(),
+                scenarios,
+                methodology: input.methodology,
+                key_assumptions: input.key_assumptions,
+                evidence_ids: input.evidence_ids,
+                confidence: clamp_confidence(input.confidence),
+                disclaimer: input
+                    .disclaimer
+                    .unwrap_or_else(|| "Research only. Not investment advice.".to_string()),
+                created_at: now(),
+            };
+            db(&config)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?
+                .save_projection(&projection)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "projection_id": projection.id }))
+        })
+    })
+    .with_description("Submit a forward-looking projection for a single entity with bull/base/bear scenarios, probabilities, and evidence.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["entity_id", "horizon", "metric", "current_value", "scenarios", "methodology", "key_assumptions", "evidence_ids"],
+        "properties": {
+            "id": { "type": "string" },
+            "entity_id": { "type": "string" },
+            "horizon": { "type": "string" },
+            "metric": { "type": "string" },
+            "current_value": { "type": "number" },
+            "current_value_label": { "type": "string" },
+            "unit": { "type": "string" },
+            "methodology": { "type": "string" },
+            "key_assumptions": { "type": "array", "items": { "type": "string" } },
+            "evidence_ids": { "type": "array", "items": { "type": "string" } },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "disclaimer": { "type": "string" },
+            "scenarios": {
+                "type": "array",
+                "minItems": 3,
+                "items": {
+                    "type": "object",
+                    "required": ["label", "target_value", "probability", "rationale", "catalysts", "risks"],
+                    "properties": {
+                        "label": { "type": "string", "enum": ["bull", "base", "bear"] },
+                        "target_value": { "type": "number" },
+                        "target_label": { "type": "string" },
+                        "upside_pct": { "type": "number" },
+                        "probability": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "rationale": { "type": "string" },
+                        "catalysts": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                        "risks": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                    }
+                }
+            }
         }
     }))
 }

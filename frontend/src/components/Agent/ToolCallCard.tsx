@@ -36,6 +36,10 @@ function primaryLabel(
 function secondaryLabel(title: string, primary: string): string | null {
   const cleaned = cleanTitle(title);
   if (!cleaned) return null;
+  const stripped = cleaned.replace(/^["']|["']$/g, "").trim();
+  if (!stripped || stripped.toLowerCase() === "undefined" || stripped.toLowerCase() === "null") {
+    return null;
+  }
   const p = primary.toLowerCase().trim();
   const c = cleaned.toLowerCase();
   if (!p) return cleaned;
@@ -163,16 +167,16 @@ export default function ToolCallCard({
 
         {/* Label */}
         <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
-          <span className="font-mono text-xs text-muted-foreground truncate opacity-70 group-hover:opacity-100 transition-opacity">
+          <span className="shrink-0 font-mono text-xs text-muted-foreground opacity-70 group-hover:opacity-100 transition-opacity">
             {primary}
           </span>
           {secondary && (
-            <span className="text-xs text-muted-foreground/50 truncate min-w-0">
+            <span className="flex-1 truncate min-w-0 text-xs text-muted-foreground/50">
               {secondary}
             </span>
           )}
           {status === "running" && (
-            <span className="text-xs text-muted-foreground/40 italic">running...</span>
+            <span className="shrink-0 text-xs text-muted-foreground/40 italic">running...</span>
           )}
         </div>
 

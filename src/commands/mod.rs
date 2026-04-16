@@ -43,6 +43,7 @@ pub enum ProgressEventPayload {
     ArtifactSubmitted,
     BlockSubmitted,
     StanceSubmitted,
+    ProjectionSubmitted,
     Completed,
     Error {
         message: String,
@@ -322,6 +323,7 @@ pub async fn generate_analysis(
                 ProgressEvent::ArtifactSubmitted => ProgressEventPayload::ArtifactSubmitted,
                 ProgressEvent::BlockSubmitted => ProgressEventPayload::BlockSubmitted,
                 ProgressEvent::StanceSubmitted => ProgressEventPayload::StanceSubmitted,
+                ProgressEvent::ProjectionSubmitted => ProgressEventPayload::ProjectionSubmitted,
                 ProgressEvent::Finalized => ProgressEventPayload::Completed,
             };
             let data_kind = match &payload {
@@ -331,6 +333,7 @@ pub async fn generate_analysis(
                 ProgressEventPayload::ArtifactSubmitted => Some("artifact"),
                 ProgressEventPayload::BlockSubmitted => Some("block"),
                 ProgressEventPayload::StanceSubmitted => Some("stance"),
+                ProgressEventPayload::ProjectionSubmitted => Some("projection"),
                 ProgressEventPayload::Completed => Some("completed"),
                 _ => None,
             };
@@ -436,6 +439,42 @@ fn render_markdown(report: &AnalysisReport) -> String {
             stance.confidence * 100.0,
             stance.summary
         ));
+    }
+    if !report.projections.is_empty() {
+        out.push_str("## Projections\n\n");
+        for projection in &report.projections {
+            out.push_str(&format!(
+                "### {} ({}) · horizon {} · current {}\n\n",
+                projection.metric,
+                projection.entity_id,
+                projection.horizon,
+                projection.current_value_label
+            ));
+            out.push_str(&format!("**Methodology:** {}\n\n", projection.methodology));
+            for scenario in &projection.scenarios {
+                out.push_str(&format!(
+                    "- **{}** → {} ({:+.1}%, probability {:.0}%) — {}\n",
+                    scenario.label,
+                    scenario.target_label,
+                    scenario.upside_pct * 100.0,
+                    scenario.probability * 100.0,
+                    scenario.rationale
+                ));
+            }
+            if !projection.key_assumptions.is_empty() {
+                out.push_str("\n**Key assumptions:**\n");
+                for assumption in &projection.key_assumptions {
+                    out.push_str(&format!("- {assumption}\n"));
+                }
+            }
+            if !projection.evidence_ids.is_empty() {
+                out.push_str(&format!(
+                    "\nSources: `{}`\n",
+                    projection.evidence_ids.join("`, `")
+                ));
+            }
+            out.push('\n');
+        }
     }
     if !report.artifacts.is_empty() {
         out.push_str("## Structured Evidence\n\n");

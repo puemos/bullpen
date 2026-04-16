@@ -42,6 +42,10 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
             tool::create_submit_final_stance_tool(config.clone()),
         )
         .tool(
+            "submit_projection",
+            tool::create_submit_projection_tool(config.clone()),
+        )
+        .tool(
             "finalize_analysis",
             tool::create_finalize_analysis_tool(config.clone()),
         )
