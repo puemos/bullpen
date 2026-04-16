@@ -48,7 +48,7 @@ export function MetricList({ metrics, entityMap, sourceMap }: MetricListProps) {
             </div>
             <div className="flex items-baseline gap-2 whitespace-nowrap text-right">
               <span className="font-mono text-[14px] tabular-nums text-foreground">
-                {metric.value}
+                {formatNumeric(metric.numeric_value)}
               </span>
               {metric.unit && (
                 <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
@@ -69,4 +69,12 @@ export function MetricList({ metrics, entityMap, sourceMap }: MetricListProps) {
 
 function formatMetric(metric: string) {
   return metric.replace(/_/g, ' ');
+}
+
+function formatNumeric(value: number): string {
+  const abs = Math.abs(value);
+  const maxFractionDigits = abs >= 1000 ? 0 : abs >= 10 ? 1 : 2;
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: maxFractionDigits,
+  }).format(value);
 }

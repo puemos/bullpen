@@ -119,8 +119,6 @@ impl Database {
                 summary TEXT NOT NULL,
                 decision_criteria TEXT NOT NULL DEFAULT '[]',
                 planned_checks TEXT NOT NULL,
-                required_blocks TEXT NOT NULL,
-                required_artifacts TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
@@ -147,7 +145,6 @@ impl Database {
                 publisher TEXT,
                 source_type TEXT NOT NULL,
                 retrieved_at TEXT NOT NULL,
-                as_of TEXT,
                 reliability TEXT NOT NULL,
                 summary TEXT NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
@@ -158,13 +155,11 @@ impl Database {
                 run_id TEXT NOT NULL,
                 entity_id TEXT,
                 metric TEXT NOT NULL,
-                value TEXT NOT NULL,
-                numeric_value REAL,
+                numeric_value REAL NOT NULL,
                 unit TEXT,
                 period TEXT,
                 as_of TEXT NOT NULL,
                 source_id TEXT NOT NULL,
-                notes TEXT,
                 prior_value REAL,
                 change_pct REAL,
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE,
@@ -181,7 +176,6 @@ impl Database {
                 rows TEXT NOT NULL,
                 series TEXT NOT NULL,
                 evidence_ids TEXT NOT NULL,
-                entity_ids TEXT NOT NULL,
                 display_order INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
@@ -194,7 +188,6 @@ impl Database {
                 title TEXT NOT NULL,
                 body TEXT NOT NULL,
                 evidence_ids TEXT NOT NULL,
-                entity_ids TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 importance TEXT NOT NULL,
                 display_order INTEGER NOT NULL,
@@ -210,7 +203,6 @@ impl Database {
                 confidence REAL NOT NULL,
                 summary TEXT NOT NULL,
                 key_reasons TEXT NOT NULL,
-                watch_items TEXT NOT NULL,
                 what_would_change TEXT NOT NULL,
                 disclaimer TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -236,6 +228,53 @@ impl Database {
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS counter_theses (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                stance_against TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                supporting_evidence_ids TEXT NOT NULL,
+                why_we_reject_or_partially_accept TEXT NOT NULL,
+                residual_probability REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS uncertainty_entries (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                why_it_matters TEXT NOT NULL,
+                attempted_resolution TEXT NOT NULL,
+                blocking INTEGER NOT NULL,
+                related_decision_criterion TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS methodology_notes (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL UNIQUE,
+                approach TEXT NOT NULL,
+                frameworks TEXT NOT NULL,
+                data_windows TEXT NOT NULL,
+                known_limitations TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS decision_criterion_answers (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                criterion TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                supporting_block_ids TEXT NOT NULL,
+                supporting_evidence_ids TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS run_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
@@ -251,9 +290,33 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON structured_artifacts(run_id);
             CREATE INDEX IF NOT EXISTS idx_blocks_run_id ON analysis_blocks(run_id);
             CREATE INDEX IF NOT EXISTS idx_projections_run_id ON projections(run_id);
+            CREATE INDEX IF NOT EXISTS idx_counter_theses_run_id ON counter_theses(run_id);
+            CREATE INDEX IF NOT EXISTS idx_uncertainty_entries_run_id ON uncertainty_entries(run_id);
+            CREATE INDEX IF NOT EXISTS idx_decision_criterion_answers_run_id ON decision_criterion_answers(run_id);
             CREATE INDEX IF NOT EXISTS idx_run_progress_run_id ON run_progress(run_id);
             "#,
         )?;
+
+        // Migrations for pre-existing databases: drop retired columns and
+        // rewrite the retired scenario_matrix block kind. DROP COLUMN is a
+        // no-op if the column never existed, which keeps this idempotent.
+        for (table, column) in [
+            ("sources", "as_of"),
+            ("metrics", "value"),
+            ("metrics", "notes"),
+            ("structured_artifacts", "entity_ids"),
+            ("analysis_blocks", "entity_ids"),
+            ("final_stances", "watch_items"),
+            ("research_plans", "required_blocks"),
+            ("research_plans", "required_artifacts"),
+        ] {
+            let _ = conn.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), []);
+        }
+        let _ = conn.execute(
+            "UPDATE analysis_blocks SET kind = 'other' WHERE kind = 'scenario_matrix'",
+            [],
+        );
+
         Ok(())
     }
 
@@ -432,6 +495,10 @@ impl Database {
                 blocks: Vec::new(),
                 final_stance: None,
                 projections: Vec::new(),
+                counter_theses: Vec::new(),
+                uncertainty_entries: Vec::new(),
+                methodology_note: None,
+                decision_criterion_answers: Vec::new(),
             }));
         };
 
@@ -446,6 +513,10 @@ impl Database {
             blocks: self.get_blocks(&run_id)?,
             final_stance: self.get_final_stance(&run_id)?,
             projections: self.get_projections(&run_id)?,
+            counter_theses: self.get_counter_theses(&run_id)?,
+            uncertainty_entries: self.get_uncertainty_entries(&run_id)?,
+            methodology_note: self.get_methodology_note(&run_id)?,
+            decision_criterion_answers: self.get_decision_criterion_answers(&run_id)?,
         }))
     }
 
@@ -500,8 +571,8 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO research_plans
-            (id, run_id, intent, summary, decision_criteria, planned_checks, required_blocks, required_artifacts, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            (id, run_id, intent, summary, decision_criteria, planned_checks, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 plan.id,
                 plan.run_id,
@@ -509,8 +580,6 @@ impl Database {
                 plan.summary,
                 serde_json::to_string(&plan.decision_criteria)?,
                 serde_json::to_string(&plan.planned_checks)?,
-                serde_json::to_string(&plan.required_blocks)?,
-                serde_json::to_string(&plan.required_artifacts)?,
                 plan.created_at
             ],
         )?;
@@ -543,8 +612,8 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO sources
-            (id, run_id, title, url, publisher, source_type, retrieved_at, as_of, reliability, summary)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            (id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 source.id,
                 source.run_id,
@@ -553,7 +622,6 @@ impl Database {
                 source.publisher,
                 source.source_type,
                 source.retrieved_at,
-                source.as_of,
                 source.reliability.to_string(),
                 source.summary
             ],
@@ -565,20 +633,18 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO metrics
-            (id, run_id, entity_id, metric, value, numeric_value, unit, period, as_of, source_id, notes, prior_value, change_pct)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            (id, run_id, entity_id, metric, numeric_value, unit, period, as_of, source_id, prior_value, change_pct)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 metric.id,
                 metric.run_id,
                 metric.entity_id,
                 metric.metric,
-                metric.value,
                 metric.numeric_value,
                 metric.unit,
                 metric.period,
                 metric.as_of,
                 metric.source_id,
-                metric.notes,
                 metric.prior_value,
                 metric.change_pct,
             ],
@@ -590,8 +656,8 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO structured_artifacts
-            (id, run_id, kind, title, summary, columns, rows, series, evidence_ids, entity_ids, display_order, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            (id, run_id, kind, title, summary, columns, rows, series, evidence_ids, display_order, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 artifact.id,
                 artifact.run_id,
@@ -602,7 +668,6 @@ impl Database {
                 serde_json::to_string(&artifact.rows)?,
                 serde_json::to_string(&artifact.series)?,
                 serde_json::to_string(&artifact.evidence_ids)?,
-                serde_json::to_string(&artifact.entity_ids)?,
                 artifact.display_order,
                 artifact.created_at
             ],
@@ -614,8 +679,8 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO analysis_blocks
-            (id, run_id, kind, title, body, evidence_ids, entity_ids, confidence, importance, display_order, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            (id, run_id, kind, title, body, evidence_ids, confidence, importance, display_order, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 block.id,
                 block.run_id,
@@ -623,9 +688,8 @@ impl Database {
                 block.title,
                 block.body,
                 serde_json::to_string(&block.evidence_ids)?,
-                serde_json::to_string(&block.entity_ids)?,
                 block.confidence,
-                block.importance,
+                block.importance.to_string(),
                 block.display_order,
                 block.created_at
             ],
@@ -664,8 +728,8 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO final_stances
-            (id, run_id, stance, horizon, confidence, summary, key_reasons, watch_items, what_would_change, disclaimer, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            (id, run_id, stance, horizon, confidence, summary, key_reasons, what_would_change, disclaimer, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 stance.id,
                 stance.run_id,
@@ -674,7 +738,6 @@ impl Database {
                 stance.confidence,
                 stance.summary,
                 serde_json::to_string(&stance.key_reasons)?,
-                serde_json::to_string(&stance.watch_items)?,
                 serde_json::to_string(&stance.what_would_change)?,
                 stance.disclaimer,
                 stance.created_at
@@ -761,78 +824,103 @@ impl Database {
         let entities = self.get_entities(run_id)?;
         let blocks = self.get_blocks(run_id)?;
         let sources = self.get_sources(run_id)?;
-        let metrics = self.get_metrics(run_id)?;
         let artifacts = self.get_structured_artifacts(run_id)?;
         let final_stance = self.get_final_stance(run_id)?;
         let projections = self.get_projections(run_id)?;
+        let counter_theses = self.get_counter_theses(run_id)?;
+        let uncertainty_entries = self.get_uncertainty_entries(run_id)?;
+        let methodology_note = self.get_methodology_note(run_id)?;
+        let criterion_answers = self.get_decision_criterion_answers(run_id)?;
+
         let mut errors = Vec::new();
-        let source_ids: HashSet<&str> = sources.iter().map(|source| source.id.as_str()).collect();
-        let block_kinds: HashSet<String> =
-            blocks.iter().map(|block| block.kind.to_string()).collect();
-        let artifact_kinds: HashSet<String> = artifacts
-            .iter()
-            .map(|artifact| artifact.kind.to_string())
-            .collect();
+        let block_kinds: HashSet<BlockKind> = blocks.iter().map(|block| block.kind).collect();
+        let artifact_kinds: HashSet<ArtifactKind> =
+            artifacts.iter().map(|artifact| artifact.kind).collect();
 
         if research_plan.is_none() {
             errors.push("missing research plan".to_string());
         }
 
-        if !blocks.iter().any(|b| b.kind == BlockKind::Thesis) {
+        if !block_kinds.contains(&BlockKind::Thesis) {
             errors.push("missing required thesis block".to_string());
         }
-        if !blocks.iter().any(|b| b.kind == BlockKind::Risks) {
+        if !block_kinds.contains(&BlockKind::Risks) {
             errors.push("missing required risks block".to_string());
         }
         if sources.is_empty() {
             errors.push("missing sources; submit at least one source".to_string());
+        } else if sources
+            .iter()
+            .all(|source| source.reliability == SourceReliability::Low)
+        {
+            errors.push(
+                "every submitted source has low reliability; add a primary/high/medium source before finalizing"
+                    .to_string(),
+            );
         }
         if final_stance.is_none() {
             errors.push("missing final stance".to_string());
         }
+        if methodology_note.is_none() {
+            errors
+                .push("missing methodology note; submit_methodology_note is required".to_string());
+        }
 
         if let Some(plan) = &research_plan {
-            for required in &plan.required_blocks {
-                if !block_kinds.contains(required) {
+            for required in required_blocks_for(plan.intent) {
+                if !block_kinds.contains(&required) {
                     errors.push(format!("missing required {required} block"));
                 }
             }
-            for required in &plan.required_artifacts {
-                if !artifact_kinds.contains(required) {
+            for required in required_artifacts_for(plan.intent) {
+                if !artifact_kinds.contains(&required) {
                     errors.push(format!("missing required {required} artifact"));
                 }
             }
             if matches!(
                 plan.intent,
                 AnalysisIntent::CompareEquities | AnalysisIntent::Watchlist
-            ) {
-                if entities.len() < 2 {
-                    errors
-                        .push("comparison reports must resolve at least two entities".to_string());
-                }
-                if !artifacts
-                    .iter()
-                    .any(|artifact| artifact.kind == ArtifactKind::ComparisonMatrix)
-                {
-                    errors.push(
-                        "comparison reports require a comparison_matrix artifact".to_string(),
-                    );
-                }
+            ) && entities.len() < 2
+            {
+                errors.push("comparison reports must resolve at least two entities".to_string());
             }
-        }
 
-        for metric in &metrics {
-            if metric.numeric_value.is_none() {
-                errors.push(format!(
-                    "metric '{}' must include numeric_value",
-                    metric.metric
-                ));
+            for answer in &criterion_answers {
+                if !plan
+                    .decision_criteria
+                    .iter()
+                    .any(|c| c == &answer.criterion)
+                {
+                    errors.push(format!(
+                        "decision_criterion_answer references unknown criterion '{}'",
+                        answer.criterion
+                    ));
+                }
             }
-            if !source_ids.contains(metric.source_id.as_str()) {
-                errors.push(format!(
-                    "metric '{}' references unknown source_id '{}'",
-                    metric.metric, metric.source_id
-                ));
+            for criterion in &plan.decision_criteria {
+                let matches: Vec<&DecisionCriterionAnswer> = criterion_answers
+                    .iter()
+                    .filter(|a| &a.criterion == criterion)
+                    .collect();
+                match matches.len() {
+                    0 => errors.push(format!(
+                        "decision criterion '{criterion}' is missing a submit_decision_criterion_answer"
+                    )),
+                    1 => {
+                        if matches[0].verdict == CriterionVerdict::Unresolved
+                            && !uncertainty_entries.iter().any(|u| {
+                                u.related_decision_criterion.as_deref() == Some(criterion.as_str())
+                            })
+                        {
+                            errors.push(format!(
+                                "decision criterion '{criterion}' marked Unresolved but no uncertainty entry references it"
+                            ));
+                        }
+                    }
+                    n => errors.push(format!(
+                        "decision criterion '{criterion}' has {n} answers; expected exactly one"
+                    )),
+                }
             }
         }
 
@@ -842,14 +930,6 @@ impl Database {
                     "material block '{}' must include evidence_ids",
                     block.title
                 ));
-            }
-            for evidence_id in &block.evidence_ids {
-                if !source_ids.contains(evidence_id.as_str()) {
-                    errors.push(format!(
-                        "block '{}' references unknown evidence_id '{}'",
-                        block.title, evidence_id
-                    ));
-                }
             }
         }
 
@@ -868,7 +948,7 @@ impl Database {
             }
             if matches!(
                 artifact.kind,
-                ArtifactKind::BarChart | ArtifactKind::LineChart
+                ArtifactKind::BarChart | ArtifactKind::LineChart | ArtifactKind::AreaChart
             ) && !artifact
                 .series
                 .iter()
@@ -885,25 +965,38 @@ impl Database {
                     artifact.title
                 ));
             }
-            for evidence_id in &artifact.evidence_ids {
-                if !source_ids.contains(evidence_id.as_str()) {
-                    errors.push(format!(
-                        "artifact '{}' references unknown evidence_id '{}'",
-                        artifact.title, evidence_id
-                    ));
-                }
-            }
         }
 
         if let Some(stance) = &final_stance {
             if stance.key_reasons.is_empty() {
                 errors.push("final stance must include key_reasons".to_string());
             }
-            if stance.watch_items.is_empty() {
-                errors.push("final stance must include watch_items".to_string());
-            }
             if stance.what_would_change.is_empty() {
                 errors.push("final stance must include what_would_change".to_string());
+            }
+
+            let directional = matches!(stance.stance, StanceKind::Bullish | StanceKind::Bearish);
+            if directional && counter_theses.is_empty() {
+                errors.push(
+                    "directional stance requires a submit_counter_thesis call steelmanning the opposing view"
+                        .to_string(),
+                );
+            }
+            for counter in &counter_theses {
+                if counter.residual_probability < 0.10 {
+                    errors.push(format!(
+                        "counter_thesis residual_probability {:.2} is below 0.10; if you cannot build a 10%+ steelman, stance must be mixed or insufficient_data",
+                        counter.residual_probability
+                    ));
+                }
+            }
+
+            let has_blocking = uncertainty_entries.iter().any(|u| u.blocking);
+            if has_blocking && stance.confidence > 0.6 {
+                errors.push(format!(
+                    "stance confidence {:.2} exceeds 0.6 while blocking uncertainty is unresolved",
+                    stance.confidence
+                ));
             }
         }
 
@@ -912,11 +1005,21 @@ impl Database {
                 plan.intent,
                 AnalysisIntent::SingleEquity | AnalysisIntent::CompareEquities
             );
-            if projection_intent && projections.is_empty() {
-                errors.push(
-                    "missing forward-looking projection; submit_projection is required for single_equity and compare_equities"
-                        .to_string(),
-                );
+            if projection_intent {
+                if projections.is_empty() {
+                    errors.push(
+                        "missing forward-looking projection; submit_projection is required for single_equity and compare_equities"
+                            .to_string(),
+                    );
+                }
+                if !uncertainty_entries.is_empty()
+                    && !block_kinds.contains(&BlockKind::OpenQuestions)
+                {
+                    errors.push(
+                        "uncertainty entries submitted but no open_questions block summarizes them"
+                            .to_string(),
+                    );
+                }
             }
             if matches!(plan.intent, AnalysisIntent::CompareEquities) && !entities.is_empty() {
                 let mut by_entity: std::collections::HashMap<&str, usize> =
@@ -935,6 +1038,20 @@ impl Database {
                             entity.name
                         )),
                         _ => {}
+                    }
+                }
+            }
+            if matches!(plan.intent, AnalysisIntent::SingleEquity) && entities.len() > 1 {
+                // single equity with more than one entity is fine, but each projection
+                // should still tie back to a resolved entity
+                let entity_ids: HashSet<&str> =
+                    entities.iter().map(|entity| entity.id.as_str()).collect();
+                for projection in &projections {
+                    if !entity_ids.contains(projection.entity_id.as_str()) {
+                        errors.push(format!(
+                            "projection '{}' references unresolved entity '{}'",
+                            projection.metric, projection.entity_id
+                        ));
                     }
                 }
             }
@@ -959,44 +1076,23 @@ impl Database {
                     projection.metric
                 ));
             }
-            for evidence_id in &projection.evidence_ids {
-                if !source_ids.contains(evidence_id.as_str()) {
-                    errors.push(format!(
-                        "projection '{}' references unknown evidence_id '{}'",
-                        projection.metric, evidence_id
-                    ));
-                }
-            }
 
-            if projection.scenarios.len() < 3 {
-                errors.push(format!(
-                    "projection '{}' must include at least 3 scenarios (bull/base/bear)",
-                    projection.metric
-                ));
-            }
-            let labels: HashSet<String> = projection
+            let labels: HashSet<ScenarioLabel> = projection
                 .scenarios
                 .iter()
-                .map(|scenario| scenario.label.to_ascii_lowercase())
+                .map(|scenario| scenario.label)
                 .collect();
-            for required in ["bull", "base", "bear"] {
-                if !labels.contains(required) {
+            for required in [
+                ScenarioLabel::Bull,
+                ScenarioLabel::Base,
+                ScenarioLabel::Bear,
+            ] {
+                if !labels.contains(&required) {
                     errors.push(format!(
                         "projection '{}' missing required '{required}' scenario",
                         projection.metric
                     ));
                 }
-            }
-            let prob_sum: f64 = projection
-                .scenarios
-                .iter()
-                .map(|scenario| scenario.probability)
-                .sum();
-            if (prob_sum - 1.0).abs() > 0.05 {
-                errors.push(format!(
-                    "projection '{}' scenario probabilities sum to {:.2}; must sum to ~1.0",
-                    projection.metric, prob_sum
-                ));
             }
             for scenario in &projection.scenarios {
                 if scenario.rationale.trim().is_empty() {
@@ -1026,13 +1122,11 @@ impl Database {
     fn get_research_plan(&self, run_id: &str) -> Result<Option<ResearchPlan>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.query_row(
-            "SELECT id, run_id, intent, summary, decision_criteria, planned_checks, required_blocks, required_artifacts, created_at FROM research_plans WHERE run_id = ?1",
+            "SELECT id, run_id, intent, summary, decision_criteria, planned_checks, created_at FROM research_plans WHERE run_id = ?1",
             [run_id],
             |row| {
                 let criteria: String = row.get(4)?;
                 let planned: String = row.get(5)?;
-                let required_blocks: String = row.get(6)?;
-                let required_artifacts: String = row.get(7)?;
                 Ok(ResearchPlan {
                     id: row.get(0)?,
                     run_id: row.get(1)?,
@@ -1040,10 +1134,7 @@ impl Database {
                     summary: row.get(3)?,
                     decision_criteria: serde_json::from_str(&criteria).unwrap_or_default(),
                     planned_checks: serde_json::from_str(&planned).unwrap_or_default(),
-                    required_blocks: serde_json::from_str(&required_blocks).unwrap_or_default(),
-                    required_artifacts: serde_json::from_str(&required_artifacts)
-                        .unwrap_or_default(),
-                    created_at: row.get(8)?,
+                    created_at: row.get(6)?,
                 })
             },
         )
@@ -1077,7 +1168,7 @@ impl Database {
     fn get_sources(&self, run_id: &str) -> Result<Vec<Source>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, title, url, publisher, source_type, retrieved_at, as_of, reliability, summary
+            "SELECT id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary
              FROM sources WHERE run_id = ?1 ORDER BY retrieved_at DESC",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -1089,10 +1180,9 @@ impl Database {
                 publisher: row.get(4)?,
                 source_type: row.get(5)?,
                 retrieved_at: row.get(6)?,
-                as_of: row.get(7)?,
-                reliability: SourceReliability::from_str(&row.get::<_, String>(8)?)
+                reliability: SourceReliability::from_str(&row.get::<_, String>(7)?)
                     .unwrap_or_default(),
-                summary: row.get(9)?,
+                summary: row.get(8)?,
             })
         })?;
         collect_rows(rows)
@@ -1101,7 +1191,7 @@ impl Database {
     fn get_metrics(&self, run_id: &str) -> Result<Vec<MetricSnapshot>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, entity_id, metric, value, numeric_value, unit, period, as_of, source_id, notes, prior_value, change_pct
+            "SELECT id, run_id, entity_id, metric, numeric_value, unit, period, as_of, source_id, prior_value, change_pct
              FROM metrics WHERE run_id = ?1 ORDER BY metric",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -1110,15 +1200,13 @@ impl Database {
                 run_id: row.get(1)?,
                 entity_id: row.get(2)?,
                 metric: row.get(3)?,
-                value: row.get(4)?,
-                numeric_value: row.get(5)?,
-                unit: row.get(6)?,
-                period: row.get(7)?,
-                as_of: row.get(8)?,
-                source_id: row.get(9)?,
-                notes: row.get(10)?,
-                prior_value: row.get(11)?,
-                change_pct: row.get(12)?,
+                numeric_value: row.get(4)?,
+                unit: row.get(5)?,
+                period: row.get(6)?,
+                as_of: row.get(7)?,
+                source_id: row.get(8)?,
+                prior_value: row.get(9)?,
+                change_pct: row.get(10)?,
             })
         })?;
         collect_rows(rows)
@@ -1127,7 +1215,7 @@ impl Database {
     fn get_structured_artifacts(&self, run_id: &str) -> Result<Vec<StructuredArtifact>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, kind, title, summary, columns, rows, series, evidence_ids, entity_ids, display_order, created_at
+            "SELECT id, run_id, kind, title, summary, columns, rows, series, evidence_ids, display_order, created_at
              FROM structured_artifacts WHERE run_id = ?1 ORDER BY display_order, created_at",
         )?;
         let rows = stmt.query_map([run_id], |row| {
@@ -1135,7 +1223,6 @@ impl Database {
             let rows_json: String = row.get(6)?;
             let series: String = row.get(7)?;
             let evidence: String = row.get(8)?;
-            let entities: String = row.get(9)?;
             Ok(StructuredArtifact {
                 id: row.get(0)?,
                 run_id: row.get(1)?,
@@ -1146,23 +1233,25 @@ impl Database {
                 rows: serde_json::from_str(&rows_json).unwrap_or_default(),
                 series: serde_json::from_str(&series).unwrap_or_default(),
                 evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
-                entity_ids: serde_json::from_str(&entities).unwrap_or_default(),
-                display_order: row.get(10)?,
-                created_at: row.get(11)?,
+                display_order: row.get(9)?,
+                created_at: row.get(10)?,
             })
         })?;
         collect_rows(rows)
     }
 
+    pub fn get_blocks_for(&self, run_id: &str) -> Result<Vec<AnalysisBlock>> {
+        self.get_blocks(run_id)
+    }
+
     fn get_blocks(&self, run_id: &str) -> Result<Vec<AnalysisBlock>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, kind, title, body, evidence_ids, entity_ids, confidence, importance, display_order, created_at
+            "SELECT id, run_id, kind, title, body, evidence_ids, confidence, importance, display_order, created_at
              FROM analysis_blocks WHERE run_id = ?1 ORDER BY display_order, created_at",
         )?;
         let rows = stmt.query_map([run_id], |row| {
             let evidence: String = row.get(5)?;
-            let entities: String = row.get(6)?;
             Ok(AnalysisBlock {
                 id: row.get(0)?,
                 run_id: row.get(1)?,
@@ -1170,11 +1259,11 @@ impl Database {
                 title: row.get(3)?,
                 body: row.get(4)?,
                 evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
-                entity_ids: serde_json::from_str(&entities).unwrap_or_default(),
-                confidence: row.get(7)?,
-                importance: row.get(8)?,
-                display_order: row.get(9)?,
-                created_at: row.get(10)?,
+                confidence: row.get(6)?,
+                importance: Importance::from_str(&row.get::<_, String>(7)?)
+                    .unwrap_or(Importance::Medium),
+                display_order: row.get(8)?,
+                created_at: row.get(9)?,
             })
         })?;
         collect_rows(rows)
@@ -1211,16 +1300,15 @@ impl Database {
         collect_rows(rows)
     }
 
-    fn get_final_stance(&self, run_id: &str) -> Result<Option<FinalStance>> {
+    pub fn get_final_stance(&self, run_id: &str) -> Result<Option<FinalStance>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.query_row(
-            "SELECT id, run_id, stance, horizon, confidence, summary, key_reasons, watch_items, what_would_change, disclaimer, created_at
+            "SELECT id, run_id, stance, horizon, confidence, summary, key_reasons, what_would_change, disclaimer, created_at
              FROM final_stances WHERE run_id = ?1",
             [run_id],
             |row| {
                 let reasons: String = row.get(6)?;
-                let watch: String = row.get(7)?;
-                let changes: String = row.get(8)?;
+                let changes: String = row.get(7)?;
                 Ok(FinalStance {
                     id: row.get(0)?,
                     run_id: row.get(1)?,
@@ -1229,15 +1317,240 @@ impl Database {
                     confidence: row.get(4)?,
                     summary: row.get(5)?,
                     key_reasons: serde_json::from_str(&reasons).unwrap_or_default(),
-                    watch_items: serde_json::from_str(&watch).unwrap_or_default(),
                     what_would_change: serde_json::from_str(&changes).unwrap_or_default(),
-                    disclaimer: row.get(9)?,
-                    created_at: row.get(10)?,
+                    disclaimer: row.get(8)?,
+                    created_at: row.get(9)?,
                 })
             },
         )
         .optional()
         .map_err(Into::into)
+    }
+
+    pub fn existing_source_ids(&self, run_id: &str) -> Result<HashSet<String>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn.prepare("SELECT id FROM sources WHERE run_id = ?1")?;
+        let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
+        let mut out = HashSet::new();
+        for row in rows {
+            out.insert(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn existing_block_ids(&self, run_id: &str) -> Result<HashSet<String>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn.prepare("SELECT id FROM analysis_blocks WHERE run_id = ?1")?;
+        let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
+        let mut out = HashSet::new();
+        for row in rows {
+            out.insert(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn save_counter_thesis(&self, thesis: &CounterThesis) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO counter_theses
+            (id, run_id, stance_against, summary, supporting_evidence_ids, why_we_reject_or_partially_accept, residual_probability, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                thesis.id,
+                thesis.run_id,
+                thesis.stance_against.to_string(),
+                thesis.summary,
+                serde_json::to_string(&thesis.supporting_evidence_ids)?,
+                thesis.why_we_reject_or_partially_accept,
+                thesis.residual_probability,
+                thesis.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_counter_theses(&self, run_id: &str) -> Result<Vec<CounterThesis>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, stance_against, summary, supporting_evidence_ids, why_we_reject_or_partially_accept, residual_probability, created_at
+             FROM counter_theses WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let evidence: String = row.get(4)?;
+            Ok(CounterThesis {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                stance_against: StanceKind::from_str(&row.get::<_, String>(2)?).unwrap_or_default(),
+                summary: row.get(3)?,
+                supporting_evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                why_we_reject_or_partially_accept: row.get(5)?,
+                residual_probability: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub fn save_uncertainty_entry(&self, entry: &UncertaintyEntry) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO uncertainty_entries
+            (id, run_id, question, why_it_matters, attempted_resolution, blocking, related_decision_criterion, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                entry.id,
+                entry.run_id,
+                entry.question,
+                entry.why_it_matters,
+                entry.attempted_resolution,
+                entry.blocking as i64,
+                entry.related_decision_criterion,
+                entry.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_uncertainty_entries(&self, run_id: &str) -> Result<Vec<UncertaintyEntry>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, question, why_it_matters, attempted_resolution, blocking, related_decision_criterion, created_at
+             FROM uncertainty_entries WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(UncertaintyEntry {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                question: row.get(2)?,
+                why_it_matters: row.get(3)?,
+                attempted_resolution: row.get(4)?,
+                blocking: row.get::<_, i64>(5)? != 0,
+                related_decision_criterion: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub fn save_methodology_note(&self, note: &MethodologyNote) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO methodology_notes
+            (id, run_id, approach, frameworks, data_windows, known_limitations, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                note.id,
+                note.run_id,
+                note.approach,
+                serde_json::to_string(&note.frameworks)?,
+                serde_json::to_string(&note.data_windows)?,
+                serde_json::to_string(&note.known_limitations)?,
+                note.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_methodology_note(&self, run_id: &str) -> Result<Option<MethodologyNote>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.query_row(
+            "SELECT id, run_id, approach, frameworks, data_windows, known_limitations, created_at
+             FROM methodology_notes WHERE run_id = ?1",
+            [run_id],
+            |row| {
+                let frameworks: String = row.get(3)?;
+                let data_windows: String = row.get(4)?;
+                let known_limitations: String = row.get(5)?;
+                Ok(MethodologyNote {
+                    id: row.get(0)?,
+                    run_id: row.get(1)?,
+                    approach: row.get(2)?,
+                    frameworks: serde_json::from_str(&frameworks).unwrap_or_default(),
+                    data_windows: serde_json::from_str(&data_windows).unwrap_or_default(),
+                    known_limitations: serde_json::from_str(&known_limitations).unwrap_or_default(),
+                    created_at: row.get(6)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn save_decision_criterion_answer(&self, answer: &DecisionCriterionAnswer) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO decision_criterion_answers
+            (id, run_id, criterion, verdict, summary, supporting_block_ids, supporting_evidence_ids, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                answer.id,
+                answer.run_id,
+                answer.criterion,
+                answer.verdict.to_string(),
+                answer.summary,
+                serde_json::to_string(&answer.supporting_block_ids)?,
+                serde_json::to_string(&answer.supporting_evidence_ids)?,
+                answer.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_decision_criterion_answers(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<DecisionCriterionAnswer>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, criterion, verdict, summary, supporting_block_ids, supporting_evidence_ids, created_at
+             FROM decision_criterion_answers WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let blocks: String = row.get(5)?;
+            let evidence: String = row.get(6)?;
+            Ok(DecisionCriterionAnswer {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                criterion: row.get(2)?,
+                verdict: CriterionVerdict::from_str(&row.get::<_, String>(3)?)
+                    .unwrap_or(CriterionVerdict::Unresolved),
+                summary: row.get(4)?,
+                supporting_block_ids: serde_json::from_str(&blocks).unwrap_or_default(),
+                supporting_evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                created_at: row.get(7)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+}
+
+fn required_blocks_for(intent: AnalysisIntent) -> Vec<BlockKind> {
+    let mut out = vec![BlockKind::Thesis, BlockKind::Risks];
+    match intent {
+        AnalysisIntent::SingleEquity => {
+            out.extend([
+                BlockKind::Financials,
+                BlockKind::Valuation,
+                BlockKind::Catalysts,
+            ]);
+        }
+        AnalysisIntent::CompareEquities | AnalysisIntent::Watchlist => {
+            out.push(BlockKind::PeerComparison);
+        }
+        AnalysisIntent::SectorAnalysis => {
+            out.push(BlockKind::SectorContext);
+        }
+        AnalysisIntent::MacroTheme | AnalysisIntent::GeneralResearch => {}
+    }
+    out
+}
+
+fn required_artifacts_for(intent: AnalysisIntent) -> Vec<ArtifactKind> {
+    match intent {
+        AnalysisIntent::CompareEquities | AnalysisIntent::Watchlist => {
+            vec![ArtifactKind::ComparisonMatrix]
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -1283,12 +1596,7 @@ mod tests {
         run_id
     }
 
-    fn save_plan(
-        db: &Database,
-        run_id: &str,
-        intent: AnalysisIntent,
-        required_artifacts: Vec<String>,
-    ) {
+    fn save_plan(db: &Database, run_id: &str, intent: AnalysisIntent) {
         db.save_research_plan(&ResearchPlan {
             id: "plan-1".into(),
             run_id: run_id.into(),
@@ -1296,29 +1604,34 @@ mod tests {
             summary: "Assess the research question.".into(),
             decision_criteria: vec!["valuation".into(), "risk".into()],
             planned_checks: vec!["Check primary sources.".into()],
-            required_blocks: vec!["thesis".into(), "risks".into()],
-            required_artifacts,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .unwrap();
     }
 
     fn save_source(db: &Database, run_id: &str) -> String {
-        let source_id = "source-1".to_string();
+        save_source_with(db, run_id, "source-1", SourceReliability::Primary)
+    }
+
+    fn save_source_with(
+        db: &Database,
+        run_id: &str,
+        id: &str,
+        reliability: SourceReliability,
+    ) -> String {
         db.save_source(&Source {
-            id: source_id.clone(),
+            id: id.into(),
             run_id: run_id.into(),
-            title: "Company filing".into(),
+            title: format!("Source {id}"),
             url: Some("https://example.com/filing".into()),
             publisher: Some("Example".into()),
             source_type: "filing".into(),
             retrieved_at: chrono::Utc::now().to_rfc3339(),
-            as_of: Some("2026-04-16".into()),
-            reliability: SourceReliability::Primary,
+            reliability,
             summary: "Primary source.".into(),
         })
         .unwrap();
-        source_id
+        id.to_string()
     }
 
     fn save_block(db: &Database, run_id: &str, kind: BlockKind, source_id: &str) {
@@ -1329,9 +1642,8 @@ mod tests {
             title: kind.to_string(),
             body: "Evidence-backed block.".into(),
             evidence_ids: vec![source_id.into()],
-            entity_ids: Vec::new(),
             confidence: 0.8,
-            importance: "high".into(),
+            importance: Importance::High,
             display_order: 10,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
@@ -1339,26 +1651,58 @@ mod tests {
     }
 
     fn save_stance(db: &Database, run_id: &str) {
+        save_stance_with(db, run_id, StanceKind::Neutral, 0.7);
+    }
+
+    fn save_stance_with(db: &Database, run_id: &str, stance: StanceKind, confidence: f64) {
         db.save_final_stance(&FinalStance {
             id: "stance-1".into(),
             run_id: run_id.into(),
-            stance: StanceKind::Neutral,
+            stance,
             horizon: "12 months".into(),
-            confidence: 0.7,
+            confidence,
             summary: "Balanced evidence.".into(),
             key_reasons: vec!["Valuation is mixed.".into()],
-            watch_items: vec!["Margin trend.".into()],
             what_would_change: vec!["Better growth visibility.".into()],
-            disclaimer: "Research only. Not investment advice.".into(),
+            disclaimer: RESEARCH_DISCLAIMER.into(),
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .unwrap();
     }
 
+    fn save_methodology(db: &Database, run_id: &str) {
+        db.save_methodology_note(&MethodologyNote {
+            id: "methodology-1".into(),
+            run_id: run_id.into(),
+            approach: "Triangulate filings and consensus.".into(),
+            frameworks: vec!["reverse DCF".into()],
+            data_windows: vec!["FY24 10-K".into()],
+            known_limitations: vec!["Forward guidance withheld.".into()],
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    }
+
+    fn save_criterion_answers(db: &Database, run_id: &str) {
+        for (index, criterion) in ["valuation", "risk"].iter().enumerate() {
+            db.save_decision_criterion_answer(&DecisionCriterionAnswer {
+                id: format!("answer-{index}"),
+                run_id: run_id.into(),
+                criterion: (*criterion).into(),
+                verdict: CriterionVerdict::Confirmed,
+                summary: "Evidence supports this criterion.".into(),
+                supporting_block_ids: vec!["block-thesis".into()],
+                supporting_evidence_ids: vec!["source-1".into()],
+                created_at: chrono::Utc::now().to_rfc3339(),
+            })
+            .unwrap();
+        }
+    }
+
     fn valid_scenarios() -> Vec<ProjectionScenario> {
         vec![
             ProjectionScenario {
-                label: "bull".into(),
+                label: ScenarioLabel::Bull,
                 target_value: 230.0,
                 target_label: "$230".into(),
                 upside_pct: 0.26,
@@ -1368,7 +1712,7 @@ mod tests {
                 risks: vec!["Execution slip".into()],
             },
             ProjectionScenario {
-                label: "base".into(),
+                label: ScenarioLabel::Base,
                 target_value: 205.0,
                 target_label: "$205".into(),
                 upside_pct: 0.13,
@@ -1378,7 +1722,7 @@ mod tests {
                 risks: vec!["Margin pressure".into()],
             },
             ProjectionScenario {
-                label: "bear".into(),
+                label: ScenarioLabel::Bear,
                 target_value: 150.0,
                 target_label: "$150".into(),
                 upside_pct: -0.18,
@@ -1411,7 +1755,7 @@ mod tests {
             key_assumptions: vec!["Steady revenue growth".into()],
             evidence_ids: vec![source_id.into()],
             confidence: 0.7,
-            disclaimer: "Research only. Not investment advice.".into(),
+            disclaimer: RESEARCH_DISCLAIMER.into(),
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .unwrap();
@@ -1433,11 +1777,30 @@ mod tests {
             rows: vec![serde_json::json!({ "metric": "example" })],
             series: Vec::new(),
             evidence_ids: vec![source_id.into()],
-            entity_ids: Vec::new(),
             display_order: 10,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .unwrap();
+    }
+
+    fn seed_full_single_equity(db: &Database) -> (String, String) {
+        let run_id = seed_run(db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(db, &run_id);
+        save_plan(db, &run_id, AnalysisIntent::SingleEquity);
+        save_methodology(db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::Financials,
+            BlockKind::Valuation,
+            BlockKind::Catalysts,
+        ] {
+            save_block(db, &run_id, kind, &source_id);
+        }
+        save_stance(db, &run_id);
+        save_projection(db, &run_id, "AAPL", &source_id, valid_scenarios());
+        save_criterion_answers(db, &run_id);
+        (run_id, source_id)
     }
 
     #[test]
@@ -1448,19 +1811,16 @@ mod tests {
         assert!(errors.iter().any(|e| e.contains("research plan")));
         assert!(errors.iter().any(|e| e.contains("thesis")));
         assert!(errors.iter().any(|e| e.contains("sources")));
+        assert!(errors.iter().any(|e| e.contains("methodology note")));
     }
 
     #[test]
-    fn finalization_rejects_missing_required_artifact() {
+    fn finalization_requires_intent_derived_blocks() {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
         let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
         let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::SingleEquity,
-            vec!["metric_table".into()],
-        );
+        save_plan(&db, &run_id, AnalysisIntent::SingleEquity);
+        save_methodology(&db, &run_id);
         save_block(&db, &run_id, BlockKind::Thesis, &source_id);
         save_block(&db, &run_id, BlockKind::Risks, &source_id);
         save_stance(&db, &run_id);
@@ -1469,62 +1829,48 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|error| error.contains("missing required metric_table artifact"))
+                .any(|e| e.contains("missing required valuation block"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("missing required financials block"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("missing required catalysts block"))
         );
     }
 
     #[test]
-    fn finalization_rejects_invalid_evidence_and_metrics() {
+    fn finalization_rejects_when_every_source_is_low_reliability() {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
         let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
-        let source_id = save_source(&db, &run_id);
-        save_plan(&db, &run_id, AnalysisIntent::SingleEquity, Vec::new());
-        save_block(&db, &run_id, BlockKind::Thesis, "missing-source");
-        save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        let source_id = save_source_with(&db, &run_id, "source-low", SourceReliability::Low);
+        save_plan(&db, &run_id, AnalysisIntent::SingleEquity);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::Financials,
+            BlockKind::Valuation,
+            BlockKind::Catalysts,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
         save_stance(&db, &run_id);
-        db.save_metric(&MetricSnapshot {
-            id: "metric-1".into(),
-            run_id: run_id.clone(),
-            entity_id: None,
-            metric: "revenue".into(),
-            value: "$10".into(),
-            numeric_value: None,
-            unit: Some("USD".into()),
-            period: Some("FY2025".into()),
-            as_of: "2026-04-16".into(),
-            source_id,
-            notes: None,
-            prior_value: None,
-            change_pct: None,
-        })
-        .unwrap();
+        save_projection(&db, &run_id, "AAPL", &source_id, valid_scenarios());
+        save_criterion_answers(&db, &run_id);
 
         let errors = db.validate_finalization(&run_id).unwrap();
-        assert!(errors.iter().any(|error| error.contains("numeric_value")));
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.contains("unknown evidence_id 'missing-source'"))
-        );
+        assert!(errors.iter().any(|e| e.contains("low reliability")));
     }
 
     #[test]
     fn valid_single_equity_report_can_finalize() {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
-        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
-        let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::SingleEquity,
-            vec!["metric_table".into()],
-        );
-        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
-        save_block(&db, &run_id, BlockKind::Risks, &source_id);
-        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
-        save_stance(&db, &run_id);
-        save_projection(&db, &run_id, "AAPL", &source_id, valid_scenarios());
-
+        let (run_id, _) = seed_full_single_equity(&db);
         let errors = db.validate_finalization(&run_id).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
     }
@@ -1534,12 +1880,8 @@ mod tests {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
         let run_id = seed_run(&db, "Compare NVDA to AMD", AnalysisIntent::CompareEquities);
         let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::CompareEquities,
-            vec!["comparison_matrix".into()],
-        );
+        save_plan(&db, &run_id, AnalysisIntent::CompareEquities);
+        save_methodology(&db, &run_id);
         for (id, name) in [("NVDA", "Nvidia"), ("AMD", "Advanced Micro Devices")] {
             db.save_entity(&Entity {
                 id: id.into(),
@@ -1558,8 +1900,10 @@ mod tests {
         }
         save_block(&db, &run_id, BlockKind::Thesis, &source_id);
         save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        save_block(&db, &run_id, BlockKind::PeerComparison, &source_id);
         save_artifact(&db, &run_id, ArtifactKind::ComparisonMatrix, &source_id);
         save_stance(&db, &run_id);
+        save_criterion_answers(&db, &run_id);
 
         let errors = db.validate_finalization(&run_id).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
@@ -1570,15 +1914,17 @@ mod tests {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
         let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
         let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::SingleEquity,
-            vec!["metric_table".into()],
-        );
-        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
-        save_block(&db, &run_id, BlockKind::Risks, &source_id);
-        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
+        save_plan(&db, &run_id, AnalysisIntent::SingleEquity);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::Financials,
+            BlockKind::Valuation,
+            BlockKind::Catalysts,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
         save_stance(&db, &run_id);
 
         let errors = db.validate_finalization(&run_id).unwrap();
@@ -1595,12 +1941,8 @@ mod tests {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
         let run_id = seed_run(&db, "Compare NVDA to AMD", AnalysisIntent::CompareEquities);
         let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::CompareEquities,
-            vec!["comparison_matrix".into()],
-        );
+        save_plan(&db, &run_id, AnalysisIntent::CompareEquities);
+        save_methodology(&db, &run_id);
         for (id, name) in [("NVDA", "Nvidia"), ("AMD", "Advanced Micro Devices")] {
             db.save_entity(&Entity {
                 id: id.into(),
@@ -1618,9 +1960,11 @@ mod tests {
         }
         save_block(&db, &run_id, BlockKind::Thesis, &source_id);
         save_block(&db, &run_id, BlockKind::Risks, &source_id);
+        save_block(&db, &run_id, BlockKind::PeerComparison, &source_id);
         save_artifact(&db, &run_id, ArtifactKind::ComparisonMatrix, &source_id);
         save_stance(&db, &run_id);
         save_projection(&db, &run_id, "NVDA", &source_id, valid_scenarios());
+        save_criterion_answers(&db, &run_id);
 
         let errors = db.validate_finalization(&run_id).unwrap();
         assert!(
@@ -1632,54 +1976,12 @@ mod tests {
     }
 
     #[test]
-    fn projection_scenarios_must_sum_to_one() {
-        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
-        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
-        let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::SingleEquity,
-            vec!["metric_table".into()],
-        );
-        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
-        save_block(&db, &run_id, BlockKind::Risks, &source_id);
-        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
-        save_stance(&db, &run_id);
-
-        let mut scenarios = valid_scenarios();
-        for scenario in &mut scenarios {
-            scenario.probability = 0.30;
-        }
-        save_projection(&db, &run_id, "AAPL", &source_id, scenarios);
-
-        let errors = db.validate_finalization(&run_id).unwrap();
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.contains("probabilities sum")),
-            "expected probabilities-sum error, got {errors:?}",
-        );
-    }
-
-    #[test]
     fn projection_requires_all_scenario_labels() {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
-        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
-        let source_id = save_source(&db, &run_id);
-        save_plan(
-            &db,
-            &run_id,
-            AnalysisIntent::SingleEquity,
-            vec!["metric_table".into()],
-        );
-        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
-        save_block(&db, &run_id, BlockKind::Risks, &source_id);
-        save_artifact(&db, &run_id, ArtifactKind::MetricTable, &source_id);
-        save_stance(&db, &run_id);
-
+        let (run_id, source_id) = seed_full_single_equity(&db);
+        // Overwrite projection with only 2 scenarios to check cross-doc validation.
         let mut scenarios = valid_scenarios();
-        scenarios.retain(|scenario| scenario.label != "bear");
+        scenarios.retain(|scenario| scenario.label != ScenarioLabel::Bear);
         save_projection(&db, &run_id, "AAPL", &source_id, scenarios);
 
         let errors = db.validate_finalization(&run_id).unwrap();
@@ -1688,6 +1990,66 @@ mod tests {
                 .iter()
                 .any(|error| error.contains("missing required 'bear' scenario")),
             "expected missing-bear error, got {errors:?}",
+        );
+    }
+
+    #[test]
+    fn directional_stance_requires_counter_thesis() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, _) = seed_full_single_equity(&db);
+        save_stance_with(&db, &run_id, StanceKind::Bullish, 0.5);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors.iter().any(|e| e.contains("counter_thesis")),
+            "expected counter-thesis requirement, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn blocking_uncertainty_caps_stance_confidence() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, _) = seed_full_single_equity(&db);
+        save_stance_with(&db, &run_id, StanceKind::Mixed, 0.85);
+        save_block(&db, &run_id, BlockKind::OpenQuestions, "source-1");
+        db.save_uncertainty_entry(&UncertaintyEntry {
+            id: "u-1".into(),
+            run_id: run_id.clone(),
+            question: "Is the backlog real?".into(),
+            why_it_matters: "It drives FY26 revenue.".into(),
+            attempted_resolution: "Filing silent.".into(),
+            blocking: true,
+            related_decision_criterion: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors.iter().any(|e| e.contains("blocking uncertainty")),
+            "expected blocking-uncertainty error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn finalize_requires_every_criterion_answered() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, _) = seed_full_single_equity(&db);
+        // Remove one of the seeded answers to simulate a gap.
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM decision_criterion_answers WHERE criterion = 'risk' AND run_id = ?1",
+            [&run_id],
+        )
+        .unwrap();
+        drop(conn);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("decision criterion 'risk'")),
+            "expected missing-criterion-answer, got {errors:?}"
         );
     }
 }

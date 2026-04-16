@@ -17,7 +17,7 @@ const GROUPS: BlockGroup[] = [
   { id: 'thesis', label: 'Thesis & Business Quality', kinds: ['thesis', 'business_quality'] },
   { id: 'financials', label: 'Financial Case', kinds: ['financials', 'valuation', 'peer_comparison'] },
   { id: 'context', label: 'Context', kinds: ['sector_context', 'technical_context'] },
-  { id: 'path', label: 'Path Ahead', kinds: ['catalysts', 'risks', 'scenario_matrix'] },
+  { id: 'path', label: 'Path Ahead', kinds: ['catalysts', 'risks'] },
   { id: 'open', label: 'Open Questions', kinds: ['open_questions', 'other'] },
 ];
 

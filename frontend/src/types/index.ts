@@ -67,8 +67,6 @@ export interface ResearchPlan {
   summary: string;
   decision_criteria: string[];
   planned_checks: string[];
-  required_blocks: string[];
-  required_artifacts: string[];
   created_at: string;
 }
 
@@ -93,7 +91,6 @@ export interface Source {
   publisher: string | null;
   source_type: string;
   retrieved_at: string;
-  as_of: string | null;
   reliability: 'primary' | 'high' | 'medium' | 'low';
   summary: string;
 }
@@ -103,13 +100,11 @@ export interface MetricSnapshot {
   run_id: string;
   entity_id: string | null;
   metric: string;
-  value: string;
-  numeric_value: number | null;
+  numeric_value: number;
   unit: string | null;
   period: string | null;
   as_of: string;
   source_id: string;
-  notes: string | null;
   prior_value: number | null;
   change_pct: number | null;
 }
@@ -152,7 +147,6 @@ export interface StructuredArtifact {
   rows: Record<string, unknown>[];
   series: ArtifactSeries[];
   evidence_ids: string[];
-  entity_ids: string[];
   display_order: number;
   created_at: string;
 }
@@ -166,10 +160,11 @@ export type BlockKind =
   | 'sector_context'
   | 'catalysts'
   | 'risks'
-  | 'scenario_matrix'
   | 'technical_context'
   | 'open_questions'
   | 'other';
+
+export type Importance = 'high' | 'medium' | 'low';
 
 export interface AnalysisBlock {
   id: string;
@@ -178,29 +173,31 @@ export interface AnalysisBlock {
   title: string;
   body: string;
   evidence_ids: string[];
-  entity_ids: string[];
   confidence: number;
-  importance: 'high' | 'medium' | 'low' | string;
+  importance: Importance;
   display_order: number;
   created_at: string;
 }
 
+export type StanceKind = 'bullish' | 'neutral' | 'bearish' | 'mixed' | 'insufficient_data';
+
 export interface FinalStance {
   id: string;
   run_id: string;
-  stance: 'bullish' | 'neutral' | 'bearish' | 'mixed' | 'insufficient_data';
+  stance: StanceKind;
   horizon: string;
   confidence: number;
   summary: string;
   key_reasons: string[];
-  watch_items: string[];
   what_would_change: string[];
   disclaimer: string;
   created_at: string;
 }
 
+export type ScenarioLabel = 'bull' | 'base' | 'bear';
+
 export interface ProjectionScenario {
-  label: string;
+  label: ScenarioLabel;
   target_value: number;
   target_label: string;
   upside_pct: number;
@@ -228,6 +225,55 @@ export interface Projection {
   created_at: string;
 }
 
+export interface CounterThesis {
+  id: string;
+  run_id: string;
+  stance_against: StanceKind;
+  summary: string;
+  supporting_evidence_ids: string[];
+  why_we_reject_or_partially_accept: string;
+  residual_probability: number;
+  created_at: string;
+}
+
+export interface UncertaintyEntry {
+  id: string;
+  run_id: string;
+  question: string;
+  why_it_matters: string;
+  attempted_resolution: string;
+  blocking: boolean;
+  related_decision_criterion: string | null;
+  created_at: string;
+}
+
+export interface MethodologyNote {
+  id: string;
+  run_id: string;
+  approach: string;
+  frameworks: string[];
+  data_windows: string[];
+  known_limitations: string[];
+  created_at: string;
+}
+
+export type CriterionVerdict =
+  | 'confirmed'
+  | 'refuted'
+  | 'partially_confirmed'
+  | 'unresolved';
+
+export interface DecisionCriterionAnswer {
+  id: string;
+  run_id: string;
+  criterion: string;
+  verdict: CriterionVerdict;
+  summary: string;
+  supporting_block_ids: string[];
+  supporting_evidence_ids: string[];
+  created_at: string;
+}
+
 export interface AnalysisReport {
   analysis: Analysis;
   runs: AnalysisRun[];
@@ -239,6 +285,10 @@ export interface AnalysisReport {
   blocks: AnalysisBlock[];
   final_stance: FinalStance | null;
   projections: Projection[];
+  counter_theses: CounterThesis[];
+  uncertainty_entries: UncertaintyEntry[];
+  methodology_note: MethodologyNote | null;
+  decision_criterion_answers: DecisionCriterionAnswer[];
 }
 
 export interface PlanEntry {

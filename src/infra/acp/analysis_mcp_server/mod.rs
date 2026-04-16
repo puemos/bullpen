@@ -46,6 +46,22 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
             tool::create_submit_projection_tool(config.clone()),
         )
         .tool(
+            "submit_counter_thesis",
+            tool::create_submit_counter_thesis_tool(config.clone()),
+        )
+        .tool(
+            "submit_uncertainty_ledger",
+            tool::create_submit_uncertainty_ledger_tool(config.clone()),
+        )
+        .tool(
+            "submit_methodology_note",
+            tool::create_submit_methodology_note_tool(config.clone()),
+        )
+        .tool(
+            "submit_decision_criterion_answer",
+            tool::create_submit_decision_criterion_answer_tool(config.clone()),
+        )
+        .tool(
             "finalize_analysis",
             tool::create_finalize_analysis_tool(config.clone()),
         )

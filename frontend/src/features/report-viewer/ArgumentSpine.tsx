@@ -9,14 +9,11 @@ interface ArgumentSpineProps {
 export function ArgumentSpine({ stance }: ArgumentSpineProps) {
   const accent = getStanceAccent(stance.stance);
   const hasAny =
-    stance.key_reasons.length +
-      stance.watch_items.length +
-      stance.what_would_change.length >
-    0;
+    stance.key_reasons.length + stance.what_would_change.length > 0;
   if (!hasAny) return null;
 
   return (
-    <section className="grid gap-10 md:grid-cols-3 md:gap-8">
+    <section className="grid gap-10 md:grid-cols-2 md:gap-8">
       <SpineColumn
         number="01"
         label="The case"
@@ -26,13 +23,6 @@ export function ArgumentSpine({ stance }: ArgumentSpineProps) {
       />
       <SpineColumn
         number="02"
-        label="Watching"
-        items={stance.watch_items}
-        markerClass="bg-muted-foreground/50"
-        markerStyle="dot"
-      />
-      <SpineColumn
-        number="03"
         label="Would change our mind"
         items={stance.what_would_change}
         markerClass="bg-foreground/60"

@@ -5,6 +5,8 @@ use std::str::FromStr;
 pub type AnalysisId = String;
 pub type AnalysisRunId = String;
 
+pub const RESEARCH_DISCLAIMER: &str = "Research only. Not investment advice.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisStatus {
@@ -44,7 +46,7 @@ impl FromStr for AnalysisStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisIntent {
     SingleEquity,
@@ -149,8 +151,6 @@ pub struct ResearchPlan {
     pub summary: String,
     pub decision_criteria: Vec<String>,
     pub planned_checks: Vec<String>,
-    pub required_blocks: Vec<String>,
-    pub required_artifacts: Vec<String>,
     pub created_at: String,
 }
 
@@ -199,7 +199,6 @@ pub struct Source {
     pub publisher: Option<String>,
     pub source_type: String,
     pub retrieved_at: String,
-    pub as_of: Option<String>,
     pub reliability: SourceReliability,
     pub summary: String,
 }
@@ -210,20 +209,18 @@ pub struct MetricSnapshot {
     pub run_id: AnalysisRunId,
     pub entity_id: Option<String>,
     pub metric: String,
-    pub value: String,
-    pub numeric_value: Option<f64>,
+    pub numeric_value: f64,
     pub unit: Option<String>,
     pub period: Option<String>,
     pub as_of: String,
     pub source_id: String,
-    pub notes: Option<String>,
     #[serde(default)]
     pub prior_value: Option<f64>,
     #[serde(default)]
     pub change_pct: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
     MetricTable,
@@ -267,6 +264,38 @@ impl FromStr for ArtifactKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenarioLabel {
+    Bull,
+    Base,
+    Bear,
+}
+
+impl fmt::Display for ScenarioLabel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Bull => "bull",
+            Self::Base => "base",
+            Self::Bear => "bear",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for ScenarioLabel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "bull" => Ok(Self::Bull),
+            "base" => Ok(Self::Base),
+            "bear" => Ok(Self::Bear),
+            other => Err(format!("unknown scenario label: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactColumn {
     pub key: String,
@@ -304,12 +333,11 @@ pub struct StructuredArtifact {
     pub rows: Vec<serde_json::Value>,
     pub series: Vec<ArtifactSeries>,
     pub evidence_ids: Vec<String>,
-    pub entity_ids: Vec<String>,
     pub display_order: i64,
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockKind {
     Thesis,
@@ -320,7 +348,6 @@ pub enum BlockKind {
     SectorContext,
     Catalysts,
     Risks,
-    ScenarioMatrix,
     TechnicalContext,
     OpenQuestions,
     #[default]
@@ -338,7 +365,6 @@ impl fmt::Display for BlockKind {
             Self::SectorContext => "sector_context",
             Self::Catalysts => "catalysts",
             Self::Risks => "risks",
-            Self::ScenarioMatrix => "scenario_matrix",
             Self::TechnicalContext => "technical_context",
             Self::OpenQuestions => "open_questions",
             Self::Other => "other",
@@ -360,10 +386,41 @@ impl FromStr for BlockKind {
             "sector_context" => Ok(Self::SectorContext),
             "catalysts" => Ok(Self::Catalysts),
             "risks" => Ok(Self::Risks),
-            "scenario_matrix" => Ok(Self::ScenarioMatrix),
             "technical_context" => Ok(Self::TechnicalContext),
             "open_questions" => Ok(Self::OpenQuestions),
             _ => Ok(Self::Other),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Importance {
+    High,
+    Medium,
+    Low,
+}
+
+impl fmt::Display for Importance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for Importance {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "high" => Ok(Self::High),
+            "medium" => Ok(Self::Medium),
+            "low" => Ok(Self::Low),
+            other => Err(format!("unknown importance: {other}")),
         }
     }
 }
@@ -376,9 +433,8 @@ pub struct AnalysisBlock {
     pub title: String,
     pub body: String,
     pub evidence_ids: Vec<String>,
-    pub entity_ids: Vec<String>,
     pub confidence: f64,
-    pub importance: String,
+    pub importance: Importance,
     pub display_order: i64,
     pub created_at: String,
 }
@@ -431,7 +487,6 @@ pub struct FinalStance {
     pub confidence: f64,
     pub summary: String,
     pub key_reasons: Vec<String>,
-    pub watch_items: Vec<String>,
     pub what_would_change: Vec<String>,
     pub disclaimer: String,
     pub created_at: String,
@@ -439,7 +494,7 @@ pub struct FinalStance {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectionScenario {
-    pub label: String,
+    pub label: ScenarioLabel,
     pub target_value: f64,
     pub target_label: String,
     pub upside_pct: f64,
@@ -469,6 +524,89 @@ pub struct Projection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CounterThesis {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub stance_against: StanceKind,
+    pub summary: String,
+    pub supporting_evidence_ids: Vec<String>,
+    pub why_we_reject_or_partially_accept: String,
+    pub residual_probability: f64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UncertaintyEntry {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub question: String,
+    pub why_it_matters: String,
+    pub attempted_resolution: String,
+    pub blocking: bool,
+    #[serde(default)]
+    pub related_decision_criterion: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MethodologyNote {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub approach: String,
+    pub frameworks: Vec<String>,
+    pub data_windows: Vec<String>,
+    pub known_limitations: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CriterionVerdict {
+    Confirmed,
+    Refuted,
+    PartiallyConfirmed,
+    Unresolved,
+}
+
+impl fmt::Display for CriterionVerdict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Confirmed => "confirmed",
+            Self::Refuted => "refuted",
+            Self::PartiallyConfirmed => "partially_confirmed",
+            Self::Unresolved => "unresolved",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for CriterionVerdict {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "confirmed" => Ok(Self::Confirmed),
+            "refuted" => Ok(Self::Refuted),
+            "partially_confirmed" => Ok(Self::PartiallyConfirmed),
+            "unresolved" => Ok(Self::Unresolved),
+            other => Err(format!("unknown criterion verdict: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionCriterionAnswer {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub criterion: String,
+    pub verdict: CriterionVerdict,
+    pub summary: String,
+    pub supporting_block_ids: Vec<String>,
+    pub supporting_evidence_ids: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisReport {
     pub analysis: Analysis,
     pub runs: Vec<AnalysisRun>,
@@ -480,4 +618,8 @@ pub struct AnalysisReport {
     pub blocks: Vec<AnalysisBlock>,
     pub final_stance: Option<FinalStance>,
     pub projections: Vec<Projection>,
+    pub counter_theses: Vec<CounterThesis>,
+    pub uncertainty_entries: Vec<UncertaintyEntry>,
+    pub methodology_note: Option<MethodologyNote>,
+    pub decision_criterion_answers: Vec<DecisionCriterionAnswer>,
 }
