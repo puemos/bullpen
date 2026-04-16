@@ -25,7 +25,7 @@ The current test coverage is Rust-focused. Add unit tests near the code under `#
 
 ## Commit & Pull Request Guidelines
 
-This repository has no commit history yet, so there is no established message convention. Use short, imperative subjects such as `Add analysis export command` or `Fix ACP run cleanup`, and keep unrelated changes in separate commits. Pull requests should describe the user-visible change, list validation commands run, link any related issue, and include screenshots or short recordings for UI changes.
+Use one-line commit subjects in the form `action(scope): outcome`, such as `refactor(frontend): split app into feature modules` or `fix(acp): clean up stopped runs`. Keep unrelated changes in separate commits. Pull requests should describe the user-visible change, list validation commands run, link any related issue, and include screenshots or short recordings for UI changes.
 
 ## Security & Configuration Tips
 
