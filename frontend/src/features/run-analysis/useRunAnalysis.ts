@@ -1,66 +1,130 @@
 import { Channel } from '@tauri-apps/api/core';
 import { useState } from 'react';
 import {
+  createAnalysis,
   generateAnalysis,
   getAnalysisReport,
   stopAnalysis,
 } from '@/shared/api/commands';
 import {
-  addProgress,
-  clearProgress,
+  addRun,
+  addRunProgress,
+  getState,
   setState,
-  useAppStore,
+  updateRunStatus,
 } from '@/store';
-import type { ProgressEventPayload } from '@/types';
+import type { AgentCandidate, ProgressEventPayload } from '@/types';
 import { handleProgressEvent } from './progress';
 
 interface UseRunAnalysisOptions {
   agentId: string;
+  agents: AgentCandidate[];
   canRun: boolean;
   onDone: () => Promise<void>;
 }
 
-export function useRunAnalysis({ agentId, canRun, onDone }: UseRunAnalysisOptions) {
-  const activeRunId = useAppStore(state => state.activeRunId);
+export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalysisOptions) {
   const [localError, setLocalError] = useState<string | null>(null);
 
   const start = async (prompt: string) => {
     if (!canRun) return;
 
     setLocalError(null);
-    clearProgress();
+
+    const agent = agents.find(a => a.id === agentId);
+
+    let analysisId: string;
+    try {
+      analysisId = await createAnalysis(prompt);
+    } catch (err) {
+      setLocalError(String(err));
+      return;
+    }
 
     const runId = crypto.randomUUID();
-    setState({ isRunning: true, activeRunId: runId });
+
+    addRun({
+      runId,
+      agentId,
+      agentLabel: agent?.label || agentId,
+      status: 'running',
+      progress: [],
+      plan: [],
+    });
+
+    // Navigate to analysis detail with agent tab active
+    setState({
+      activeAnalysisId: analysisId,
+      selectedAnalysisId: analysisId,
+      selectedRunTab: runId,
+      view: 'analysis',
+      analysisSubTab: 'agent',
+    });
+
+    // Refresh analyses list so the sidebar shows the new entry immediately
+    void onDone();
+
+    // Fetch initial report so the report tab has data
+    getAnalysisReport(analysisId).then(report => {
+      // Only update if we're still viewing this analysis
+      if (getState().selectedAnalysisId === analysisId) {
+        setState({ selectedReport: report });
+      }
+    }).catch(() => {});
 
     const onProgress = new Channel<ProgressEventPayload>();
     onProgress.onmessage = payload => {
-      handleProgressEvent(payload);
-      if (payload.event === 'Completed' || payload.event === 'Error') {
-        setState({ isRunning: false, activeRunId: null });
-        onDone().catch(console.error);
+      handleProgressEvent(payload, runId);
+      if (payload.event === 'Completed') {
+        updateRunStatus(runId, 'completed');
+        finishRun(analysisId);
+      } else if (payload.event === 'Error') {
+        updateRunStatus(runId, 'error');
+        finishRun(analysisId);
       }
     };
 
-    try {
-      const result = await generateAnalysis(prompt, agentId, runId, onProgress);
-      setState({
-        selectedAnalysisId: result.analysis_id,
-        view: 'reports',
-      });
-      const report = await getAnalysisReport(result.analysis_id);
-      setState({ selectedReport: report });
-      await onDone();
-    } catch (err) {
-      setLocalError(String(err));
-      setState({ isRunning: false, activeRunId: null });
-    }
+    generateAnalysis(prompt, agentId, runId, analysisId, onProgress).catch(err => {
+      const msg = String(err);
+      const isCancelled = msg.includes('cancelled by user');
+      updateRunStatus(runId, isCancelled ? 'cancelled' : 'error');
+      if (!isCancelled) {
+        addRunProgress(runId, 'error', msg);
+      }
+      finishRun(analysisId);
+    });
   };
 
-  const stop = async () => {
-    if (!activeRunId) return;
-    await stopAnalysis(activeRunId);
-    addProgress('error', 'Stop requested');
+  const finishRun = async (analysisId: string) => {
+    // Switch to report tab if we're still viewing this analysis
+    const current = getState();
+    if (current.selectedAnalysisId === analysisId) {
+      setState({ analysisSubTab: 'report' });
+      try {
+        const report = await getAnalysisReport(analysisId);
+        setState({ selectedReport: report });
+      } catch {
+        // non-critical
+      }
+    }
+    await onDone();
+  };
+
+  const stop = async (runId?: string) => {
+    if (runId) {
+      await stopAnalysis(runId);
+      addRunProgress(runId, 'error', 'Stop requested');
+    } else {
+      const runs = getState().activeRuns;
+      await Promise.all(
+        Object.values(runs)
+          .filter(r => r.status === 'running')
+          .map(r => {
+            addRunProgress(r.runId, 'error', 'Stop requested');
+            return stopAnalysis(r.runId);
+          })
+      );
+    }
   };
 
   return {

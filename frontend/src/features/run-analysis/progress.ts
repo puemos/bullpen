@@ -1,7 +1,7 @@
 import {
-  addProgress,
-  appendProgress,
-  setState,
+  addRunProgress,
+  appendRunProgress,
+  setRunPlan,
 } from '@/store';
 import type {
   ProgressEventPayload,
@@ -23,6 +23,7 @@ export type TimelineBlock =
       id: string;
       title: string;
       toolName: string | null;
+      kind: string | null;
       arguments: string | null;
       result: string | null;
       status: ToolTimelineStatus;
@@ -38,47 +39,50 @@ export type TimelineBlock =
       content: string;
     };
 
-export function handleProgressEvent(payload: ProgressEventPayload) {
+export function handleProgressEvent(payload: ProgressEventPayload, runId: string) {
   switch (payload.event) {
     case 'MessageDelta':
-      appendProgress('agent_message', payload.data.delta);
+      appendRunProgress(runId, 'agent_message', payload.data.delta);
       break;
     case 'ThoughtDelta':
-      appendProgress('agent_thought', payload.data.delta);
+      appendRunProgress(runId, 'agent_thought', payload.data.delta);
       break;
     case 'ToolCallStarted':
-      addProgress('tool_call', payload.data.title, payload.data);
+      addRunProgress(runId, 'tool_call', payload.data.title, payload.data);
       break;
     case 'ToolCallComplete':
-      addProgress('tool_result', `${payload.data.title || 'tool'} ${payload.data.status}`, payload.data);
+      addRunProgress(runId, 'tool_result', `${payload.data.title || 'tool'} ${payload.data.status}`, payload.data);
       break;
     case 'Plan':
-      setState({ plan: payload.data.entries });
-      addProgress('plan', 'Plan updated', payload.data);
+      setRunPlan(runId, payload.data.entries);
+      addRunProgress(runId, 'plan', 'Plan updated', payload.data);
       break;
     case 'PlanSubmitted':
-      addProgress('submitted', 'Research plan submitted');
+      addRunProgress(runId, 'submitted', 'Research plan submitted');
       break;
     case 'SourceSubmitted':
-      addProgress('submitted', 'Source submitted');
+      addRunProgress(runId, 'submitted', 'Source submitted');
       break;
     case 'MetricSubmitted':
-      addProgress('submitted', 'Metric submitted');
+      addRunProgress(runId, 'submitted', 'Metric submitted');
+      break;
+    case 'ArtifactSubmitted':
+      addRunProgress(runId, 'submitted', 'Structured artifact submitted');
       break;
     case 'BlockSubmitted':
-      addProgress('submitted', 'Analysis block submitted');
+      addRunProgress(runId, 'submitted', 'Analysis block submitted');
       break;
     case 'StanceSubmitted':
-      addProgress('submitted', 'Final stance submitted');
+      addRunProgress(runId, 'submitted', 'Final stance submitted');
       break;
     case 'Completed':
-      addProgress('completed', 'Analysis complete');
+      addRunProgress(runId, 'completed', 'Analysis complete');
       break;
     case 'Error':
-      addProgress('error', payload.data.message);
+      addRunProgress(runId, 'error', payload.data.message);
       break;
     case 'Log':
-      addProgress('log', payload.data);
+      addRunProgress(runId, 'log', payload.data);
       break;
   }
 }
@@ -112,7 +116,8 @@ export function getTimelineBlocks(progress: ProgressItem[]): TimelineBlock[] {
         type: 'tool',
         id,
         title: data?.title || item.message,
-        toolName: data?.kind || null,
+        toolName: null,
+        kind: data?.kind ?? null,
         arguments: null,
         result: null,
         status: 'running',
@@ -134,6 +139,7 @@ export function getTimelineBlocks(progress: ProgressItem[]): TimelineBlock[] {
           id,
           title: data?.title || item.message,
           toolName: toolNameFromInput(data?.raw_input),
+          kind: null,
           arguments: serializeToolPayload(data?.raw_input),
           result: serializeToolPayload(data?.raw_output),
           status: nextStatus,

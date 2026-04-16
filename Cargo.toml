@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 default-run = "crazylines"
 license = "MIT OR Apache-2.0"
-description = "CrazyLines is an ACP-powered local stock market analysis workbench."
+description = "Crazylines is an ACP-powered local stock market analysis workbench."
 keywords = ["stocks", "analysis", "ai", "acp", "tauri"]
 categories = ["finance", "gui"]
 

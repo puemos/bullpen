@@ -6,13 +6,13 @@ use crate::infra::acp::analysis_mcp_server::RunContext;
 use crate::infra::acp::{AgentCandidate, list_agent_candidates};
 use crate::infra::app_config::{AppConfig, load_config, save_config};
 use crate::state::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data")]
 pub enum ProgressEventPayload {
     Log(String),
@@ -40,6 +40,7 @@ pub enum ProgressEventPayload {
     PlanSubmitted,
     SourceSubmitted,
     MetricSubmitted,
+    ArtifactSubmitted,
     BlockSubmitted,
     StanceSubmitted,
     Completed,
@@ -48,12 +49,12 @@ pub enum ProgressEventPayload {
     },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontendPlan {
     pub entries: Vec<FrontendPlanEntry>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontendPlanEntry {
     pub content: String,
     pub priority: String,
@@ -98,9 +99,11 @@ pub async fn get_all_analyses(state: State<'_, AppState>) -> Result<Vec<Analysis
 pub async fn get_analysis_report(
     state: State<'_, AppState>,
     analysis_id: String,
+    run_id: Option<String>,
 ) -> Result<Option<AnalysisReport>, String> {
     let db = state.db.lock().map_err(|err| err.to_string())?;
-    db.get_report(&analysis_id).map_err(|err| err.to_string())
+    db.get_report(&analysis_id, run_id.as_deref())
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -132,7 +135,8 @@ pub async fn export_analysis_markdown(
 ) -> Result<String, String> {
     let report = {
         let db = state.db.lock().map_err(|err| err.to_string())?;
-        db.get_report(&analysis_id).map_err(|err| err.to_string())?
+        db.get_report(&analysis_id, None)
+            .map_err(|err| err.to_string())?
     };
     let Some(report) = report else {
         return Err("analysis not found".to_string());
@@ -141,11 +145,69 @@ pub async fn export_analysis_markdown(
 }
 
 #[tauri::command]
+pub async fn create_analysis(
+    state: State<'_, AppState>,
+    user_prompt: String,
+) -> Result<String, String> {
+    let trimmed = user_prompt.trim();
+    if trimmed.is_empty() {
+        return Err("Enter a research request before starting analysis.".to_string());
+    }
+    let id = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let analysis = Analysis {
+        id: id.clone(),
+        title: derive_title(trimmed),
+        user_prompt: trimmed.to_string(),
+        intent: AnalysisIntent::GeneralResearch,
+        status: AnalysisStatus::Running,
+        active_run_id: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.save_analysis(&analysis).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub async fn set_active_run(
+    state: State<'_, AppState>,
+    analysis_id: String,
+    run_id: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.save_analysis(&{
+        let analysis = db
+            .get_report(&analysis_id, None)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Analysis not found".to_string())?
+            .analysis;
+        Analysis {
+            active_run_id: Some(run_id),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            ..analysis
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_run_progress(
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<Vec<ProgressEventPayload>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_run_progress(&run_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn generate_analysis(
     app: AppHandle,
     state: State<'_, AppState>,
     user_prompt: String,
     agent_id: String,
+    analysis_id: String,
     run_id: Option<String>,
     on_progress: Channel<ProgressEventPayload>,
 ) -> Result<GenerateAnalysisResult, String> {
@@ -170,20 +232,8 @@ pub async fn generate_analysis(
     let agent_args = candidate.args.clone();
 
     let now = chrono::Utc::now().to_rfc3339();
-    let analysis_id = Uuid::new_v4().to_string();
     let run_id = run_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let title = derive_title(trimmed_prompt);
 
-    let analysis = Analysis {
-        id: analysis_id.clone(),
-        title,
-        user_prompt: trimmed_prompt.to_string(),
-        intent: AnalysisIntent::GeneralResearch,
-        status: AnalysisStatus::Running,
-        active_run_id: Some(run_id.clone()),
-        created_at: now.clone(),
-        updated_at: now.clone(),
-    };
     let run = AnalysisRun {
         id: run_id.clone(),
         analysis_id: analysis_id.clone(),
@@ -197,8 +247,9 @@ pub async fn generate_analysis(
 
     let db_path = {
         let db = state.db.lock().map_err(|err| err.to_string())?;
-        db.save_analysis(&analysis).map_err(|err| err.to_string())?;
         db.save_run(&run).map_err(|err| err.to_string())?;
+        db.set_active_run_if_empty(&analysis_id, &run_id)
+            .map_err(|err| err.to_string())?;
         db.path().clone()
     };
 
@@ -220,6 +271,8 @@ pub async fn generate_analysis(
     let progress_channel = on_progress.clone();
     let app_clone = app.clone();
     let analysis_id_clone = analysis_id.clone();
+    let run_id_clone = run_id.clone();
+    let db_clone = state.db.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = progress_rx.recv().await {
             let payload = match event {
@@ -266,6 +319,7 @@ pub async fn generate_analysis(
                 ProgressEvent::PlanSubmitted => ProgressEventPayload::PlanSubmitted,
                 ProgressEvent::SourceSubmitted => ProgressEventPayload::SourceSubmitted,
                 ProgressEvent::MetricSubmitted => ProgressEventPayload::MetricSubmitted,
+                ProgressEvent::ArtifactSubmitted => ProgressEventPayload::ArtifactSubmitted,
                 ProgressEvent::BlockSubmitted => ProgressEventPayload::BlockSubmitted,
                 ProgressEvent::StanceSubmitted => ProgressEventPayload::StanceSubmitted,
                 ProgressEvent::Finalized => ProgressEventPayload::Completed,
@@ -274,11 +328,15 @@ pub async fn generate_analysis(
                 ProgressEventPayload::PlanSubmitted => Some("plan"),
                 ProgressEventPayload::SourceSubmitted => Some("source"),
                 ProgressEventPayload::MetricSubmitted => Some("metric"),
+                ProgressEventPayload::ArtifactSubmitted => Some("artifact"),
                 ProgressEventPayload::BlockSubmitted => Some("block"),
                 ProgressEventPayload::StanceSubmitted => Some("stance"),
                 ProgressEventPayload::Completed => Some("completed"),
                 _ => None,
             };
+            if let Ok(db) = db_clone.lock() {
+                let _ = db.append_progress_event(&run_id_clone, &payload);
+            }
             if let Some(kind) = data_kind {
                 let _ = app_clone.emit(
                     "analysis-data-changed",
@@ -322,7 +380,7 @@ pub async fn generate_analysis(
             let db = state.db.lock().map_err(|err| err.to_string())?;
             db.update_run_status(&run_id, AnalysisStatus::Completed, None)
                 .map_err(|err| err.to_string())?;
-            db.update_analysis_status(&analysis_id, AnalysisStatus::Completed)
+            db.recompute_analysis_status(&analysis_id)
                 .map_err(|err| err.to_string())?;
             let _ = on_progress.send(ProgressEventPayload::Completed);
         }
@@ -337,7 +395,7 @@ pub async fn generate_analysis(
             let db = state.db.lock().map_err(|err| err.to_string())?;
             db.update_run_status(&run_id, status, Some(&message))
                 .map_err(|err| err.to_string())?;
-            db.update_analysis_status(&analysis_id, status)
+            db.recompute_analysis_status(&analysis_id)
                 .map_err(|err| err.to_string())?;
             let _ = on_progress.send(ProgressEventPayload::Error {
                 message: message.clone(),
@@ -378,6 +436,21 @@ fn render_markdown(report: &AnalysisReport) -> String {
             stance.confidence * 100.0,
             stance.summary
         ));
+    }
+    if !report.artifacts.is_empty() {
+        out.push_str("## Structured Evidence\n\n");
+        for artifact in &report.artifacts {
+            out.push_str(&format!(
+                "### {}\n\n{}\n\n",
+                artifact.title, artifact.summary
+            ));
+            if !artifact.evidence_ids.is_empty() {
+                out.push_str(&format!(
+                    "Sources: `{}`\n\n",
+                    artifact.evidence_ids.join("`, `")
+                ));
+            }
+        }
     }
     for block in &report.blocks {
         out.push_str(&format!("## {}\n\n{}\n\n", block.title, block.body));

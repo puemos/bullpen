@@ -1,9 +1,11 @@
 import { CaretDown, Check } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { AgentCandidate } from "@/types";
 import { getLogoPath } from "@/lib/agents";
@@ -26,12 +28,14 @@ export default function AgentSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={disabled}>
-        <button
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
           className={cn(
-            "flex items-center gap-2 px-3 py-1.5 rounded-md transition-all border outline-none",
-            "border-border/50 hover:border-border hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring",
+            "h-8 border-border/50 bg-transparent px-3 text-xs hover:border-border hover:bg-muted/30",
             "data-[state=open]:bg-muted/50 data-[state=open]:border-border",
-            disabled && "opacity-50 cursor-not-allowed",
           )}
         >
           <span className="flex items-center gap-2 text-xs font-medium text-foreground">
@@ -46,7 +50,7 @@ export default function AgentSelector({
             {!selectedAgent?.available && selectedAgent && " (offline)"}
           </span>
           <CaretDown size={12} className="text-muted-foreground ml-1" weight="bold" />
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -56,34 +60,23 @@ export default function AgentSelector({
           const isSelected = agent.id === selectedAgentId;
           const isUnavailable = !agent.available;
 
-          if (isUnavailable) {
-            return (
-              <div 
-                key={agent.id}
-                className="flex items-center gap-2 px-2 py-1.5 rounded text-xs w-full text-left opacity-40 cursor-not-allowed"
-              >
-                <img src={getLogoPath(agent.label)} alt={agent.label} className="w-3.5 h-3.5 object-contain opacity-80" />
-                <span className="flex-1 truncate font-medium">{agent.label}</span>
-                <span className="text-[10px] text-muted-foreground">offline</span>
-              </div>
-            );
-          }
-
           return (
-            <button
+            <DropdownMenuItem
               key={agent.id}
-              onClick={() => onSelect(agent.id)}
+              disabled={isUnavailable}
+              onSelect={() => onSelect(agent.id)}
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors w-full text-left outline-none",
-                isSelected
-                  ? "bg-accent/50 text-accent-foreground font-medium"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "gap-2 text-xs",
+                isSelected && "bg-accent/50 text-accent-foreground font-medium",
               )}
             >
               <img src={getLogoPath(agent.label)} alt={agent.label} className="w-3.5 h-3.5 object-contain opacity-80" />
               <span className="flex-1 truncate">{agent.label}</span>
+              {isUnavailable && (
+                <span className="text-[10px] text-muted-foreground">offline</span>
+              )}
               {isSelected && <Check size={12} weight="bold" />}
-            </button>
+            </DropdownMenuItem>
           );
         })}
       </DropdownMenuContent>

@@ -26,8 +26,10 @@ fn clamp_confidence(value: Option<f64>) -> f64 {
 struct SubmitResearchPlanArgs {
     intent: Option<String>,
     summary: String,
+    decision_criteria: Vec<String>,
     planned_checks: Vec<String>,
     required_blocks: Vec<String>,
+    required_artifacts: Vec<String>,
     title: Option<String>,
 }
 
@@ -50,8 +52,10 @@ pub fn create_submit_research_plan_tool(config: Arc<ServerConfig>) -> impl ToolH
                 run_id: context.run_id.clone(),
                 intent: intent.clone(),
                 summary: input.summary,
+                decision_criteria: input.decision_criteria,
                 planned_checks: input.planned_checks,
                 required_blocks: input.required_blocks,
+                required_artifacts: input.required_artifacts,
                 created_at: now(),
             };
             let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
@@ -67,13 +71,15 @@ pub fn create_submit_research_plan_tool(config: Arc<ServerConfig>) -> impl ToolH
     .with_description("Submit the interpreted research plan before doing the analysis.")
     .with_schema(json!({
         "type": "object",
-        "required": ["summary", "planned_checks", "required_blocks"],
+        "required": ["summary", "decision_criteria", "planned_checks", "required_blocks", "required_artifacts"],
         "properties": {
             "intent": { "type": "string", "enum": ["single_equity", "compare_equities", "sector_analysis", "macro_theme", "watchlist", "general_research"] },
             "title": { "type": "string" },
             "summary": { "type": "string" },
+            "decision_criteria": { "type": "array", "items": { "type": "string" } },
             "planned_checks": { "type": "array", "items": { "type": "string" } },
-            "required_blocks": { "type": "array", "items": { "type": "string" } }
+            "required_blocks": { "type": "array", "items": { "type": "string", "enum": ["thesis", "business_quality", "financials", "valuation", "peer_comparison", "sector_context", "catalysts", "risks", "scenario_matrix", "technical_context", "open_questions", "other"] } },
+            "required_artifacts": { "type": "array", "items": { "type": "string", "enum": ["metric_table", "comparison_matrix", "scenario_matrix", "bar_chart", "line_chart"] } }
         }
     }))
 }
@@ -211,6 +217,7 @@ struct SubmitMetricArgs {
     entity_id: Option<String>,
     metric: String,
     value: String,
+    numeric_value: f64,
     unit: Option<String>,
     period: Option<String>,
     as_of: String,
@@ -233,6 +240,7 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
                 entity_id: input.entity_id,
                 metric: input.metric,
                 value: input.value,
+                numeric_value: Some(input.numeric_value),
                 unit: input.unit,
                 period: input.period,
                 as_of: input.as_of,
@@ -249,17 +257,121 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
     .with_description("Submit a normalized market, fundamental, valuation, or macro metric with source and as_of metadata.")
     .with_schema(json!({
         "type": "object",
-        "required": ["metric", "value", "as_of", "source_id"],
+        "required": ["metric", "value", "numeric_value", "as_of", "source_id"],
         "properties": {
             "id": { "type": "string" },
             "entity_id": { "type": "string" },
             "metric": { "type": "string" },
             "value": { "type": "string" },
+            "numeric_value": { "type": "number" },
             "unit": { "type": "string" },
             "period": { "type": "string" },
             "as_of": { "type": "string" },
             "source_id": { "type": "string" },
             "notes": { "type": "string" }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitStructuredArtifactArgs {
+    id: Option<String>,
+    kind: String,
+    title: String,
+    summary: String,
+    columns: Vec<ArtifactColumn>,
+    rows: Vec<Value>,
+    series: Option<Vec<ArtifactSeries>>,
+    evidence_ids: Vec<String>,
+    entity_ids: Option<Vec<String>>,
+    display_order: Option<i64>,
+}
+
+pub fn create_submit_structured_artifact_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_structured_artifact", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitStructuredArtifactArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let artifact = StructuredArtifact {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                kind: ArtifactKind::from_str(&input.kind).unwrap_or_default(),
+                title: input.title,
+                summary: input.summary,
+                columns: input.columns,
+                rows: input.rows,
+                series: input.series.unwrap_or_default(),
+                evidence_ids: input.evidence_ids,
+                entity_ids: input.entity_ids.unwrap_or_default(),
+                display_order: input.display_order.unwrap_or(50),
+                created_at: now(),
+            };
+            db(&config)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?
+                .save_structured_artifact(&artifact)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "artifact_id": artifact.id }))
+        })
+    })
+    .with_description("Submit a source-backed table, comparison matrix, scenario matrix, or lightweight chart for the report.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["kind", "title", "summary", "columns", "rows", "evidence_ids"],
+        "properties": {
+            "id": { "type": "string" },
+            "kind": { "type": "string", "enum": ["metric_table", "comparison_matrix", "scenario_matrix", "bar_chart", "line_chart"] },
+            "title": { "type": "string" },
+            "summary": { "type": "string" },
+            "columns": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["key", "label"],
+                    "properties": {
+                        "key": { "type": "string" },
+                        "label": { "type": "string" },
+                        "unit": { "type": "string" },
+                        "description": { "type": "string" }
+                    }
+                }
+            },
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            },
+            "series": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["label", "points"],
+                    "properties": {
+                        "label": { "type": "string" },
+                        "points": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["label", "value"],
+                                "properties": {
+                                    "label": { "type": "string" },
+                                    "value": { "type": "number" },
+                                    "source_id": { "type": "string" },
+                                    "metric_id": { "type": "string" }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "evidence_ids": { "type": "array", "items": { "type": "string" } },
+            "entity_ids": { "type": "array", "items": { "type": "string" } },
+            "display_order": { "type": "integer" }
         }
     }))
 }

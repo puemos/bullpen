@@ -1,6 +1,6 @@
-# CrazyLines
+# Crazylines
 
-CrazyLines is a local desktop workbench for ACP-powered stock market research. It follows the same core idea as LaReview: the agent can research broadly, but it must submit typed blocks through app-owned MCP tools instead of returning one opaque markdown answer.
+Crazylines is a local desktop workbench for ACP-powered stock market research. It follows the same core idea as LaReview: the agent can research broadly, but it must submit typed blocks through app-owned MCP tools instead of returning one opaque markdown answer.
 
 The first implementation is research-only. It does not execute trades, prepare orders, size positions, or provide personalized investment advice.
 
@@ -48,7 +48,7 @@ cargo run
 
 ## Agent Configuration
 
-CrazyLines discovers the same kinds of ACP agents as LaReview:
+Crazylines discovers the same kinds of ACP agents as LaReview:
 
 - Codex via `npx -y @zed-industries/codex-acp@latest`
 - Claude via `npx -y @zed-industries/claude-code-acp`
@@ -69,4 +69,3 @@ Environment overrides:
 - `CRAZYLINES_CUSTOM_AGENT_ARGS`
 
 The local database defaults to the OS app data directory. Override it with `CRAZYLINES_DB_PATH`.
-

@@ -1,153 +1,200 @@
+import { WarningCircle } from "@phosphor-icons/react";
 import {
-  ChartLineUp,
-  Gear,
-  MagnifyingGlass,
-  WarningCircle,
-} from '@phosphor-icons/react';
-import { useEffect, useState, type ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
-import { ReportsPage } from '@/features/report-viewer/ReportsPage';
-import { ResearchPage } from '@/features/run-analysis/ResearchPage';
-import { SettingsPage } from '@/features/settings/SettingsPage';
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { AppSidebar } from "@/app/AppSidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { AnalysisPage } from "@/features/analysis/AnalysisPage";
+import { ResearchPage } from "@/features/run-analysis/ResearchPage";
+import { SettingsPage } from "@/features/settings/SettingsPage";
+import { useBackendEvent } from "@/hooks/useBackendEvent";
 import {
   getAgents,
   getAllAnalyses,
   getAnalysisReport,
-} from '@/shared/api/commands';
-import {
-  getState,
-  setState,
-  useAppStore,
-} from '@/store';
-import type { AgentCandidate } from '@/types';
-import type { AppView } from './navigation';
+} from "@/shared/api/commands";
+import { getState, setState, useAppStore } from "@/store";
+import type { AgentCandidate, DataChangedPayload } from "@/types";
+import type { AppView } from "./navigation";
+
+const DATA_CHANGED_DEBOUNCE_MS = 150;
 
 export function App() {
-  const view = useAppStore(state => state.view);
-  const analyses = useAppStore(state => state.analyses);
-  const selectedAnalysisId = useAppStore(state => state.selectedAnalysisId);
+  const view = useAppStore((state) => state.view);
+  const analyses = useAppStore((state) => state.analyses);
+  const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
   const [agents, setAgents] = useState<AgentCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [nextAgents, nextAnalyses] = await Promise.all([getAgents(), getAllAnalyses()]);
+      const [nextAgents, nextAnalyses] = await Promise.all([
+        getAgents(),
+        getAllAnalyses(),
+      ]);
+      const selected = getState().selectedAnalysisId;
+      const selectedStillExists = selected
+        ? nextAnalyses.some((analysis) => analysis.id === selected)
+        : false;
+
       setAgents(nextAgents);
       setState({
         analyses: nextAnalyses,
+        ...(selected && !selectedStillExists
+          ? { selectedAnalysisId: null, selectedReport: null }
+          : {}),
         agentId:
           getState().agentId ||
-          nextAgents.find(agent => agent.available)?.id ||
+          nextAgents.find((agent) => agent.available)?.id ||
           nextAgents[0]?.id ||
-          '',
+          "",
       });
 
-      const selected = getState().selectedAnalysisId;
-      if (selected) {
+      if (selected && selectedStillExists) {
         const report = await getAnalysisReport(selected);
         setState({ selectedReport: report });
       }
     } catch (err) {
       setError(String(err));
     }
-  };
+  }, []);
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  const debounceRef = useRef<number | null>(null);
+  const pendingAnalysisIdsRef = useRef<Set<string>>(new Set());
+
+  useBackendEvent<DataChangedPayload>("analysis-data-changed", (payload) => {
+    pendingAnalysisIdsRef.current.add(payload.analysis_id);
+    if (debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = window.setTimeout(async () => {
+      debounceRef.current = null;
+      const changedIds = pendingAnalysisIdsRef.current;
+      pendingAnalysisIdsRef.current = new Set();
+      try {
+        const nextAnalyses = await getAllAnalyses();
+        const selected = getState().selectedAnalysisId;
+        const selectedStillExists = selected
+          ? nextAnalyses.some((analysis) => analysis.id === selected)
+          : false;
+
+        setState({
+          analyses: nextAnalyses,
+          ...(selected && !selectedStillExists
+            ? { selectedAnalysisId: null, selectedReport: null }
+            : {}),
+        });
+
+        if (
+          selected &&
+          selectedStillExists &&
+          changedIds.has(selected)
+        ) {
+          const report = await getAnalysisReport(selected);
+          if (getState().selectedAnalysisId === selected) {
+            setState({ selectedReport: report });
+          }
+        }
+      } catch (err) {
+        setError(String(err));
+      }
+    }, DATA_CHANGED_DEBOUNCE_MS);
+  });
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current !== null) {
+        window.clearTimeout(debounceRef.current);
+      }
+    },
+    [],
+  );
+
+  const selectAnalysis = useCallback(async (analysisId: string) => {
+    setError(null);
+
+    // Check if this analysis has an active in-memory run
+    const runs = getState().activeRuns;
+    const isRunning = Object.values(runs).some(
+      r => r.status === 'running' && getState().activeAnalysisId === analysisId
+    );
+
+    setState({
+      selectedAnalysisId: analysisId,
+      selectedReport: null,
+      view: "analysis",
+      analysisSubTab: isRunning ? "agent" : "report",
+    });
+
+    try {
+      const report = await getAnalysisReport(analysisId);
+      // Refine: if the run is still running according to the report, show agent tab
+      const runIsActive =
+        report?.analysis.active_run_id &&
+        Object.values(getState().activeRuns).some(
+          r => r.runId === report.analysis.active_run_id && r.status === 'running'
+        );
+      setState({
+        selectedReport: report,
+        ...(runIsActive ? { analysisSubTab: 'agent' } : {}),
+      });
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const changeView = useCallback((nextView: AppView) => {
+    setError(null);
+    setState({ view: nextView });
   }, []);
 
   return (
-    <div className="flex h-screen w-full flex-col bg-background text-foreground">
-      <div className="fixed left-1/2 top-6 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-background/80 px-2 py-1.5 shadow-sm backdrop-blur-xl">
-        <nav className="flex items-center gap-1 text-sm">
-          <NavButton
-            view="research"
-            label="Research"
-            icon={<MagnifyingGlass size={16} />}
-            currentView={view}
-          />
-          <NavButton
-            view="reports"
-            label="Reports"
-            icon={<ChartLineUp size={16} />}
-            currentView={view}
-          />
-          <NavButton
-            view="settings"
-            label="Settings"
-            icon={<Gear size={16} />}
-            currentView={view}
-          />
-        </nav>
-      </div>
-
-      <div className="fixed right-6 top-6 z-50 flex items-center gap-2">
-        {view === 'reports' && analyses.length > 0 && (
-          <select
-            className="rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs shadow-sm outline-none backdrop-blur-md"
-            value={selectedAnalysisId || ''}
-            onChange={async event => {
-              const id = event.target.value;
-              setState({ selectedAnalysisId: id, selectedReport: null });
-              if (id) {
-                const report = await getAnalysisReport(id);
-                setState({ selectedReport: report });
-              }
-            }}
-          >
-            <option value="" disabled>
-              Select report...
-            </option>
-            {analyses.map(analysis => (
-              <option key={analysis.id} value={analysis.id}>
-                {analysis.title}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      <main className="relative flex flex-1 flex-col overflow-hidden pt-20">
+    <SidebarProvider
+      className="h-screen min-h-0 overflow-hidden bg-background text-foreground"
+      style={{ "--sidebar-width": "17rem" } as CSSProperties}
+    >
+      <AppSidebar
+        analyses={analyses}
+        currentView={view}
+        selectedAnalysisId={selectedAnalysisId}
+        onViewChange={changeView}
+        onSelectAnalysis={selectAnalysis}
+      />
+      <SidebarInset className="h-screen min-w-0 overflow-hidden">
+        <div
+          data-tauri-drag-region
+          className="absolute left-0 right-0 top-0 z-10 h-3"
+        />
+        <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 md:hidden">
+          <SidebarTrigger />
+        </header>
         {error && (
           <div className="mx-6 mt-4 flex items-center gap-2 rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
             <WarningCircle size={16} />
             {error}
           </div>
         )}
-        <div className="flex-1 overflow-auto">
-          {view === 'research' && <ResearchPage agents={agents} onDone={refresh} />}
-          {view === 'reports' && <ReportsPage onRefresh={refresh} />}
-          {view === 'settings' && <SettingsPage agents={agents} />}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {view === "new-analysis" && (
+            <ResearchPage agents={agents} onDone={refresh} />
+          )}
+          {view === "analysis" && <AnalysisPage onRefresh={refresh} />}
+          {view === "settings" && <SettingsPage agents={agents} />}
         </div>
-      </main>
-    </div>
-  );
-}
-
-interface NavButtonProps {
-  view: AppView;
-  label: string;
-  icon: ReactNode;
-  currentView: AppView;
-}
-
-function NavButton({ view, label, icon, currentView }: NavButtonProps) {
-  const active = currentView === view;
-
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className={`flex items-center gap-1.5 rounded-full px-4 transition-colors ${
-        active
-          ? 'bg-secondary font-medium text-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-secondary/40 hover:text-foreground'
-      }`}
-      onClick={() => setState({ view })}
-    >
-      {icon}
-      {label}
-    </Button>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

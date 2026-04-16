@@ -26,10 +26,13 @@ fn main() {
             commands::get_all_analyses,
             commands::get_analysis_report,
             commands::delete_analysis,
+            commands::create_analysis,
             commands::generate_analysis,
             commands::stop_analysis,
+            commands::set_active_run,
+            commands::get_run_progress,
             commands::export_analysis_markdown,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running CrazyLines");
+        .expect("error while running Crazylines");
 }

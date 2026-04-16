@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-CrazyLines is a Rust/Tauri desktop app with a Vite React frontend. Rust application code lives in `src/`: `domain` contains core analysis types, `infra/db` handles SQLite persistence, `infra/acp` manages ACP agent integration and the analysis MCP server, and `commands` exposes Tauri IPC commands. Frontend code lives in `frontend/src`, with hooks in `hooks`, shared state in `store`, and TypeScript types in `types`. Support files are in `capabilities/`, `gen/schemas/`, `icons/`, and `docs/`.
+Crazylines is a Rust/Tauri desktop app with a Vite React frontend. Rust application code lives in `src/`: `domain` contains core analysis types, `infra/db` handles SQLite persistence, `infra/acp` manages ACP agent integration and the analysis MCP server, and `commands` exposes Tauri IPC commands. Frontend code lives in `frontend/src`, with hooks in `hooks`, shared state in `store`, and TypeScript types in `types`. Support files are in `capabilities/`, `gen/schemas/`, `icons/`, and `docs/`.
 
 ## Build, Test, and Development Commands
 

@@ -65,8 +65,10 @@ export interface ResearchPlan {
   run_id: string;
   intent: AnalysisIntent;
   summary: string;
+  decision_criteria: string[];
   planned_checks: string[];
   required_blocks: string[];
+  required_artifacts: string[];
   created_at: string;
 }
 
@@ -102,11 +104,54 @@ export interface MetricSnapshot {
   entity_id: string | null;
   metric: string;
   value: string;
+  numeric_value: number | null;
   unit: string | null;
   period: string | null;
   as_of: string;
   source_id: string;
   notes: string | null;
+}
+
+export type ArtifactKind =
+  | 'metric_table'
+  | 'comparison_matrix'
+  | 'scenario_matrix'
+  | 'bar_chart'
+  | 'line_chart'
+  | 'other';
+
+export interface ArtifactColumn {
+  key: string;
+  label: string;
+  unit: string | null;
+  description: string | null;
+}
+
+export interface ArtifactPoint {
+  label: string;
+  value: number;
+  source_id: string | null;
+  metric_id: string | null;
+}
+
+export interface ArtifactSeries {
+  label: string;
+  points: ArtifactPoint[];
+}
+
+export interface StructuredArtifact {
+  id: string;
+  run_id: string;
+  kind: ArtifactKind;
+  title: string;
+  summary: string;
+  columns: ArtifactColumn[];
+  rows: Record<string, unknown>[];
+  series: ArtifactSeries[];
+  evidence_ids: string[];
+  entity_ids: string[];
+  display_order: number;
+  created_at: string;
 }
 
 export type BlockKind =
@@ -158,6 +203,7 @@ export interface AnalysisReport {
   entities: Entity[];
   sources: Source[];
   metrics: MetricSnapshot[];
+  artifacts: StructuredArtifact[];
   blocks: AnalysisBlock[];
   final_stance: FinalStance | null;
 }
@@ -192,6 +238,7 @@ export type ProgressEventPayload =
   | { event: 'PlanSubmitted' }
   | { event: 'SourceSubmitted' }
   | { event: 'MetricSubmitted' }
+  | { event: 'ArtifactSubmitted' }
   | { event: 'BlockSubmitted' }
   | { event: 'StanceSubmitted' }
   | { event: 'Completed' }
@@ -214,4 +261,20 @@ export interface ProgressItem {
   message: string;
   timestamp: number;
   data?: unknown;
+}
+
+export type RunStatus = 'running' | 'completed' | 'error' | 'cancelled';
+
+export interface RunState {
+  runId: string;
+  agentId: string;
+  agentLabel: string;
+  status: RunStatus;
+  progress: ProgressItem[];
+  plan: PlanEntry[];
+}
+
+export interface DataChangedPayload {
+  analysis_id: string;
+  kind: string;
 }

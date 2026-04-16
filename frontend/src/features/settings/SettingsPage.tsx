@@ -1,14 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import {
-  getSettings,
-  updateSettings,
-} from '@/shared/api/commands';
-import type {
-  AgentCandidate,
-  AppSettings,
-} from '@/types';
-import { AgentStatusList } from './AgentStatusList';
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { getSettings, updateSettings } from "@/shared/api/commands";
+import type { AgentCandidate, AppSettings } from "@/types";
+import { AgentStatusList } from "./AgentStatusList";
 
 interface SettingsPageProps {
   agents: AgentCandidate[];
@@ -20,7 +15,9 @@ export function SettingsPage({ agents }: SettingsPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSettings().then(setSettings).catch(err => setError(String(err)));
+    getSettings()
+      .then(setSettings)
+      .catch((err) => setError(String(err)));
   }, []);
 
   const save = async () => {
@@ -29,7 +26,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
     try {
       const next = await updateSettings(settings);
       setSettings(next);
-      setSaved('Saved!');
+      setSaved("Saved!");
       setTimeout(() => setSaved(null), 1300);
     } catch (err) {
       setError(String(err));
@@ -41,7 +38,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
       <div>
         <h2 className="mb-2 text-xl font-semibold">Agents</h2>
         <p className="mb-4 text-xs text-muted-foreground">
-          CrazyLines uses local ACP agents. Check PATH or ENV overrides.
+          Crazylines uses local ACP agents. Check PATH or ENV overrides.
         </p>
         <AgentStatusList agents={agents} />
       </div>
@@ -57,10 +54,10 @@ export function SettingsPage({ agents }: SettingsPageProps) {
               <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Custom ACP Command
               </label>
-              <input
-                className="border border-border bg-transparent px-3 py-2 outline-none focus:border-primary/50"
-                value={settings.custom_agent_command || ''}
-                onChange={event =>
+              <Input
+                className="bg-transparent"
+                value={settings.custom_agent_command || ""}
+                onChange={(event) =>
                   setSettings({
                     ...settings,
                     custom_agent_command: event.target.value || null,
@@ -70,7 +67,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
             </div>
 
             <Button className="mt-4 font-semibold" onClick={save}>
-              {saved || 'Save Settings'}
+              {saved || "Save Settings"}
             </Button>
           </div>
         )}

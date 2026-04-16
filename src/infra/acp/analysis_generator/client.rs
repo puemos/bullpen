@@ -14,6 +14,7 @@ const CRAZYLINES_TOOLS: &[&str] = &[
     "submit_entity_resolution",
     "submit_source",
     "submit_metric_snapshot",
+    "submit_structured_artifact",
     "submit_analysis_block",
     "submit_final_stance",
     "finalize_analysis",
@@ -21,7 +22,7 @@ const CRAZYLINES_TOOLS: &[&str] = &[
 
 type PendingToolCallMap = HashMap<String, (String, String, Option<serde_json::Value>)>;
 
-pub(super) struct CrazyLinesClient {
+pub(super) struct CrazylinesClient {
     pub(super) messages: Arc<Mutex<Vec<String>>>,
     pub(super) thoughts: Arc<Mutex<Vec<String>>>,
     pub(super) finalization_received: Arc<Mutex<bool>>,
@@ -33,7 +34,7 @@ pub(super) struct CrazyLinesClient {
     last_sent_lengths: Arc<Mutex<HashMap<String, usize>>>,
 }
 
-impl CrazyLinesClient {
+impl CrazylinesClient {
     pub(super) fn new(progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>) -> Self {
         Self {
             messages: Arc::new(Mutex::new(Vec::new())),
@@ -134,7 +135,7 @@ impl CrazyLinesClient {
 }
 
 #[async_trait(?Send)]
-impl agent_client_protocol::Client for CrazyLinesClient {
+impl agent_client_protocol::Client for CrazylinesClient {
     async fn request_permission(
         &self,
         args: RequestPermissionRequest,
@@ -310,6 +311,11 @@ impl agent_client_protocol::Client for CrazyLinesClient {
                             Some("submit_metric_snapshot") => {
                                 if let Some(tx) = &self.progress {
                                     let _ = tx.send(ProgressEvent::MetricSubmitted);
+                                }
+                            }
+                            Some("submit_structured_artifact") => {
+                                if let Some(tx) = &self.progress {
+                                    let _ = tx.send(ProgressEvent::ArtifactSubmitted);
                                 }
                             }
                             Some("submit_analysis_block") => {

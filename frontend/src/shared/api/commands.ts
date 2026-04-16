@@ -24,8 +24,11 @@ export async function getAllAnalyses(): Promise<AnalysisSummary[]> {
   return invoke('get_all_analyses');
 }
 
-export async function getAnalysisReport(analysisId: string): Promise<AnalysisReport | null> {
-  return invoke('get_analysis_report', { analysisId });
+export async function getAnalysisReport(
+  analysisId: string,
+  runId?: string
+): Promise<AnalysisReport | null> {
+  return invoke('get_analysis_report', { analysisId, runId: runId ?? null });
 }
 
 export async function deleteAnalysis(analysisId: string): Promise<void> {
@@ -40,15 +43,29 @@ export async function exportAnalysisMarkdown(analysisId: string): Promise<string
   return invoke('export_analysis_markdown', { analysisId });
 }
 
+export async function createAnalysis(userPrompt: string): Promise<string> {
+  return invoke('create_analysis', { userPrompt });
+}
+
+export async function setActiveRun(analysisId: string, runId: string): Promise<void> {
+  return invoke('set_active_run', { analysisId, runId });
+}
+
+export async function getRunProgress(runId: string): Promise<ProgressEventPayload[]> {
+  return invoke('get_run_progress', { runId });
+}
+
 export async function generateAnalysis(
   userPrompt: string,
   agentId: string,
   runId: string,
+  analysisId: string,
   onProgress: Channel<ProgressEventPayload>
 ): Promise<{ analysis_id: string; run_id: string }> {
   return invoke('generate_analysis', {
     userPrompt,
     agentId,
+    analysisId,
     runId,
     onProgress,
   });

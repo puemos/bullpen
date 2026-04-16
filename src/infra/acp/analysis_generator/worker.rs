@@ -1,4 +1,4 @@
-use super::client::CrazyLinesClient;
+use super::client::CrazylinesClient;
 use crate::infra::acp::analysis_mcp_server::RunContext;
 use crate::prompts;
 use agent_client_protocol::{
@@ -46,6 +46,7 @@ pub enum ProgressEvent {
     PlanSubmitted,
     SourceSubmitted,
     MetricSubmitted,
+    ArtifactSubmitted,
     BlockSubmitted,
     StanceSubmitted,
     Finalized,
@@ -179,7 +180,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         }
     });
 
-    let client = CrazyLinesClient::new(progress_tx.clone());
+    let client = CrazylinesClient::new(progress_tx.clone());
     let messages = client.messages.clone();
     let thoughts = client.thoughts.clone();
     let finalization_received = client.finalization_received.clone();

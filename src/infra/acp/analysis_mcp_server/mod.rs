@@ -30,6 +30,10 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
             tool::create_submit_metric_snapshot_tool(config.clone()),
         )
         .tool(
+            "submit_structured_artifact",
+            tool::create_submit_structured_artifact_tool(config.clone()),
+        )
+        .tool(
             "submit_analysis_block",
             tool::create_submit_analysis_block_tool(config.clone()),
         )

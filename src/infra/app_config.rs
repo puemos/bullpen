@@ -53,7 +53,7 @@ fn config_path() -> PathBuf {
             return home
                 .join("Library")
                 .join("Application Support")
-                .join("CrazyLines")
+                .join("Crazylines")
                 .join("config.json");
         }
     }
@@ -62,7 +62,7 @@ fn config_path() -> PathBuf {
     {
         if let Some(appdata) = std::env::var_os("APPDATA") {
             return PathBuf::from(appdata)
-                .join("CrazyLines")
+                .join("Crazylines")
                 .join("config.json");
         }
     }

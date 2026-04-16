@@ -147,8 +147,10 @@ pub struct ResearchPlan {
     pub run_id: AnalysisRunId,
     pub intent: AnalysisIntent,
     pub summary: String,
+    pub decision_criteria: Vec<String>,
     pub planned_checks: Vec<String>,
     pub required_blocks: Vec<String>,
+    pub required_artifacts: Vec<String>,
     pub created_at: String,
 }
 
@@ -209,11 +211,95 @@ pub struct MetricSnapshot {
     pub entity_id: Option<String>,
     pub metric: String,
     pub value: String,
+    pub numeric_value: Option<f64>,
     pub unit: Option<String>,
     pub period: Option<String>,
     pub as_of: String,
     pub source_id: String,
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    MetricTable,
+    ComparisonMatrix,
+    ScenarioMatrix,
+    BarChart,
+    LineChart,
+    #[default]
+    Other,
+}
+
+impl fmt::Display for ArtifactKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::MetricTable => "metric_table",
+            Self::ComparisonMatrix => "comparison_matrix",
+            Self::ScenarioMatrix => "scenario_matrix",
+            Self::BarChart => "bar_chart",
+            Self::LineChart => "line_chart",
+            Self::Other => "other",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for ArtifactKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "metric_table" => Ok(Self::MetricTable),
+            "comparison_matrix" => Ok(Self::ComparisonMatrix),
+            "scenario_matrix" => Ok(Self::ScenarioMatrix),
+            "bar_chart" => Ok(Self::BarChart),
+            "line_chart" => Ok(Self::LineChart),
+            _ => Ok(Self::Other),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactColumn {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactPoint {
+    pub label: String,
+    pub value: f64,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub metric_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactSeries {
+    pub label: String,
+    pub points: Vec<ArtifactPoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuredArtifact {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub kind: ArtifactKind,
+    pub title: String,
+    pub summary: String,
+    pub columns: Vec<ArtifactColumn>,
+    pub rows: Vec<serde_json::Value>,
+    pub series: Vec<ArtifactSeries>,
+    pub evidence_ids: Vec<String>,
+    pub entity_ids: Vec<String>,
+    pub display_order: i64,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -352,6 +438,7 @@ pub struct AnalysisReport {
     pub entities: Vec<Entity>,
     pub sources: Vec<Source>,
     pub metrics: Vec<MetricSnapshot>,
+    pub artifacts: Vec<StructuredArtifact>,
     pub blocks: Vec<AnalysisBlock>,
     pub final_stance: Option<FinalStance>,
 }

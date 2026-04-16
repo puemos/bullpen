@@ -1,6 +1,6 @@
 # Architecture
 
-CrazyLines mirrors LaReview's layered shape while replacing diff review concepts with stock analysis concepts.
+Crazylines mirrors LaReview's layered shape while replacing diff review concepts with stock analysis concepts.
 
 ## Layers
 
@@ -17,7 +17,7 @@ CrazyLines mirrors LaReview's layered shape while replacing diff review concepts
 2. `generate_analysis` creates `Analysis` and `AnalysisRun` rows.
 3. The backend spawns the selected ACP agent.
 4. The ACP session mounts a stdio MCP server named `crazylines-analysis`.
-5. The system prompt instructs the agent to research with all available tools but submit output only through CrazyLines tools.
+5. The system prompt instructs the agent to research with all available tools but submit output only through Crazylines tools.
 6. MCP tool calls persist sources, metrics, blocks, and stance as they arrive.
 7. `finalize_analysis` validates the report and marks the run complete.
 8. The Reports page renders the persisted typed report.
@@ -28,4 +28,3 @@ CrazyLines mirrors LaReview's layered shape while replacing diff review concepts
 - No portfolio personalization or trade execution.
 - Source and metric metadata are first-class data.
 - Finalization is blocked if required evidence is missing.
-

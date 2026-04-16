@@ -3,6 +3,7 @@ import { CaretRight, Lightning } from "@phosphor-icons/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import PythonCode from "./PythonCode";
+import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 
 interface ToolCallCardProps {
@@ -12,25 +13,35 @@ interface ToolCallCardProps {
   arguments: string | null;
   result: string | null;
   status: "running" | "completed" | "failed";
-  displayTitle: string | null;
 }
 
 
 
 // --- Helpers ---
 
-function formatToolLabel(
+function cleanTitle(title: string): string {
+  return title.replace(/^mcp:\s*\S+\s*/, "").trim();
+}
+
+function primaryLabel(
   title: string,
   toolName: string | null,
-  displayTitle: string | null,
+  toolKind: string | null | undefined,
 ): string {
-  if (displayTitle) return displayTitle;
   if (toolName) return toolName.replace(/_/g, " ");
-  return title
-    .replace(/^mcp:\s*\S+\s*/, "")
-    .replace(/\(.*\)$/, "")
-    .replace(/_/g, " ")
-    .trim();
+  if (toolKind) return toolKind;
+  return cleanTitle(title).replace(/\(.*\)$/, "").replace(/_/g, " ").trim();
+}
+
+function secondaryLabel(title: string, primary: string): string | null {
+  const cleaned = cleanTitle(title);
+  if (!cleaned) return null;
+  const p = primary.toLowerCase().trim();
+  const c = cleaned.toLowerCase();
+  if (!p) return cleaned;
+  if (c === p) return null;
+  if (c.includes(p)) return null;
+  return cleaned;
 }
 
 function extractPythonCode(args: string | null): string | null {
@@ -112,10 +123,10 @@ function prettyJson(raw: string): string {
 export default function ToolCallCard({
   title,
   toolName,
+  toolKind,
   arguments: args,
   result,
   status,
-  displayTitle,
 }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -125,14 +136,17 @@ export default function ToolCallCard({
   const subWorkerResult = execResult ? parseSubWorkerResult(execResult.result) : null;
   const hasDetails = !!(args || result);
 
-  const label = formatToolLabel(title, toolName, displayTitle);
+  const primary = primaryLabel(title, toolName, toolKind);
+  const secondary = secondaryLabel(title, primary);
 
   return (
     <div className="w-full">
-      <button
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => hasDetails && setExpanded(!expanded)}
         className={cn(
-          "group flex w-full items-center gap-3 py-1 text-left transition-colors",
+          "group h-auto w-full justify-start gap-3 px-0 py-1 text-left hover:bg-transparent hover:text-inherit",
           hasDetails ? "cursor-pointer" : "cursor-default",
         )}
       >
@@ -150,8 +164,13 @@ export default function ToolCallCard({
         {/* Label */}
         <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
           <span className="font-mono text-xs text-muted-foreground truncate opacity-70 group-hover:opacity-100 transition-opacity">
-            {label}
+            {primary}
           </span>
+          {secondary && (
+            <span className="text-xs text-muted-foreground/50 truncate min-w-0">
+              {secondary}
+            </span>
+          )}
           {status === "running" && (
             <span className="text-xs text-muted-foreground/40 italic">running...</span>
           )}
@@ -167,7 +186,7 @@ export default function ToolCallCard({
             <CaretRight weight="bold" size={10} />
           </motion.div>
         )}
-      </button>
+      </Button>
 
       <AnimatePresence>
         {expanded && hasDetails && (
