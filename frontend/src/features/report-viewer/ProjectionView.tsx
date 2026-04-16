@@ -85,6 +85,7 @@ function ProjectionCard({
           <ScenarioColumn
             key={`${scenario.label}-${i}`}
             scenario={scenario}
+            currentValue={projection.current_value}
             indexLabel={String(i + 1).padStart(2, '0')}
           />
         ))}
@@ -122,6 +123,37 @@ function ProjectionCard({
   );
 }
 
+type GaugeMarker = {
+  key: string;
+  x: number;
+  labelTop: string;
+  labelBottom: string;
+  topClassName: string;
+  bottomClassName: string;
+  dot: { fillClassName: string } | null;
+  tick: boolean;
+};
+
+function assignSlots(markers: GaugeMarker[], minGap: number): number[] {
+  const sorted = markers
+    .map((m, i) => ({ i, x: m.x }))
+    .sort((a, b) => a.x - b.x);
+  const slots = new Array<number>(markers.length).fill(0);
+  const lastXPerSlot: number[] = [];
+  for (const { i, x } of sorted) {
+    let slot = 0;
+    while (
+      slot < lastXPerSlot.length &&
+      x - lastXPerSlot[slot] < minGap
+    ) {
+      slot += 1;
+    }
+    lastXPerSlot[slot] = x;
+    slots[i] = slot;
+  }
+  return slots;
+}
+
 function ProjectionGauge({
   scenarios,
   currentValue,
@@ -136,81 +168,125 @@ function ProjectionGauge({
   const max = Math.max(...values);
   const span = max - min || Math.max(1, Math.abs(max) * 0.1);
   const width = 880;
-  const height = 72;
+  const height = 116;
   const padX = 40;
+  const midY = height / 2;
 
   const project = (value: number) =>
     padX + ((value - min) / span) * (width - padX * 2);
 
-  const currentX = project(currentValue);
+  const markers: GaugeMarker[] = [
+    {
+      key: 'now',
+      x: project(currentValue),
+      labelTop: 'now',
+      labelBottom: currentLabel,
+      topClassName:
+        'fill-muted-foreground text-[10px] font-mono uppercase tracking-[0.16em]',
+      bottomClassName: 'fill-foreground text-[11px] font-mono tabular-nums',
+      dot: null,
+      tick: true,
+    },
+    ...scenarios.map((scenario, i): GaugeMarker => {
+      const accent = scenarioAccent(scenario.label);
+      return {
+        key: `${scenario.label}-${i}`,
+        x: project(scenario.target_value),
+        labelTop: scenario.label,
+        labelBottom: scenario.target_label,
+        topClassName: cn(
+          'text-[10px] font-mono uppercase tracking-[0.16em]',
+          accent.text,
+        ),
+        bottomClassName: 'fill-foreground text-[11px] font-mono tabular-nums',
+        dot: { fillClassName: accent.fill },
+        tick: false,
+      };
+    }),
+  ];
+
+  const MIN_GAP = 64;
+  const SLOT_STEP = 18;
+  const BASE_TOP_OFFSET = 14;
+  const BASE_BOTTOM_OFFSET = 24;
+  const slots = assignSlots(markers, MIN_GAP);
 
   return (
     <div className="space-y-3">
       <div className="border-y border-border py-4">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" className="h-24 w-full">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" className="h-28 w-full">
           <line
             x1={padX}
             x2={width - padX}
-            y1={height / 2}
-            y2={height / 2}
+            y1={midY}
+            y2={midY}
             stroke="currentColor"
             strokeWidth="1"
             className="text-border"
           />
-          <line
-            x1={currentX}
-            x2={currentX}
-            y1={height / 2 - 14}
-            y2={height / 2 + 14}
-            stroke="currentColor"
-            strokeWidth="1.5"
-            className="text-foreground"
-          />
-          <text
-            x={currentX}
-            y={height / 2 - 20}
-            textAnchor="middle"
-            className="fill-muted-foreground text-[10px] font-mono uppercase tracking-[0.16em]"
-          >
-            now
-          </text>
-          <text
-            x={currentX}
-            y={height / 2 + 28}
-            textAnchor="middle"
-            className="fill-foreground text-[11px] font-mono tabular-nums"
-          >
-            {currentLabel}
-          </text>
-          {scenarios.map((scenario, i) => {
-            const cx = project(scenario.target_value);
-            const accent = scenarioAccent(scenario.label);
+          {markers.map((marker, i) => {
+            const slot = slots[i];
+            const topY = midY - (BASE_TOP_OFFSET + slot * SLOT_STEP);
+            const bottomY = midY + (BASE_BOTTOM_OFFSET + slot * SLOT_STEP);
+            const tickExtent = 14 + slot * SLOT_STEP;
             return (
-              <g key={`${scenario.label}-${i}`}>
-                <circle
-                  cx={cx}
-                  cy={height / 2}
-                  r={4.5}
-                  className={accent.fill}
-                />
+              <g key={marker.key}>
+                {marker.tick && (
+                  <line
+                    x1={marker.x}
+                    x2={marker.x}
+                    y1={midY - tickExtent}
+                    y2={midY + tickExtent}
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    className="text-foreground"
+                  />
+                )}
+                {slot > 0 && !marker.tick && (
+                  <>
+                    <line
+                      x1={marker.x}
+                      x2={marker.x}
+                      y1={midY - 6}
+                      y2={topY + 4}
+                      stroke="currentColor"
+                      strokeWidth="1"
+                      className="text-border"
+                    />
+                    <line
+                      x1={marker.x}
+                      x2={marker.x}
+                      y1={midY + 6}
+                      y2={bottomY - 10}
+                      stroke="currentColor"
+                      strokeWidth="1"
+                      className="text-border"
+                    />
+                  </>
+                )}
+                {marker.dot && (
+                  <circle
+                    cx={marker.x}
+                    cy={midY}
+                    r={4.5}
+                    className={marker.dot.fillClassName}
+                  />
+                )}
                 <text
-                  x={cx}
-                  y={height / 2 - 14}
+                  x={marker.x}
+                  y={topY}
                   textAnchor="middle"
-                  className={cn(
-                    'text-[10px] font-mono uppercase tracking-[0.16em]',
-                    accent.text,
-                  )}
+                  className={marker.topClassName}
                 >
-                  {scenario.label}
+                  {marker.labelTop}
                 </text>
                 <text
-                  x={cx}
-                  y={height / 2 + 24}
+                  x={marker.x}
+                  y={bottomY}
                   textAnchor="middle"
-                  className="fill-foreground text-[11px] font-mono tabular-nums"
+                  className={marker.bottomClassName}
                 >
-                  {scenario.target_label}
+                  {marker.labelBottom}
                 </text>
               </g>
             );
@@ -220,7 +296,7 @@ function ProjectionGauge({
       <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground">
         {scenarios.map((scenario, i) => (
           <span key={`${scenario.label}-${i}`}>
-            {scenario.label} · {scenario.target_label} ({formatSignedPct(scenario.upside_pct)})
+            {scenario.label} · {scenario.target_label} ({formatUpside(currentValue, scenario.target_value)})
           </span>
         ))}
       </div>
@@ -265,9 +341,11 @@ function ProbabilityBar({ scenarios }: { scenarios: ProjectionScenario[] }) {
 
 function ScenarioColumn({
   scenario,
+  currentValue,
   indexLabel,
 }: {
   scenario: ProjectionScenario;
+  currentValue: number;
   indexLabel: string;
 }) {
   const accent = scenarioAccent(scenario.label);
@@ -286,7 +364,7 @@ function ScenarioColumn({
             {scenario.target_label}
           </span>
           <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-            {formatSignedPct(scenario.upside_pct)}
+            {formatUpside(currentValue, scenario.target_value)}
           </span>
         </div>
         <div className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
@@ -408,8 +486,9 @@ function formatMetric(metric: string) {
   return metric.replace(/_/g, ' ');
 }
 
-function formatSignedPct(value: number): string {
-  const pct = value * 100;
+function formatUpside(current: number, target: number): string {
+  if (!Number.isFinite(current) || Math.abs(current) < 1e-9) return '—';
+  const pct = ((target - current) / current) * 100;
   const sign = pct >= 0 ? '+' : '';
   return `${sign}${pct.toFixed(1)}%`;
 }

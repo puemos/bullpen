@@ -47,14 +47,24 @@ export function MetricList({ metrics, entityMap, sourceMap }: MetricListProps) {
               )}
             </div>
             <div className="flex items-baseline gap-2 whitespace-nowrap text-right">
-              <span className="font-mono text-[14px] tabular-nums text-foreground">
-                {formatNumeric(metric.numeric_value)}
-              </span>
-              {metric.unit && (
-                <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-                  {metric.unit}
-                </span>
-              )}
+              {(() => {
+                const { value, suffix } = formatMetricValue(
+                  metric.numeric_value,
+                  metric.unit,
+                );
+                return (
+                  <>
+                    <span className="font-mono text-[14px] tabular-nums text-foreground">
+                      {value}
+                    </span>
+                    {suffix && (
+                      <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
+                        {suffix}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
               <MetricDelta
                 changePct={metric.change_pct}
                 priorValue={metric.prior_value}
@@ -77,4 +87,30 @@ function formatNumeric(value: number): string {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: maxFractionDigits,
   }).format(value);
+}
+
+function formatMetricValue(
+  value: number,
+  unit: string | null,
+): { value: string; suffix: string | null } {
+  if (!unit) return { value: formatNumeric(value), suffix: null };
+  const u = unit.trim();
+  if (u === '') return { value: formatNumeric(value), suffix: null };
+  if (u === '%') return { value: `${formatNumeric(value)}%`, suffix: null };
+  if (u.toUpperCase() === 'USD') {
+    const abs = Math.abs(value);
+    const maxFractionDigits = abs >= 1000 ? 0 : abs >= 10 ? 1 : 2;
+    return {
+      value: new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: maxFractionDigits,
+      }).format(value),
+      suffix: null,
+    };
+  }
+  if (u === 'x' || u === 'X') {
+    return { value: `${formatNumeric(value)}x`, suffix: null };
+  }
+  return { value: formatNumeric(value), suffix: u };
 }

@@ -204,16 +204,21 @@ function DecisionCriteria({ criteria }: { criteria: string[] }) {
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-5">
       <Eyebrow>Decision criteria</Eyebrow>
-      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-foreground/80">
+      <ol className="divide-y divide-border/60 text-[13.5px] text-foreground/85">
         {criteria.map((criterion, index) => (
-          <span key={criterion} className="inline-flex items-baseline gap-1.5">
-            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
+          <li
+            key={criterion}
+            className="flex items-baseline gap-3 py-2 first:pt-0 last:pb-0"
+          >
+            <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
               {String(index + 1).padStart(2, '0')}
             </span>
-            {criterion.replace(/^\s*\d+[.)]\s+/, '')}
-          </span>
+            <span className="leading-[1.55]">
+              {criterion.replace(/^\s*\d+[.)]\s+/, '')}
+            </span>
+          </li>
         ))}
-      </div>
+      </ol>
     </div>
   );
 }

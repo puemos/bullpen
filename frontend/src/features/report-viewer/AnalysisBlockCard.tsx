@@ -91,12 +91,23 @@ function EvidenceRow({
                 </a>
               </TooltipTrigger>
               {source && (
-                <TooltipContent className="max-w-xs space-y-1 text-left">
-                  <p className="font-medium">{source.title}</p>
+                <TooltipContent
+                  variant="editorial"
+                  sideOffset={6}
+                  className="max-w-xs space-y-1.5 text-left"
+                >
+                  <span className="block font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Source
+                  </span>
+                  <p className="text-[13px] font-medium leading-snug text-foreground">
+                    {source.title}
+                  </p>
                   {source.publisher && (
-                    <p className="text-muted-foreground">{source.publisher}</p>
+                    <p className="text-[12px] text-foreground/70">
+                      {source.publisher}
+                    </p>
                   )}
-                  <p className="text-muted-foreground">
+                  <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
                     {source.reliability} reliability
                   </p>
                 </TooltipContent>

@@ -6,6 +6,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import type { ArtifactPoint, StructuredArtifact } from '@/types';
 import { Eyebrow } from '@/components/ui/editorial';
 
@@ -59,13 +60,28 @@ export function StructuredArtifactView({ artifact, isFirst }: StructuredArtifact
 }
 
 function ArtifactTable({ artifact }: { artifact: StructuredArtifact }) {
+  const columnIsNumeric = artifact.columns.map(column =>
+    artifact.rows.every(row => {
+      const value = row[column.key];
+      return value === null || value === undefined || typeof value === 'number';
+    }),
+  );
+
   return (
     <div className="overflow-x-auto">
       <Table className="text-[13px]">
         <TableHeader>
           <TableRow className="border-b border-border">
-            {artifact.columns.map(column => (
-              <TableHead key={column.key} className="px-3 text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+            {artifact.columns.map((column, colIndex) => (
+              <TableHead
+                key={column.key}
+                className={cn(
+                  'px-3 align-top text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground',
+                  columnIsNumeric[colIndex]
+                    ? 'min-w-[96px] whitespace-nowrap text-right'
+                    : 'min-w-[180px] max-w-[420px]',
+                )}
+              >
                 {column.label}
                 {column.unit && (
                   <span className="ml-1 normal-case tracking-normal">
@@ -79,17 +95,18 @@ function ArtifactTable({ artifact }: { artifact: StructuredArtifact }) {
         <TableBody>
           {artifact.rows.map((row, index) => (
             <TableRow key={index} className="border-b border-border/60">
-              {artifact.columns.map(column => {
+              {artifact.columns.map((column, colIndex) => {
                 const value = row[column.key];
-                const isNumber = typeof value === 'number';
+                const numeric = columnIsNumeric[colIndex];
                 return (
                   <TableCell
                     key={column.key}
-                    className={
-                      isNumber
-                        ? 'px-3 font-mono tabular-nums'
-                        : 'px-3 max-w-[280px]'
-                    }
+                    className={cn(
+                      'px-3 align-top',
+                      numeric
+                        ? 'min-w-[96px] whitespace-nowrap text-right font-mono tabular-nums'
+                        : 'min-w-[180px] max-w-[420px] whitespace-normal leading-[1.55]',
+                    )}
                   >
                     {formatValue(value)}
                   </TableCell>
