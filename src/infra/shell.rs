@@ -154,11 +154,11 @@ fn should_load_shell_environment() -> bool {
 #[cfg(unix)]
 fn capture_login_shell_environment() -> Option<HashMap<String, String>> {
     let shell = system_shell_path()?;
-    let home_dir = home::home_dir()?;
+    let home_dir = dirs::home_dir()?;
     let exe_path = std::env::current_exe().ok()?;
 
-    let home_arg = shell_escape_arg(&home_dir);
-    let exe_arg = shell_escape_arg(&exe_path);
+    let home_arg = shell_escape_arg(&home_dir)?;
+    let exe_arg = shell_escape_arg(&exe_path)?;
     let command = format!("cd {home_arg}; {exe_arg} --printenv");
 
     let mut shell_command = Command::new(&shell);
@@ -220,13 +220,13 @@ fn apply_shell_environment(env: HashMap<String, String>) {
 }
 
 #[cfg(unix)]
-fn shell_escape_arg(path: &Path) -> String {
+fn shell_escape_arg(path: &Path) -> Option<String> {
     shell_escape_value(path.as_os_str())
 }
 
 #[cfg(unix)]
-fn shell_escape_value(value: &OsStr) -> String {
-    let value = value.to_string_lossy();
+fn shell_escape_value(value: &OsStr) -> Option<String> {
+    let value = value.to_str()?;
     let mut escaped = String::with_capacity(value.len() + 2);
     escaped.push('\'');
     for ch in value.chars() {
@@ -237,7 +237,7 @@ fn shell_escape_value(value: &OsStr) -> String {
         }
     }
     escaped.push('\'');
-    escaped
+    Some(escaped)
 }
 
 fn candidate_names(command: &str) -> Vec<OsString> {

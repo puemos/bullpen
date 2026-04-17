@@ -372,4 +372,44 @@ mod tests {
         assert_eq!(flag, Some(("--model".into(), "sonnet".into())));
         assert!(env.is_none());
     }
+
+    #[test]
+    fn resolve_trims_empty_model_id() {
+        let c = build(vec![("sonnet", "Sonnet")], Some("--model"), None, None);
+        let (flag, env) = c.resolve_model(Some("   "));
+        assert!(flag.is_none() && env.is_none());
+    }
+
+    #[test]
+    fn resolve_emits_both_flag_and_env_when_candidate_has_both() {
+        let c = build(
+            vec![("gpt-5", "GPT-5")],
+            Some("--model"),
+            None,
+            Some("OPENAI_MODEL"),
+        );
+        let (flag, env) = c.resolve_model(Some("gpt-5"));
+        assert_eq!(flag, Some(("--model".into(), "gpt-5".into())));
+        assert_eq!(env, Some(("OPENAI_MODEL".into(), "gpt-5".into())));
+    }
+
+    #[test]
+    fn resolve_skips_blank_flag_and_env_strings() {
+        let c = build(vec![("sonnet", "Sonnet")], Some("   "), None, Some("   "));
+        let (flag, env) = c.resolve_model(Some("sonnet"));
+        assert!(flag.is_none());
+        assert!(env.is_none());
+    }
+
+    #[test]
+    fn candidate_lookup_never_empty_and_has_stable_ids() {
+        let candidates = list_agent_candidates();
+        assert!(!candidates.is_empty());
+        for expected in ["codex", "claude", "gemini", "qwen", "kimi", "opencode"] {
+            assert!(
+                candidates.iter().any(|c| c.id == expected),
+                "missing built-in agent id {expected}",
+            );
+        }
+    }
 }

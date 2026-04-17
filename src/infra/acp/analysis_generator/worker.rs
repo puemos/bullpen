@@ -1,5 +1,6 @@
 use super::client::BullpenClient;
-use crate::infra::acp::analysis_mcp_server::RunContext;
+use crate::domain::RunContext;
+use crate::infra::progress::ProgressEventPayload;
 use crate::prompts;
 use agent_client_protocol::{
     Agent, ClientCapabilities, ClientSideConnection, ContentBlock, FileSystemCapability,
@@ -7,8 +8,9 @@ use agent_client_protocol::{
     ProtocolVersion, TextContent,
 };
 use anyhow::{Context, Result};
-use futures::future::LocalBoxFuture;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,39 +22,7 @@ use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone)]
-pub enum ProgressEvent {
-    MessageDelta {
-        id: String,
-        delta: String,
-    },
-    ThoughtDelta {
-        id: String,
-        delta: String,
-    },
-    ToolCallStarted {
-        tool_call_id: String,
-        title: String,
-        kind: String,
-    },
-    ToolCallComplete {
-        tool_call_id: String,
-        status: String,
-        title: String,
-        raw_input: Option<serde_json::Value>,
-        raw_output: Option<serde_json::Value>,
-    },
-    Plan(agent_client_protocol::Plan),
-    LocalLog(String),
-    PlanSubmitted,
-    SourceSubmitted,
-    MetricSubmitted,
-    ArtifactSubmitted,
-    BlockSubmitted,
-    StanceSubmitted,
-    ProjectionSubmitted,
-    Finalized,
-}
+pub type ProgressTx = tokio::sync::mpsc::UnboundedSender<ProgressEventPayload>;
 
 pub struct GenerateAnalysisInput {
     pub run_context: RunContext,
@@ -60,7 +30,7 @@ pub struct GenerateAnalysisInput {
     pub agent_args: Vec<String>,
     pub model_flag: Option<(String, String)>,
     pub model_env: Option<(String, String)>,
-    pub progress_tx: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
+    pub progress_tx: Option<ProgressTx>,
     pub mcp_server_binary: Option<PathBuf>,
     pub db_path: PathBuf,
     pub timeout_secs: Option<u64>,
@@ -86,9 +56,30 @@ pub struct AcpCancelled;
 #[error("agent timed out after {0}s")]
 pub struct AcpTimeout(pub u64);
 
-pub async fn generate_with_acp(input: GenerateAnalysisInput) -> Result<GenerateAnalysisResult> {
-    let (sender, receiver) = futures::channel::oneshot::channel();
+/// RAII guard that cancels its token when dropped.
+///
+/// The worker runs on a detached OS thread whose lifetime is not bound to the
+/// parent future. If the parent is dropped (Tauri command cancelled, panic,
+/// app shutdown) the detached thread would otherwise keep running and the
+/// spawned agent child process would survive — `kill_on_drop` only fires when
+/// the `Child` is dropped on the thread that owns it. Cancelling the token
+/// forces the worker's `select!` to take the cancellation branch, which kills
+/// the child and tears everything down cleanly.
+struct CancelOnDrop(CancellationToken);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+pub async fn generate_with_acp(mut input: GenerateAnalysisInput) -> Result<GenerateAnalysisResult> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
     let timeout_secs = input.timeout_secs.unwrap_or(1800);
+
+    let cancel_token = input.cancel_token.clone().unwrap_or_default();
+    input.cancel_token = Some(cancel_token.clone());
+    let _cancel_guard = CancelOnDrop(cancel_token);
 
     thread::spawn(move || {
         let runtime = Builder::new_current_thread().enable_all().build();
@@ -147,7 +138,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
             guard.push(msg.clone());
         }
         if let Some(tx) = &progress_tx {
-            let _ = tx.send(ProgressEvent::LocalLog(msg));
+            let _ = tx.send(ProgressEventPayload::Log(msg));
         }
     };
 
@@ -203,7 +194,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
                 guard.push(msg.clone());
             }
             if let Some(tx) = &stderr_tx {
-                let _ = tx.send(ProgressEvent::LocalLog(msg));
+                let _ = tx.send(ProgressEventPayload::Log(msg));
             }
         }
     });
@@ -215,7 +206,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
 
     let stdin_compat = stdin.compat_write();
     let stdout_compat = stdout.compat();
-    let spawn_fn = |fut: LocalBoxFuture<'static, ()>| {
+    let spawn_fn = |fut: Pin<Box<dyn Future<Output = ()> + 'static>>| {
         tokio::task::spawn_local(fut);
     };
     let (connection, io_future) =
@@ -346,10 +337,15 @@ fn resolve_mcp_server_path(override_path: Option<&PathBuf>, current_exe: &Path) 
 
 #[cfg(unix)]
 fn kill_process_group(pid: u32) {
-    if pid != 0 {
-        unsafe {
-            libc::killpg(pid as i32, libc::SIGKILL);
-        }
+    if pid == 0 {
+        return;
+    }
+    let Ok(signed_pid) = i32::try_from(pid) else {
+        log::warn!("refusing to kill process group: pid {pid} does not fit in i32");
+        return;
+    };
+    unsafe {
+        libc::killpg(signed_pid, libc::SIGKILL);
     }
 }
 

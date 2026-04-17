@@ -54,7 +54,7 @@ fn config_path() -> PathBuf {
 
     #[cfg(target_os = "macos")]
     {
-        if let Some(home) = home::home_dir() {
+        if let Some(home) = dirs::home_dir() {
             return home
                 .join("Library")
                 .join("Application Support")
@@ -75,7 +75,7 @@ fn config_path() -> PathBuf {
         if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
             return PathBuf::from(xdg).join("bullpen").join("config.json");
         }
-        if let Some(home) = home::home_dir() {
+        if let Some(home) = dirs::home_dir() {
             return home.join(".config").join("bullpen").join("config.json");
         }
     }

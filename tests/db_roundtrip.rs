@@ -219,6 +219,73 @@ fn source_with_all_reliability_levels_roundtrips() {
     assert_eq!(report.sources.len(), 4);
 }
 
+fn seed_analysis_with_runs(db: &Database, analysis_id: &str, run_statuses: &[AnalysisStatus]) {
+    db.save_analysis(&analysis_fixture(analysis_id)).unwrap();
+    for (idx, status) in run_statuses.iter().enumerate() {
+        let run_id = format!("{analysis_id}-r{idx}");
+        let mut run = run_fixture(&run_id, analysis_id);
+        run.status = *status;
+        db.save_run(&run).unwrap();
+    }
+}
+
+fn analysis_status(db: &Database, analysis_id: &str) -> AnalysisStatus {
+    db.list_analyses()
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == analysis_id)
+        .map(|s| s.status)
+        .unwrap()
+}
+
+#[test]
+fn recompute_analysis_status_precedence_matrix() {
+    use AnalysisStatus::{Cancelled, Completed, Failed, Queued, Running};
+
+    let cases: &[(&str, &[AnalysisStatus], AnalysisStatus)] = &[
+        (
+            "running-wins-over-completed",
+            &[Running, Completed],
+            Running,
+        ),
+        ("running-wins-over-failed", &[Running, Failed], Running),
+        (
+            "running-wins-over-cancelled",
+            &[Running, Cancelled],
+            Running,
+        ),
+        ("failed-wins-over-completed", &[Failed, Completed], Failed),
+        ("failed-wins-over-cancelled", &[Failed, Cancelled], Failed),
+        ("all-cancelled", &[Cancelled, Cancelled], Cancelled),
+        (
+            "cancelled-with-completed-is-completed",
+            &[Cancelled, Completed],
+            Completed,
+        ),
+        ("completed-with-queued", &[Completed, Queued], Completed),
+        ("only-queued", &[Queued, Queued], Queued),
+    ];
+
+    for (label, statuses, expected) in cases {
+        let (db, _dir) = open_in_tempdir();
+        seed_analysis_with_runs(&db, label, statuses);
+        db.recompute_analysis_status(label).unwrap();
+        assert_eq!(
+            analysis_status(&db, label),
+            *expected,
+            "case {label}: statuses {statuses:?}",
+        );
+    }
+}
+
+#[test]
+fn recompute_analysis_status_with_no_runs_is_queued() {
+    let (db, _dir) = open_in_tempdir();
+    db.save_analysis(&analysis_fixture("no-runs")).unwrap();
+    db.recompute_analysis_status("no-runs").unwrap();
+    assert_eq!(analysis_status(&db, "no-runs"), AnalysisStatus::Queued);
+}
+
 #[test]
 fn update_analysis_metadata_is_atomic_across_fields() {
     let (db, _dir) = open_in_tempdir();

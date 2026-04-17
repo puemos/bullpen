@@ -5,11 +5,11 @@ pub use error::CommandError;
 
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
+    RunContext,
 };
 use crate::infra::acp::analysis_generator::{
-    AcpCancelled, GenerateAnalysisInput, ProgressEvent, generate_with_acp,
+    AcpCancelled, GenerateAnalysisInput, generate_with_acp,
 };
-use crate::infra::acp::analysis_mcp_server::RunContext;
 use crate::infra::acp::{AgentCandidate, list_agent_candidates};
 use crate::infra::app_config::{AppConfig, load_config, save_config};
 use crate::state::AppState;
@@ -90,6 +90,8 @@ pub async fn stop_analysis(state: State<'_, AppState>, run_id: String) -> Result
     };
     if let Some(token) = token {
         token.cancel();
+    } else {
+        log::warn!("stop_analysis: no active run ({run_id})");
     }
     Ok(())
 }
@@ -183,6 +185,7 @@ pub async fn export_analysis_html(
 }
 
 const DEFAULT_PUBLISH_URL: &str = "https://pagedrop.dev/api/v1/sites";
+const PUBLISH_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PublishedReport {
@@ -221,7 +224,7 @@ pub async fn publish_analysis_html(
         "title": title,
     });
 
-    let response = client
+    let mut response = client
         .post(&endpoint)
         .header("Content-Type", "application/json")
         .json(&body)
@@ -230,10 +233,31 @@ pub async fn publish_analysis_html(
         .map_err(|err| CommandError::new(format!("publish failed: {err}")))?;
 
     let status = response.status();
-    let text = response
-        .text()
+
+    if let Some(declared) = response.content_length()
+        && declared > PUBLISH_RESPONSE_MAX_BYTES as u64
+    {
+        return Err(CommandError::new(format!(
+            "publish failed: response too large ({declared} bytes, max {PUBLISH_RESPONSE_MAX_BYTES})"
+        )));
+    }
+
+    let mut buf = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|err| CommandError::new(format!("publish failed: read body: {err}")))?;
+        .map_err(|err| CommandError::new(format!("publish failed: read body: {err}")))?
+    {
+        if buf.len() + chunk.len() > PUBLISH_RESPONSE_MAX_BYTES {
+            return Err(CommandError::new(format!(
+                "publish failed: response exceeded {PUBLISH_RESPONSE_MAX_BYTES} bytes"
+            )));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    let text = String::from_utf8(buf)
+        .map_err(|err| CommandError::new(format!("publish failed: non-utf8 body: {err}")))?;
 
     if !status.is_success() {
         return Err(CommandError::new(format!(
@@ -241,16 +265,18 @@ pub async fn publish_analysis_html(
         )));
     }
 
-    let envelope: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|err| CommandError::new(format!("publish failed: parse: {err}: {text}")))?;
+    parse_publish_envelope(&text).map_err(CommandError::new)
+}
+
+fn parse_publish_envelope(text: &str) -> Result<PublishedReport, String> {
+    let envelope: serde_json::Value = serde_json::from_str(text)
+        .map_err(|err| format!("publish failed: parse: {err}: {text}"))?;
 
     let data = envelope.get("data").unwrap_or(&envelope);
     let url = data
         .get("url")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            CommandError::new(format!("publish failed: missing url in response: {text}"))
-        })?
+        .ok_or_else(|| format!("publish failed: missing url in response: {text}"))?
         .to_string();
     let site_id = data
         .get("siteId")
@@ -390,8 +416,29 @@ pub async fn generate_analysis(
 
     let db_path = {
         let db = &state.db;
-        db.save_run(&run)?;
-        db.set_active_run_if_empty(&analysis_id, &run_id)?;
+        db.with_tx(|tx| {
+            tx.execute(
+                "INSERT OR REPLACE INTO analysis_runs
+                (id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    run.id,
+                    run.analysis_id,
+                    run.agent_id,
+                    run.model_id,
+                    run.prompt_text,
+                    run.status.to_string(),
+                    run.started_at,
+                    run.completed_at,
+                    run.error
+                ],
+            )?;
+            tx.execute(
+                "UPDATE analyses SET active_run_id = ?1 WHERE id = ?2 AND active_run_id IS NULL",
+                rusqlite::params![run_id, analysis_id],
+            )?;
+            Ok(())
+        })?;
         db.path().clone()
     };
 
@@ -409,7 +456,7 @@ pub async fn generate_analysis(
         created_at: now,
     };
 
-    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressEvent>();
+    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressEventPayload>();
     let progress_channel = on_progress.clone();
     let run_id_clone = run_id.clone();
     let db_clone = state.db.clone();
@@ -432,57 +479,7 @@ pub async fn generate_analysis(
     });
 
     tauri::async_runtime::spawn(async move {
-        while let Some(event) = progress_rx.recv().await {
-            let payload = match event {
-                ProgressEvent::MessageDelta { id, delta } => {
-                    ProgressEventPayload::MessageDelta { id, delta }
-                }
-                ProgressEvent::ThoughtDelta { id, delta } => {
-                    ProgressEventPayload::ThoughtDelta { id, delta }
-                }
-                ProgressEvent::ToolCallStarted {
-                    tool_call_id,
-                    title,
-                    kind,
-                } => ProgressEventPayload::ToolCallStarted {
-                    tool_call_id,
-                    title,
-                    kind,
-                },
-                ProgressEvent::ToolCallComplete {
-                    tool_call_id,
-                    status,
-                    title,
-                    raw_input,
-                    raw_output,
-                } => ProgressEventPayload::ToolCallComplete {
-                    tool_call_id,
-                    status,
-                    title,
-                    raw_input,
-                    raw_output,
-                },
-                ProgressEvent::Plan(plan) => ProgressEventPayload::Plan(FrontendPlan {
-                    entries: plan
-                        .entries
-                        .into_iter()
-                        .map(|entry| FrontendPlanEntry {
-                            content: entry.content,
-                            priority: format!("{:?}", entry.priority),
-                            status: format!("{:?}", entry.status),
-                        })
-                        .collect(),
-                }),
-                ProgressEvent::LocalLog(msg) => ProgressEventPayload::Log(msg),
-                ProgressEvent::PlanSubmitted => ProgressEventPayload::PlanSubmitted,
-                ProgressEvent::SourceSubmitted => ProgressEventPayload::SourceSubmitted,
-                ProgressEvent::MetricSubmitted => ProgressEventPayload::MetricSubmitted,
-                ProgressEvent::ArtifactSubmitted => ProgressEventPayload::ArtifactSubmitted,
-                ProgressEvent::BlockSubmitted => ProgressEventPayload::BlockSubmitted,
-                ProgressEvent::StanceSubmitted => ProgressEventPayload::StanceSubmitted,
-                ProgressEvent::ProjectionSubmitted => ProgressEventPayload::ProjectionSubmitted,
-                ProgressEvent::Finalized => ProgressEventPayload::Completed,
-            };
+        while let Some(payload) = progress_rx.recv().await {
             let data_kind = match &payload {
                 ProgressEventPayload::PlanSubmitted => Some("plan"),
                 ProgressEventPayload::SourceSubmitted => Some("source"),
@@ -494,9 +491,13 @@ pub async fn generate_analysis(
                 ProgressEventPayload::Completed => Some("completed"),
                 _ => None,
             };
-            let _ = db_clone.append_progress_event(&run_id_clone, &payload);
-            if data_kind.is_some() {
-                let _ = coalesce_tx.send(());
+            if let Err(err) = db_clone.append_progress_event(&run_id_clone, &payload) {
+                log::warn!("progress persist dropped ({run_id_clone}): {err:#}");
+            }
+            if data_kind.is_some() && coalesce_tx.send(()).is_err() {
+                log::warn!(
+                    "progress coalesce channel closed; UI will miss data-changed pulse ({run_id_clone})"
+                );
             }
             if progress_channel.send(payload).is_err() {
                 break;
@@ -537,12 +538,20 @@ pub async fn generate_analysis(
             let _ = on_progress.send(ProgressEventPayload::Completed);
         }
         Err(err) => {
-            let is_cancelled = err.downcast_ref::<AcpCancelled>().is_some();
-            let message = err.to_string();
-            let status = if is_cancelled {
-                AnalysisStatus::Cancelled
+            use crate::commands::error::CommandErrorKind;
+            use crate::infra::acp::analysis_generator::AcpTimeout;
+
+            let kind = if err.downcast_ref::<AcpCancelled>().is_some() {
+                CommandErrorKind::Cancelled
+            } else if err.downcast_ref::<AcpTimeout>().is_some() {
+                CommandErrorKind::Timeout
             } else {
-                AnalysisStatus::Failed
+                CommandErrorKind::Internal
+            };
+            let message = err.to_string();
+            let status = match kind {
+                CommandErrorKind::Cancelled => AnalysisStatus::Cancelled,
+                _ => AnalysisStatus::Failed,
             };
             let db = &state.db;
             db.update_run_status(&run_id, status, Some(&message))?;
@@ -550,7 +559,7 @@ pub async fn generate_analysis(
             let _ = on_progress.send(ProgressEventPayload::Error {
                 message: message.clone(),
             });
-            return Err(message.into());
+            return Err(CommandError::with_kind(message, kind));
         }
     }
 
@@ -683,6 +692,45 @@ mod tests {
             methodology_note: None,
             decision_criterion_answers: vec![],
         }
+    }
+
+    #[test]
+    fn parse_publish_envelope_reads_nested_data_form() {
+        let body = r#"{"data":{"url":"https://x/a","siteId":"s","deleteToken":"d"}}"#;
+        let report = parse_publish_envelope(body).unwrap();
+        assert_eq!(report.url, "https://x/a");
+        assert_eq!(report.site_id, "s");
+        assert_eq!(report.delete_token, "d");
+        assert_eq!(report.provider, "PageDrop.io");
+    }
+
+    #[test]
+    fn parse_publish_envelope_reads_flat_form() {
+        let body = r#"{"url":"https://x/a"}"#;
+        let report = parse_publish_envelope(body).unwrap();
+        assert_eq!(report.url, "https://x/a");
+        assert!(report.site_id.is_empty());
+        assert!(report.delete_token.is_empty());
+    }
+
+    #[test]
+    fn parse_publish_envelope_rejects_missing_url() {
+        let body = r#"{"data":{"siteId":"s"}}"#;
+        let err = parse_publish_envelope(body).unwrap_err();
+        assert!(err.contains("missing url"));
+    }
+
+    #[test]
+    fn parse_publish_envelope_rejects_unrelated_json() {
+        let body = r#"{"status":"ok"}"#;
+        let err = parse_publish_envelope(body).unwrap_err();
+        assert!(err.contains("missing url"));
+    }
+
+    #[test]
+    fn parse_publish_envelope_rejects_invalid_json() {
+        let err = parse_publish_envelope("not json").unwrap_err();
+        assert!(err.contains("parse"));
     }
 
     #[test]

@@ -53,7 +53,7 @@ impl Database {
 
         #[cfg(target_os = "macos")]
         {
-            if let Some(home) = home::home_dir() {
+            if let Some(home) = dirs::home_dir() {
                 return home
                     .join("Library")
                     .join("Application Support")
@@ -74,7 +74,7 @@ impl Database {
             if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
                 return PathBuf::from(xdg).join("bullpen").join("db.sqlite");
             }
-            if let Some(home) = home::home_dir() {
+            if let Some(home) = dirs::home_dir() {
                 return home
                     .join(".local")
                     .join("share")
@@ -97,6 +97,22 @@ impl Database {
         self.conn
             .lock()
             .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))
+    }
+
+    /// Run `f` inside a SQLite transaction, committing on `Ok` and rolling
+    /// back on `Err` or panic. Use this for any command that performs two or
+    /// more writes that must be visible together (or not at all). Prefer
+    /// writing raw `tx.execute` / `tx.query_*` inside the closure over calling
+    /// back into `Database` methods, which would re-acquire the lock.
+    pub(crate) fn with_tx<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> rusqlite::Result<T>,
+    ) -> Result<T> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
     }
 
     fn init(&self) -> Result<()> {
@@ -408,7 +424,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn update_analysis_status(&self, analysis_id: &str, status: AnalysisStatus) -> Result<()> {
+    pub(crate) fn update_analysis_status(
+        &self,
+        analysis_id: &str,
+        status: AnalysisStatus,
+    ) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE analyses SET status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -569,7 +589,7 @@ impl Database {
         .map_err(Into::into)
     }
 
-    pub fn get_runs(&self, analysis_id: &str) -> Result<Vec<AnalysisRun>> {
+    pub(crate) fn get_runs(&self, analysis_id: &str) -> Result<Vec<AnalysisRun>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error
@@ -657,7 +677,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_metric(&self, metric: &MetricSnapshot) -> Result<()> {
+    pub(crate) fn save_metric(&self, metric: &MetricSnapshot) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO metrics
@@ -680,7 +700,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_structured_artifact(&self, artifact: &StructuredArtifact) -> Result<()> {
+    pub(crate) fn save_structured_artifact(&self, artifact: &StructuredArtifact) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO structured_artifacts
@@ -703,7 +723,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_block(&self, block: &AnalysisBlock) -> Result<()> {
+    pub(crate) fn save_block(&self, block: &AnalysisBlock) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO analysis_blocks
@@ -725,7 +745,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_projection(&self, projection: &Projection) -> Result<()> {
+    pub(crate) fn save_projection(&self, projection: &Projection) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO projections
@@ -752,7 +772,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_final_stance(&self, stance: &FinalStance) -> Result<()> {
+    pub(crate) fn save_final_stance(&self, stance: &FinalStance) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO final_stances
@@ -774,18 +794,42 @@ impl Database {
         Ok(())
     }
 
+    /// Derive the analysis-level status from its runs and persist it
+    /// atomically.
+    ///
+    /// Precedence, applied in order — first rule that matches wins:
+    /// 1. any run `Running`         → `Running`
+    /// 2. any run `Failed`          → `Failed`
+    /// 3. all runs `Cancelled`
+    ///    (at least one run exists) → `Cancelled`
+    /// 4. any run `Completed`       → `Completed`
+    /// 5. otherwise (no runs, or only `Queued`) → `Queued`
+    ///
+    /// `Failed` outranks `Completed` so a mixed (some-failed, some-completed)
+    /// analysis surfaces the failure to the user. `Cancelled` requires
+    /// unanimity so a single cancelled retry among completed runs does not
+    /// mark the whole analysis as cancelled.
     pub fn recompute_analysis_status(&self, analysis_id: &str) -> Result<()> {
-        let runs = self.get_runs(analysis_id)?;
-        let status = if runs.iter().any(|r| r.status == AnalysisStatus::Running) {
-            AnalysisStatus::Running
-        } else if runs.iter().any(|r| r.status == AnalysisStatus::Completed) {
-            AnalysisStatus::Completed
-        } else if runs.iter().all(|r| r.status == AnalysisStatus::Cancelled) {
-            AnalysisStatus::Cancelled
-        } else {
-            AnalysisStatus::Failed
-        };
-        self.update_analysis_status(analysis_id, status)
+        self.with_tx(|tx| {
+            let mut stmt = tx.prepare("SELECT status FROM analysis_runs WHERE analysis_id = ?1")?;
+            let run_statuses: Vec<AnalysisStatus> = stmt
+                .query_map([analysis_id], |row| row.get::<_, String>(0))?
+                .filter_map(Result::ok)
+                .map(|s| AnalysisStatus::from_str(&s).unwrap_or_default())
+                .collect();
+            drop(stmt);
+
+            let new_status = compute_analysis_status(&run_statuses);
+            tx.execute(
+                "UPDATE analyses SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                params![
+                    new_status.to_string(),
+                    chrono::Utc::now().to_rfc3339(),
+                    analysis_id
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn set_active_run_if_empty(&self, analysis_id: &str, run_id: &str) -> Result<()> {
@@ -847,7 +891,7 @@ impl Database {
         Ok(events)
     }
 
-    pub fn validate_finalization(&self, run_id: &str) -> Result<Vec<String>> {
+    pub(crate) fn validate_finalization(&self, run_id: &str) -> Result<Vec<String>> {
         let research_plan = self.get_research_plan(run_id)?;
         let entities = self.get_entities(run_id)?;
         let blocks = self.get_blocks(run_id)?;
@@ -1268,11 +1312,7 @@ impl Database {
         collect_rows(rows)
     }
 
-    pub fn get_blocks_for(&self, run_id: &str) -> Result<Vec<AnalysisBlock>> {
-        self.get_blocks(run_id)
-    }
-
-    fn get_blocks(&self, run_id: &str) -> Result<Vec<AnalysisBlock>> {
+    pub(crate) fn get_blocks(&self, run_id: &str) -> Result<Vec<AnalysisBlock>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, kind, title, body, evidence_ids, confidence, importance, display_order, created_at
@@ -1297,7 +1337,7 @@ impl Database {
         collect_rows(rows)
     }
 
-    pub fn get_projections(&self, run_id: &str) -> Result<Vec<Projection>> {
+    pub(crate) fn get_projections(&self, run_id: &str) -> Result<Vec<Projection>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, entity_id, horizon, metric, current_value, current_value_label, unit, scenarios, methodology, key_assumptions, evidence_ids, confidence, disclaimer, created_at
@@ -1328,7 +1368,7 @@ impl Database {
         collect_rows(rows)
     }
 
-    pub fn get_final_stance(&self, run_id: &str) -> Result<Option<FinalStance>> {
+    pub(crate) fn get_final_stance(&self, run_id: &str) -> Result<Option<FinalStance>> {
         let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, run_id, stance, horizon, confidence, summary, key_reasons, what_would_change, disclaimer, created_at
@@ -1355,7 +1395,7 @@ impl Database {
         .map_err(Into::into)
     }
 
-    pub fn existing_source_ids(&self, run_id: &str) -> Result<HashSet<String>> {
+    pub(crate) fn existing_source_ids(&self, run_id: &str) -> Result<HashSet<String>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT id FROM sources WHERE run_id = ?1")?;
         let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
@@ -1366,7 +1406,7 @@ impl Database {
         Ok(out)
     }
 
-    pub fn existing_block_ids(&self, run_id: &str) -> Result<HashSet<String>> {
+    pub(crate) fn existing_block_ids(&self, run_id: &str) -> Result<HashSet<String>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT id FROM analysis_blocks WHERE run_id = ?1")?;
         let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
@@ -1377,7 +1417,7 @@ impl Database {
         Ok(out)
     }
 
-    pub fn save_counter_thesis(&self, thesis: &CounterThesis) -> Result<()> {
+    pub(crate) fn save_counter_thesis(&self, thesis: &CounterThesis) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO counter_theses
@@ -1397,7 +1437,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_counter_theses(&self, run_id: &str) -> Result<Vec<CounterThesis>> {
+    pub(crate) fn get_counter_theses(&self, run_id: &str) -> Result<Vec<CounterThesis>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, stance_against, summary, supporting_evidence_ids, why_we_reject_or_partially_accept, residual_probability, created_at
@@ -1419,7 +1459,7 @@ impl Database {
         collect_rows(rows)
     }
 
-    pub fn save_uncertainty_entry(&self, entry: &UncertaintyEntry) -> Result<()> {
+    pub(crate) fn save_uncertainty_entry(&self, entry: &UncertaintyEntry) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO uncertainty_entries
@@ -1439,7 +1479,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_uncertainty_entries(&self, run_id: &str) -> Result<Vec<UncertaintyEntry>> {
+    pub(crate) fn get_uncertainty_entries(&self, run_id: &str) -> Result<Vec<UncertaintyEntry>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, question, why_it_matters, attempted_resolution, blocking, related_decision_criterion, created_at
@@ -1460,7 +1500,7 @@ impl Database {
         collect_rows(rows)
     }
 
-    pub fn save_methodology_note(&self, note: &MethodologyNote) -> Result<()> {
+    pub(crate) fn save_methodology_note(&self, note: &MethodologyNote) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO methodology_notes
@@ -1479,7 +1519,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_methodology_note(&self, run_id: &str) -> Result<Option<MethodologyNote>> {
+    pub(crate) fn get_methodology_note(&self, run_id: &str) -> Result<Option<MethodologyNote>> {
         let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, run_id, approach, frameworks, data_windows, known_limitations, created_at
@@ -1504,7 +1544,10 @@ impl Database {
         .map_err(Into::into)
     }
 
-    pub fn save_decision_criterion_answer(&self, answer: &DecisionCriterionAnswer) -> Result<()> {
+    pub(crate) fn save_decision_criterion_answer(
+        &self,
+        answer: &DecisionCriterionAnswer,
+    ) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO decision_criterion_answers
@@ -1524,7 +1567,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_decision_criterion_answers(
+    pub(crate) fn get_decision_criterion_answers(
         &self,
         run_id: &str,
     ) -> Result<Vec<DecisionCriterionAnswer>> {
@@ -1549,6 +1592,24 @@ impl Database {
             })
         })?;
         collect_rows(rows)
+    }
+}
+
+/// Pure-function form of the precedence rules documented on
+/// [`Database::recompute_analysis_status`].
+pub(crate) fn compute_analysis_status(run_statuses: &[AnalysisStatus]) -> AnalysisStatus {
+    if run_statuses.contains(&AnalysisStatus::Running) {
+        AnalysisStatus::Running
+    } else if run_statuses.contains(&AnalysisStatus::Failed) {
+        AnalysisStatus::Failed
+    } else if !run_statuses.is_empty()
+        && run_statuses.iter().all(|s| *s == AnalysisStatus::Cancelled)
+    {
+        AnalysisStatus::Cancelled
+    } else if run_statuses.contains(&AnalysisStatus::Completed) {
+        AnalysisStatus::Completed
+    } else {
+        AnalysisStatus::Queued
     }
 }
 
@@ -2170,7 +2231,7 @@ pub(crate) mod tests {
         let source_id = save_source(&db, &run_id);
         save_block(&db, &run_id, BlockKind::Thesis, &source_id);
 
-        let blocks = db.get_blocks_for(&run_id).unwrap();
+        let blocks = db.get_blocks(&run_id).unwrap();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].kind, BlockKind::Thesis);
         assert_eq!(blocks[0].evidence_ids, vec![source_id]);
@@ -2266,12 +2327,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn recompute_status_prefers_running_then_completed_then_cancelled_else_failed() {
+    fn recompute_status_prefers_running_then_failed_then_cancelled_then_completed() {
         let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
         let _run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Add a second run for the same analysis.
         db.save_run(&AnalysisRun {
             id: "run-2".into(),
             analysis_id: "a".into(),
@@ -2285,33 +2345,35 @@ pub(crate) mod tests {
         })
         .unwrap();
 
-        // run-1 still Running → analysis becomes Running
         db.recompute_analysis_status("a").unwrap();
-        let report = db.get_report("a", None).unwrap().unwrap();
-        assert_eq!(report.analysis.status, AnalysisStatus::Running);
+        assert_eq!(
+            db.get_report("a", None).unwrap().unwrap().analysis.status,
+            AnalysisStatus::Running
+        );
 
-        // Move run-1 to Completed → analysis becomes Completed (Completed beats Failed)
         db.update_run_status("run-1", AnalysisStatus::Completed, None)
             .unwrap();
         db.recompute_analysis_status("a").unwrap();
-        let report = db.get_report("a", None).unwrap().unwrap();
-        assert_eq!(report.analysis.status, AnalysisStatus::Completed);
+        assert_eq!(
+            db.get_report("a", None).unwrap().unwrap().analysis.status,
+            AnalysisStatus::Failed
+        );
 
-        // Both Cancelled → Cancelled
-        db.update_run_status("run-1", AnalysisStatus::Cancelled, None)
-            .unwrap();
         db.update_run_status("run-2", AnalysisStatus::Cancelled, None)
             .unwrap();
         db.recompute_analysis_status("a").unwrap();
-        let report = db.get_report("a", None).unwrap().unwrap();
-        assert_eq!(report.analysis.status, AnalysisStatus::Cancelled);
+        assert_eq!(
+            db.get_report("a", None).unwrap().unwrap().analysis.status,
+            AnalysisStatus::Completed
+        );
 
-        // No Running, no Completed, mixed Failed/Cancelled → Failed
-        db.update_run_status("run-2", AnalysisStatus::Failed, Some("err"))
+        db.update_run_status("run-1", AnalysisStatus::Cancelled, None)
             .unwrap();
         db.recompute_analysis_status("a").unwrap();
-        let report = db.get_report("a", None).unwrap().unwrap();
-        assert_eq!(report.analysis.status, AnalysisStatus::Failed);
+        assert_eq!(
+            db.get_report("a", None).unwrap().unwrap().analysis.status,
+            AnalysisStatus::Cancelled
+        );
     }
 
     #[test]

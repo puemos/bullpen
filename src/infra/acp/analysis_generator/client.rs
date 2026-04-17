@@ -1,4 +1,5 @@
-use super::ProgressEvent;
+use super::ProgressTx;
+use crate::infra::progress::{FrontendPlan, FrontendPlanEntry, ProgressEventPayload};
 use agent_client_protocol::{
     ContentBlock, ExtNotification, ExtRequest, ExtResponse, Meta, PermissionOptionKind,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
@@ -27,7 +28,7 @@ pub(super) struct BullpenClient {
     pub(super) messages: Arc<Mutex<Vec<String>>>,
     pub(super) thoughts: Arc<Mutex<Vec<String>>>,
     pub(super) finalization_received: Arc<Mutex<bool>>,
-    progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
+    progress: Option<ProgressTx>,
     tool_call_names: Arc<Mutex<HashMap<String, String>>>,
     pending_tool_calls: Arc<Mutex<PendingToolCallMap>>,
     last_message_id: Arc<Mutex<Option<String>>>,
@@ -36,7 +37,7 @@ pub(super) struct BullpenClient {
 }
 
 impl BullpenClient {
-    pub(super) fn new(progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>) -> Self {
+    pub(super) fn new(progress: Option<ProgressTx>) -> Self {
         Self {
             messages: Arc::new(Mutex::new(Vec::new())),
             thoughts: Arc::new(Mutex::new(Vec::new())),
@@ -119,8 +120,11 @@ impl BullpenClient {
             && !*guard
         {
             *guard = true;
+            if let Ok(mut lengths) = self.last_sent_lengths.lock() {
+                lengths.clear();
+            }
             if let Some(tx) = &self.progress {
-                let _ = tx.send(ProgressEvent::Finalized);
+                let _ = tx.send(ProgressEventPayload::Completed);
             }
         }
     }
@@ -135,7 +139,7 @@ impl BullpenClient {
         tool_name: Option<&str>,
     ) {
         if let Some(tx) = &self.progress {
-            let _ = tx.send(ProgressEvent::ToolCallComplete {
+            let _ = tx.send(ProgressEventPayload::ToolCallComplete {
                 tool_call_id: tool_id.to_string(),
                 status: status.to_string(),
                 title,
@@ -145,44 +149,12 @@ impl BullpenClient {
         }
 
         if status == "completed" {
-            match tool_name {
-                Some("submit_research_plan") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::PlanSubmitted);
-                    }
+            if let Some(extra) = submitted_event_for(tool_name) {
+                if let Some(tx) = &self.progress {
+                    let _ = tx.send(extra);
                 }
-                Some("submit_source") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::SourceSubmitted);
-                    }
-                }
-                Some("submit_metric_snapshot") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::MetricSubmitted);
-                    }
-                }
-                Some("submit_structured_artifact") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::ArtifactSubmitted);
-                    }
-                }
-                Some("submit_analysis_block") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::BlockSubmitted);
-                    }
-                }
-                Some("submit_final_stance") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::StanceSubmitted);
-                    }
-                }
-                Some("submit_projection") => {
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::ProjectionSubmitted);
-                    }
-                }
-                Some("finalize_analysis") => self.mark_finalization_received(),
-                _ => {}
+            } else if tool_name == Some("finalize_analysis") {
+                self.mark_finalization_received();
             }
         }
 
@@ -195,6 +167,19 @@ impl BullpenClient {
             return true;
         }
         BULLPEN_TOOLS.iter().any(|tool| method.contains(tool))
+    }
+}
+
+fn submitted_event_for(tool_name: Option<&str>) -> Option<ProgressEventPayload> {
+    match tool_name? {
+        "submit_research_plan" => Some(ProgressEventPayload::PlanSubmitted),
+        "submit_source" => Some(ProgressEventPayload::SourceSubmitted),
+        "submit_metric_snapshot" => Some(ProgressEventPayload::MetricSubmitted),
+        "submit_structured_artifact" => Some(ProgressEventPayload::ArtifactSubmitted),
+        "submit_analysis_block" => Some(ProgressEventPayload::BlockSubmitted),
+        "submit_final_stance" => Some(ProgressEventPayload::StanceSubmitted),
+        "submit_projection" => Some(ProgressEventPayload::ProjectionSubmitted),
+        _ => None,
     }
 }
 
@@ -227,6 +212,7 @@ impl agent_client_protocol::Client for BullpenClient {
         match notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = &chunk.content {
+                    let prev_id = self.last_message_id.lock().unwrap().clone();
                     let full = Self::append_streamed_content(
                         &self.messages,
                         &self.last_message_id,
@@ -237,6 +223,11 @@ impl agent_client_protocol::Client for BullpenClient {
                         .unwrap_or_else(|| "default_message".to_string());
                     let delta = {
                         let mut lengths = self.last_sent_lengths.lock().unwrap();
+                        if let Some(prev) = prev_id.as_deref()
+                            && prev != msg_id.as_str()
+                        {
+                            lengths.remove(prev);
+                        }
                         let last_len = *lengths.get(&msg_id).unwrap_or(&0);
                         let delta = if full.len() > last_len {
                             full[last_len..].to_string()
@@ -249,12 +240,13 @@ impl agent_client_protocol::Client for BullpenClient {
                     if !delta.is_empty()
                         && let Some(tx) = &self.progress
                     {
-                        let _ = tx.send(ProgressEvent::MessageDelta { id: msg_id, delta });
+                        let _ = tx.send(ProgressEventPayload::MessageDelta { id: msg_id, delta });
                     }
                 }
             }
             SessionUpdate::AgentThoughtChunk(chunk) => {
                 if let ContentBlock::Text(text) = &chunk.content {
+                    let prev_id = self.last_thought_id.lock().unwrap().clone();
                     let full = Self::append_streamed_content(
                         &self.thoughts,
                         &self.last_thought_id,
@@ -266,6 +258,11 @@ impl agent_client_protocol::Client for BullpenClient {
                     let delta = {
                         let mut lengths = self.last_sent_lengths.lock().unwrap();
                         let key = format!("thought_{thought_id}");
+                        if let Some(prev) = prev_id.as_deref()
+                            && prev != thought_id.as_str()
+                        {
+                            lengths.remove(&format!("thought_{prev}"));
+                        }
                         let last_len = *lengths.get(&key).unwrap_or(&0);
                         let delta = if full.len() > last_len {
                             full[last_len..].to_string()
@@ -278,7 +275,7 @@ impl agent_client_protocol::Client for BullpenClient {
                     if !delta.is_empty()
                         && let Some(tx) = &self.progress
                     {
-                        let _ = tx.send(ProgressEvent::ThoughtDelta {
+                        let _ = tx.send(ProgressEventPayload::ThoughtDelta {
                             id: thought_id,
                             delta,
                         });
@@ -342,7 +339,7 @@ impl agent_client_protocol::Client for BullpenClient {
                         .unwrap()
                         .contains_key(&tool_id);
                     if !already_pending && let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::ToolCallStarted {
+                        let _ = tx.send(ProgressEventPayload::ToolCallStarted {
                             tool_call_id: tool_id.clone(),
                             title: call.title.clone(),
                             kind: kind.clone(),
@@ -423,7 +420,17 @@ impl agent_client_protocol::Client for BullpenClient {
             }
             SessionUpdate::Plan(plan) => {
                 if let Some(tx) = &self.progress {
-                    let _ = tx.send(ProgressEvent::Plan(plan));
+                    let _ = tx.send(ProgressEventPayload::Plan(FrontendPlan {
+                        entries: plan
+                            .entries
+                            .into_iter()
+                            .map(|entry| FrontendPlanEntry {
+                                content: entry.content,
+                                priority: format!("{:?}", entry.priority),
+                                status: format!("{:?}", entry.status),
+                            })
+                            .collect(),
+                    }));
                 }
             }
             _ => {}
@@ -460,7 +467,7 @@ mod tests {
     use std::matches;
     use tokio::sync::mpsc;
 
-    fn make_client() -> (BullpenClient, mpsc::UnboundedReceiver<ProgressEvent>) {
+    fn make_client() -> (BullpenClient, mpsc::UnboundedReceiver<ProgressEventPayload>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (BullpenClient::new(Some(tx)), rx)
     }
@@ -484,7 +491,7 @@ mod tests {
         ))
     }
 
-    fn drain(rx: &mut mpsc::UnboundedReceiver<ProgressEvent>) -> Vec<ProgressEvent> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<ProgressEventPayload>) -> Vec<ProgressEventPayload> {
         let mut out = Vec::new();
         while let Ok(event) = rx.try_recv() {
             out.push(event);
@@ -520,7 +527,7 @@ mod tests {
         );
 
         match &events[0] {
-            ProgressEvent::ToolCallStarted {
+            ProgressEventPayload::ToolCallStarted {
                 tool_call_id,
                 title,
                 kind,
@@ -532,7 +539,7 @@ mod tests {
             other => panic!("expected ToolCallStarted, got {other:?}"),
         }
         match &events[1] {
-            ProgressEvent::ToolCallComplete {
+            ProgressEventPayload::ToolCallComplete {
                 tool_call_id,
                 status,
                 title,
@@ -585,11 +592,11 @@ mod tests {
         let events = drain(&mut rx);
         let started_count = events
             .iter()
-            .filter(|e| matches!(e, ProgressEvent::ToolCallStarted { .. }))
+            .filter(|e| matches!(e, ProgressEventPayload::ToolCallStarted { .. }))
             .count();
         let complete_count = events
             .iter()
-            .filter(|e| matches!(e, ProgressEvent::ToolCallComplete { .. }))
+            .filter(|e| matches!(e, ProgressEventPayload::ToolCallComplete { .. }))
             .count();
         assert_eq!(started_count, 1, "started should dedupe, got {events:?}");
         assert_eq!(complete_count, 1, "one completion expected, got {events:?}");
@@ -618,7 +625,7 @@ mod tests {
         let events = drain(&mut rx);
         assert_eq!(events.len(), 1, "expected only Complete, got {events:?}");
         match &events[0] {
-            ProgressEvent::ToolCallComplete {
+            ProgressEventPayload::ToolCallComplete {
                 tool_call_id,
                 status,
                 title,
@@ -659,7 +666,7 @@ mod tests {
         let events = drain(&mut rx);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            ProgressEvent::ToolCallComplete { status, .. } => assert_eq!(status, "failed"),
+            ProgressEventPayload::ToolCallComplete { status, .. } => assert_eq!(status, "failed"),
             other => panic!("expected failed ToolCallComplete, got {other:?}"),
         }
     }
@@ -704,7 +711,7 @@ mod tests {
         // its own Started event.
         assert_eq!(events.len(), 2, "unexpected events: {events:?}");
         match &events[1] {
-            ProgressEvent::ToolCallComplete {
+            ProgressEventPayload::ToolCallComplete {
                 title, raw_input, ..
             } => {
                 assert_eq!(title, "fetch \"quantum outlook\"");
@@ -745,7 +752,7 @@ mod tests {
         let events = drain(&mut rx);
         assert_eq!(events.len(), 1, "expected only Complete, got {events:?}");
         match &events[0] {
-            ProgressEvent::ToolCallComplete {
+            ProgressEventPayload::ToolCallComplete {
                 title, raw_input, ..
             } => {
                 assert_eq!(title, "fetch \"late\"");
@@ -779,13 +786,13 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, ProgressEvent::ToolCallComplete { .. })),
+                .any(|e| matches!(e, ProgressEventPayload::ToolCallComplete { .. })),
             "missing ToolCallComplete in {events:?}",
         );
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, ProgressEvent::SourceSubmitted)),
+                .any(|e| matches!(e, ProgressEventPayload::SourceSubmitted)),
             "missing SourceSubmitted in {events:?}",
         );
     }
@@ -823,7 +830,7 @@ mod tests {
         let completions: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                ProgressEvent::ToolCallComplete {
+                ProgressEventPayload::ToolCallComplete {
                     tool_call_id,
                     title,
                     ..

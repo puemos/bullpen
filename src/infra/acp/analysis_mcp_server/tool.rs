@@ -584,7 +584,7 @@ pub fn create_submit_final_stance_tool(config: Arc<ServerConfig>) -> impl ToolHa
             // Cross-field coherence: hedge-everywhere pattern.
             if matches!(stance, StanceKind::Bullish) {
                 let blocks = database
-                    .get_blocks_for(&context.run_id)
+                    .get_blocks(&context.run_id)
                     .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
                 let risk_blocks: Vec<_> = blocks
                     .iter()

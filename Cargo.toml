@@ -48,9 +48,7 @@ chrono = { version = "0.4", features = ["clock"] }
 clap = { version = "4.4", features = ["derive"] }
 dirs = "5"
 env_logger = "0.11"
-futures = "0.3"
 handlebars = "6.3"
-home = "0.5"
 log = "0.4"
 pmcp = "1.8.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
