@@ -1,0 +1,47 @@
+name: Landing CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "landing/**"
+      - ".github/workflows/landing-ci.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "landing/**"
+      - ".github/workflows/landing-ci.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build landing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Install landing dependencies
+        working-directory: landing
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build landing site
+        working-directory: landing
+        run: pnpm run build
