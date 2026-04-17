@@ -1,6 +1,6 @@
-use crazylines::commands;
-use crazylines::infra::acp::analysis_mcp_server;
-use crazylines::state::AppState;
+use bullpen::commands;
+use bullpen::infra::acp::analysis_mcp_server;
+use bullpen::state::AppState;
 
 fn main() {
     env_logger::init();
@@ -34,5 +34,5 @@ fn main() {
             commands::export_analysis_markdown,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Crazylines");
+        .expect("error while running Bullpen");
 }

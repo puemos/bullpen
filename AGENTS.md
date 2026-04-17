@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Crazylines is a Rust/Tauri desktop app with a Vite React frontend. Rust application code lives in `src/`: `domain` contains core analysis types, `infra/db` handles SQLite persistence, `infra/acp` manages ACP agent integration and the analysis MCP server, and `commands` exposes Tauri IPC commands. Frontend code lives in `frontend/src`, with hooks in `hooks`, shared state in `store`, and TypeScript types in `types`. Support files are in `capabilities/`, `gen/schemas/`, `icons/`, and `docs/`.
+Bullpen is a Rust/Tauri desktop app with a Vite React frontend. Rust application code lives in `src/`: `domain` contains core analysis types, `infra/db` handles SQLite persistence, `infra/acp` manages ACP agent integration and the analysis MCP server, and `commands` exposes Tauri IPC commands. Frontend code lives in `frontend/src`, with hooks in `hooks`, shared state in `store`, and TypeScript types in `types`. Support files are in `capabilities/`, `gen/schemas/`, `icons/`, and `docs/`.
 
 ## Build, Test, and Development Commands
 
@@ -49,4 +49,4 @@ Use one-line commit subjects in the form `action(scope): outcome`, such as `refa
 
 ## Security & Configuration Tips
 
-Do not commit local databases, credentials, or machine-specific ACP agent paths. Prefer documented environment overrides such as `CRAZYLINES_DB_PATH`, `CODEX_ACP_BIN`, and `CRAZYLINES_CUSTOM_AGENT` for local configuration.
+Do not commit local databases, credentials, or machine-specific ACP agent paths. Prefer documented environment overrides such as `BULLPEN_DB_PATH`, `CODEX_ACP_BIN`, and `BULLPEN_CUSTOM_AGENT` for local configuration.

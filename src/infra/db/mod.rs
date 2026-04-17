@@ -29,9 +29,9 @@ impl Database {
             path,
         };
         db.init()?;
-        if std::env::var("CRAZYLINES_DB_PATH").is_err() {
+        if std::env::var("BULLPEN_DB_PATH").is_err() {
             unsafe {
-                std::env::set_var("CRAZYLINES_DB_PATH", db.path.to_string_lossy().to_string());
+                std::env::set_var("BULLPEN_DB_PATH", db.path.to_string_lossy().to_string());
             }
         }
         Ok(db)
@@ -42,7 +42,7 @@ impl Database {
     }
 
     fn default_path() -> PathBuf {
-        if let Ok(path) = std::env::var("CRAZYLINES_DB_PATH") {
+        if let Ok(path) = std::env::var("BULLPEN_DB_PATH") {
             return PathBuf::from(path);
         }
 
@@ -52,7 +52,7 @@ impl Database {
                 return home
                     .join("Library")
                     .join("Application Support")
-                    .join("Crazylines")
+                    .join("Bullpen")
                     .join("db.sqlite");
             }
         }
@@ -60,27 +60,27 @@ impl Database {
         #[cfg(target_os = "windows")]
         {
             if let Some(appdata) = std::env::var_os("APPDATA") {
-                return PathBuf::from(appdata).join("Crazylines").join("db.sqlite");
+                return PathBuf::from(appdata).join("Bullpen").join("db.sqlite");
             }
         }
 
         #[cfg(target_os = "linux")]
         {
             if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-                return PathBuf::from(xdg).join("crazylines").join("db.sqlite");
+                return PathBuf::from(xdg).join("bullpen").join("db.sqlite");
             }
             if let Some(home) = home::home_dir() {
                 return home
                     .join(".local")
                     .join("share")
-                    .join("crazylines")
+                    .join("bullpen")
                     .join("db.sqlite");
             }
         }
 
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".crazylines")
+            .join(".bullpen")
             .join("db.sqlite")
     }
 

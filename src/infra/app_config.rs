@@ -47,7 +47,7 @@ pub fn save_config(config: &AppConfig) -> Result<()> {
 }
 
 fn config_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CRAZYLINES_CONFIG_PATH") {
+    if let Ok(path) = std::env::var("BULLPEN_CONFIG_PATH") {
         return PathBuf::from(path);
     }
 
@@ -57,7 +57,7 @@ fn config_path() -> PathBuf {
             return home
                 .join("Library")
                 .join("Application Support")
-                .join("Crazylines")
+                .join("Bullpen")
                 .join("config.json");
         }
     }
@@ -65,24 +65,22 @@ fn config_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            return PathBuf::from(appdata)
-                .join("Crazylines")
-                .join("config.json");
+            return PathBuf::from(appdata).join("Bullpen").join("config.json");
         }
     }
 
     #[cfg(target_os = "linux")]
     {
         if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-            return PathBuf::from(xdg).join("crazylines").join("config.json");
+            return PathBuf::from(xdg).join("bullpen").join("config.json");
         }
         if let Some(home) = home::home_dir() {
-            return home.join(".config").join("crazylines").join("config.json");
+            return home.join(".config").join("bullpen").join("config.json");
         }
     }
 
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".crazylines")
+        .join(".bullpen")
         .join("config.json")
 }

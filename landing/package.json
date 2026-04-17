@@ -1,5 +1,5 @@
 {
-  "name": "crazylines-landing",
+  "name": "bullpen-landing",
   "private": true,
   "scripts": {
     "build": "pnpm run build:css && pnpm run build:dist",

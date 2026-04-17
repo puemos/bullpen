@@ -1,6 +1,6 @@
 # Architecture
 
-Crazylines mirrors LaReview's layered shape while replacing diff review concepts with stock analysis concepts.
+Bullpen mirrors LaReview's layered shape while replacing diff review concepts with stock analysis concepts.
 
 ## Layers
 
@@ -16,8 +16,8 @@ Crazylines mirrors LaReview's layered shape while replacing diff review concepts
 1. The user submits a free-text request from Ask.
 2. `generate_analysis` creates `Analysis` and `AnalysisRun` rows.
 3. The backend spawns the selected ACP agent.
-4. The ACP session mounts a stdio MCP server named `crazylines-analysis`.
-5. The system prompt instructs the agent to research with all available tools but submit output only through Crazylines tools.
+4. The ACP session mounts a stdio MCP server named `bullpen-analysis`.
+5. The system prompt instructs the agent to research with all available tools but submit output only through Bullpen tools.
 6. MCP tool calls persist sources, metrics, blocks, and stance as they arrive.
 7. `finalize_analysis` validates the report and marks the run complete.
 8. The Reports page renders the persisted typed report.

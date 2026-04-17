@@ -9,7 +9,7 @@ use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-const CRAZYLINES_TOOLS: &[&str] = &[
+const BULLPEN_TOOLS: &[&str] = &[
     "submit_research_plan",
     "submit_entity_resolution",
     "submit_source",
@@ -23,7 +23,7 @@ const CRAZYLINES_TOOLS: &[&str] = &[
 
 type PendingToolCallMap = HashMap<String, (String, String, Option<serde_json::Value>)>;
 
-pub(super) struct CrazylinesClient {
+pub(super) struct BullpenClient {
     pub(super) messages: Arc<Mutex<Vec<String>>>,
     pub(super) thoughts: Arc<Mutex<Vec<String>>>,
     pub(super) finalization_received: Arc<Mutex<bool>>,
@@ -35,7 +35,7 @@ pub(super) struct CrazylinesClient {
     last_sent_lengths: Arc<Mutex<HashMap<String, usize>>>,
 }
 
-impl CrazylinesClient {
+impl BullpenClient {
     pub(super) fn new(progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>) -> Self {
         Self {
             messages: Arc::new(Mutex::new(Vec::new())),
@@ -51,7 +51,7 @@ impl CrazylinesClient {
     }
 
     fn tool_name_from_title(title: &str) -> Option<&'static str> {
-        CRAZYLINES_TOOLS
+        BULLPEN_TOOLS
             .iter()
             .find(|tool| title.contains(*tool))
             .copied()
@@ -191,16 +191,16 @@ impl CrazylinesClient {
     }
 
     fn handle_extension_payload(&self, method: &str) -> bool {
-        if matches!(method, "crazylines/finalize_analysis" | "finalize_analysis") {
+        if matches!(method, "bullpen/finalize_analysis" | "finalize_analysis") {
             self.mark_finalization_received();
             return true;
         }
-        CRAZYLINES_TOOLS.iter().any(|tool| method.contains(tool))
+        BULLPEN_TOOLS.iter().any(|tool| method.contains(tool))
     }
 }
 
 #[async_trait(?Send)]
-impl agent_client_protocol::Client for CrazylinesClient {
+impl agent_client_protocol::Client for BullpenClient {
     async fn request_permission(
         &self,
         args: RequestPermissionRequest,
@@ -462,9 +462,9 @@ mod tests {
     use std::matches;
     use tokio::sync::mpsc;
 
-    fn make_client() -> (CrazylinesClient, mpsc::UnboundedReceiver<ProgressEvent>) {
+    fn make_client() -> (BullpenClient, mpsc::UnboundedReceiver<ProgressEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (CrazylinesClient::new(Some(tx)), rx)
+        (BullpenClient::new(Some(tx)), rx)
     }
 
     fn notify(update: SessionUpdate) -> SessionNotification {
@@ -770,12 +770,9 @@ mod tests {
 
         client
             .session_notification(notify(SessionUpdate::ToolCall(
-                ToolCall::new(
-                    "call-submit".to_string(),
-                    "mcp: crazylines submit_source(...)",
-                )
-                .kind(ToolKind::Other)
-                .status(ToolCallStatus::Completed),
+                ToolCall::new("call-submit".to_string(), "mcp: bullpen submit_source(...)")
+                    .kind(ToolKind::Other)
+                    .status(ToolCallStatus::Completed),
             )))
             .await
             .unwrap();

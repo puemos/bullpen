@@ -10,7 +10,7 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
     let config = Arc::new(ServerConfig::from_args());
 
     let server = Server::builder()
-        .name("crazylines-analysis")
+        .name("bullpen-analysis")
         .version(env!("CARGO_PKG_VERSION"))
         .capabilities(ServerCapabilities::tools_only())
         .tool(

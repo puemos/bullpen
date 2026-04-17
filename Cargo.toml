@@ -1,11 +1,11 @@
 [package]
-name = "crazylines"
+name = "bullpen"
 version = "0.1.0"
 edition = "2024"
-default-run = "crazylines"
+default-run = "bullpen"
 license = "MIT OR Apache-2.0"
-description = "Crazylines is an ACP-powered local stock market analysis workbench."
-repository = "https://github.com/puemos/crazylines"
+description = "Bullpen is an ACP-powered local stock market analysis workbench."
+repository = "https://github.com/puemos/bullpen"
 keywords = ["stocks", "analysis", "ai", "acp", "tauri"]
 categories = ["finance", "gui"]
 
@@ -39,7 +39,7 @@ uuid = { version = "1", features = ["v4"] }
 which = "6"
 
 [lib]
-name = "crazylines"
+name = "bullpen"
 path = "src/lib.rs"
 
 [features]
@@ -47,5 +47,5 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [[bin]]
-name = "crazylines"
+name = "bullpen"
 path = "src/main.rs"

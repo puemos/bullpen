@@ -79,7 +79,7 @@ jobs:
         with:
           projectPath: .
           tagName: v__VERSION__
-          releaseName: "Crazylines v__VERSION__"
+          releaseName: "Bullpen v__VERSION__"
           releaseBody: "See the assets to download and install this version."
           releaseDraft: false
           prerelease: false
@@ -89,25 +89,25 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           # Find the binary in the Tauri build output
-          BINARY_PATH=$(find target/release -name "crazylines" -type f -executable | head -n 1)
+          BINARY_PATH=$(find target/release -name "bullpen" -type f -executable | head -n 1)
 
           if [ -z "$BINARY_PATH" ]; then
-            echo "Error: Could not find crazylines binary"
+            echo "Error: Could not find bullpen binary"
             exit 1
           fi
 
           # Create tarball
           mkdir -p dist
-          tar -czf dist/crazylines-linux.tar.gz -C $(dirname "$BINARY_PATH") $(basename "$BINARY_PATH")
+          tar -czf dist/bullpen-linux.tar.gz -C $(dirname "$BINARY_PATH") $(basename "$BINARY_PATH")
 
-          echo "Created tarball: dist/crazylines-linux.tar.gz"
-          ls -lh dist/crazylines-linux.tar.gz
+          echo "Created tarball: dist/bullpen-linux.tar.gz"
+          ls -lh dist/bullpen-linux.tar.gz
 
       - name: Upload Linux tarball to release
         if: matrix.platform == 'ubuntu-22.04'
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/crazylines-linux.tar.gz
+          files: dist/bullpen-linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -137,30 +137,30 @@ jobs:
           cd homebrew-tap
 
           # Get SHA256 for Linux AppImage
-          APPIMAGE_URL="https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_${VERSION}_amd64.AppImage"
+          APPIMAGE_URL="https://github.com/puemos/bullpen/releases/download/v${VERSION}/Bullpen_${VERSION}_amd64.AppImage"
           APPIMAGE_SHA=$(curl -sL "$APPIMAGE_URL" | sha256sum | cut -d' ' -f1)
 
           # Get SHA256 for macOS ARM
-          ARM_URL="https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_aarch64.app.tar.gz"
+          ARM_URL="https://github.com/puemos/bullpen/releases/download/v${VERSION}/Bullpen_aarch64.app.tar.gz"
           ARM_SHA=$(curl -sL "$ARM_URL" | sha256sum | cut -d' ' -f1)
 
           # Get SHA256 for macOS Intel
-          INTEL_URL="https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_x64.app.tar.gz"
+          INTEL_URL="https://github.com/puemos/bullpen/releases/download/v${VERSION}/Bullpen_x64.app.tar.gz"
           INTEL_SHA=$(curl -sL "$INTEL_URL" | sha256sum | cut -d' ' -f1)
 
           # Update Formula
-          sed -i "s|url \"https://github.com/puemos/crazylines/releases/download/v[^\"]*\"|url \"https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_${VERSION}_amd64.AppImage\"|" Formula/crazylines.rb
-          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" Formula/crazylines.rb
-          sed -i "s/sha256 \"[^\"]*\"/sha256 \"${APPIMAGE_SHA}\"/" Formula/crazylines.rb
+          sed -i "s|url \"https://github.com/puemos/bullpen/releases/download/v[^\"]*\"|url \"https://github.com/puemos/bullpen/releases/download/v${VERSION}/Bullpen_${VERSION}_amd64.AppImage\"|" Formula/bullpen.rb
+          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" Formula/bullpen.rb
+          sed -i "s/sha256 \"[^\"]*\"/sha256 \"${APPIMAGE_SHA}\"/" Formula/bullpen.rb
 
           # Update Cask
-          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" Casks/crazylines.rb
-          sed -i "s/sha256 arm:   \"[^\"]*\"/sha256 arm:   \"${ARM_SHA}\"/" Casks/crazylines.rb
-          sed -i "s/intel: \"[^\"]*\"/intel: \"${INTEL_SHA}\"/" Casks/crazylines.rb
+          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" Casks/bullpen.rb
+          sed -i "s/sha256 arm:   \"[^\"]*\"/sha256 arm:   \"${ARM_SHA}\"/" Casks/bullpen.rb
+          sed -i "s/intel: \"[^\"]*\"/intel: \"${INTEL_SHA}\"/" Casks/bullpen.rb
 
           # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --staged --quiet || git commit -m "Bump crazylines to v${VERSION}"
+          git diff --staged --quiet || git commit -m "Bump bullpen to v${VERSION}"
           git push

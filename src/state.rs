@@ -12,7 +12,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             db: Arc::new(Mutex::new(
-                Database::open().expect("failed to open Crazylines database"),
+                Database::open().expect("failed to open Bullpen database"),
             )),
             active_runs: Arc::new(Mutex::new(HashMap::new())),
         }

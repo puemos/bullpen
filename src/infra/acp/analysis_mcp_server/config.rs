@@ -27,10 +27,10 @@ impl ServerConfig {
         I: IntoIterator<Item = String>,
     {
         let mut config = ServerConfig::default();
-        if let Ok(path) = std::env::var("CRAZYLINES_ANALYSIS_CONTEXT") {
+        if let Ok(path) = std::env::var("BULLPEN_ANALYSIS_CONTEXT") {
             config.run_context = Some(PathBuf::from(path));
         }
-        if let Ok(path) = std::env::var("CRAZYLINES_DB_PATH") {
+        if let Ok(path) = std::env::var("BULLPEN_DB_PATH") {
             config.db_path = Some(PathBuf::from(path));
         }
 

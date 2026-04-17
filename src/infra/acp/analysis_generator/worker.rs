@@ -1,4 +1,4 @@
-use super::client::CrazylinesClient;
+use super::client::BullpenClient;
 use crate::infra::acp::analysis_mcp_server::RunContext;
 use crate::prompts;
 use agent_client_protocol::{
@@ -194,7 +194,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         }
     });
 
-    let client = CrazylinesClient::new(progress_tx.clone());
+    let client = BullpenClient::new(progress_tx.clone());
     let messages = client.messages.clone();
     let thoughts = client.thoughts.clone();
     let finalization_received = client.finalization_received.clone();
@@ -215,7 +215,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         connection
             .initialize(
                 InitializeRequest::new(ProtocolVersion::V1)
-                    .client_info(Implementation::new("crazylines", env!("CARGO_PKG_VERSION")))
+                    .client_info(Implementation::new("bullpen", env!("CARGO_PKG_VERSION")))
                     .client_capabilities(build_client_capabilities()),
             )
             .await
@@ -223,7 +223,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
 
         let temp_cwd = tempfile::tempdir().context("create temp working directory")?;
         let cwd = temp_cwd.path().to_path_buf();
-        let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("crazylines"));
+        let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("bullpen"));
         let mcp_path = resolve_mcp_server_path(mcp_server_binary.as_ref(), &current_exe);
         let context_file =
             tempfile::NamedTempFile::new().context("create analysis context file")?;
@@ -234,7 +234,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         .context("write analysis context file")?;
 
         let mcp_servers = vec![McpServer::Stdio(
-            McpServerStdio::new("crazylines-analysis", mcp_path.clone()).args(vec![
+            McpServerStdio::new("bullpen-analysis", mcp_path.clone()).args(vec![
                 "--analysis-mcp-server".to_string(),
                 "--analysis-context".to_string(),
                 context_file.path().to_string_lossy().to_string(),

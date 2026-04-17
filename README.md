@@ -1,6 +1,6 @@
-# Crazylines
+# Bullpen
 
-Crazylines is a local desktop workbench for ACP-powered stock market research. It follows the same core idea as LaReview: the agent can research broadly, but it must submit typed blocks through app-owned MCP tools instead of returning one opaque markdown answer.
+Bullpen is a local desktop workbench for ACP-powered stock market research. It follows the same core idea as LaReview: the agent can research broadly, but it must submit typed blocks through app-owned MCP tools instead of returning one opaque markdown answer.
 
 The first implementation is research-only. It does not execute trades, prepare orders, size positions, or provide personalized investment advice.
 
@@ -8,7 +8,7 @@ The first implementation is research-only. It does not execute trades, prepare o
 
 - Accepts free-text prompts such as `Compare NVDA to AMD` or `Analyze the energy sector`.
 - Starts a configured ACP agent.
-- Mounts a `crazylines-analysis` MCP server with structured submission tools.
+- Mounts a `bullpen-analysis` MCP server with structured submission tools.
 - Persists reports locally in SQLite.
 - Renders a simple three-page UI:
   - Ask: prompt, agent selection, live process stream.
@@ -48,7 +48,7 @@ cargo run
 
 ## Agent Configuration
 
-Crazylines discovers the same kinds of ACP agents as LaReview:
+Bullpen discovers the same kinds of ACP agents as LaReview:
 
 - Codex via `npx -y @zed-industries/codex-acp@latest`
 - Claude via `npx -y @zed-industries/claude-code-acp`
@@ -65,7 +65,7 @@ Environment overrides:
 - `MISTRAL_ACP_BIN`
 - `KIMI_ACP_BIN`
 - `OPENCODE_ACP_BIN`
-- `CRAZYLINES_CUSTOM_AGENT`
-- `CRAZYLINES_CUSTOM_AGENT_ARGS`
+- `BULLPEN_CUSTOM_AGENT`
+- `BULLPEN_CUSTOM_AGENT_ARGS`
 
-The local database defaults to the OS app data directory. Override it with `CRAZYLINES_DB_PATH`.
+The local database defaults to the OS app data directory. Override it with `BULLPEN_DB_PATH`.

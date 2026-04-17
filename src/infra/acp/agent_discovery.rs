@@ -161,11 +161,11 @@ pub fn list_agent_candidates() -> Vec<AgentCandidate> {
     let custom_command = config
         .custom_agent_command
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| std::env::var("CRAZYLINES_CUSTOM_AGENT").ok());
+        .or_else(|| std::env::var("BULLPEN_CUSTOM_AGENT").ok());
 
     if let Some(custom) = custom_command {
         let args = if config.custom_agent_args.is_empty() {
-            std::env::var("CRAZYLINES_CUSTOM_AGENT_ARGS")
+            std::env::var("BULLPEN_CUSTOM_AGENT_ARGS")
                 .map(|raw| raw.split_whitespace().map(str::to_string).collect())
                 .unwrap_or_default()
         } else {

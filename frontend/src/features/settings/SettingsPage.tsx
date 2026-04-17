@@ -54,10 +54,10 @@ export function SettingsPage({ agents }: SettingsPageProps) {
           }
         />
         <p className="max-w-[60ch] text-[14px] leading-[1.6] text-muted-foreground">
-          Crazylines runs research against ACP-compatible agents on your machine. If an agent is
+          Bullpen runs research against ACP-compatible agents on your machine. If an agent is
           marked unavailable, check your PATH or the documented environment overrides (
           <code className="font-mono text-[13px]">CODEX_ACP_BIN</code>,{" "}
-          <code className="font-mono text-[13px]">CRAZYLINES_CUSTOM_AGENT</code>).
+          <code className="font-mono text-[13px]">BULLPEN_CUSTOM_AGENT</code>).
         </p>
         <AgentStatusList agents={agents} />
       </section>

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Only the latest released version of Crazylines receives security updates. The project is pre-1.0, and older releases are considered unsupported once a newer tag ships.
+Only the latest released version of Bullpen receives security updates. The project is pre-1.0, and older releases are considered unsupported once a newer tag ships.
 
 | Version | Supported |
 | ------- | --------- |
@@ -15,11 +15,11 @@ Please report vulnerabilities privately. Do **not** open a public GitHub issue f
 
 Preferred channel:
 
-- [Open a private security advisory](https://github.com/puemos/crazylines/security/advisories/new) on GitHub.
+- [Open a private security advisory](https://github.com/puemos/bullpen/security/advisories/new) on GitHub.
 
 Alternative channel:
 
-- Email the maintainer at **puemos@gmail.com** with the subject line `SECURITY: crazylines`.
+- Email the maintainer at **puemos@gmail.com** with the subject line `SECURITY: bullpen`.
 
 When reporting, please include:
 
@@ -38,7 +38,7 @@ When reporting, please include:
 
 In scope:
 
-- The Crazylines desktop application (Rust backend, React frontend, Tauri shell).
+- The Bullpen desktop application (Rust backend, React frontend, Tauri shell).
 - The analysis MCP server and ACP integration code in this repository.
 - The landing site under `landing/`.
 

@@ -1,6 +1,6 @@
 # Documentation
 
-Reference material for working on or understanding Crazylines. For install, quick start, and everyday commands, see the [project README](../README.md).
+Reference material for working on or understanding Bullpen. For install, quick start, and everyday commands, see the [project README](../README.md).
 
 ## Contents
 
