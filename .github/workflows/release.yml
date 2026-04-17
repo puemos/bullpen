@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "macos-latest"
+            args: "--target aarch64-apple-darwin"
+          - platform: "macos-latest"
+            args: "--target x86_64-apple-darwin"
+          - platform: "ubuntu-22.04"
+            args: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend dependencies
+        run: pnpm install
+        working-directory: frontend
+
+      - name: Build with Tauri action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS code signing
+          APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_IDENTITY }}
+          # macOS notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: .
+          tagName: v__VERSION__
+          releaseName: "Crazylines v__VERSION__"
+          releaseBody: "See the assets to download and install this version."
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Create Linux tarball
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          # Find the binary in the Tauri build output
+          BINARY_PATH=$(find target/release -name "crazylines" -type f -executable | head -n 1)
+
+          if [ -z "$BINARY_PATH" ]; then
+            echo "Error: Could not find crazylines binary"
+            exit 1
+          fi
+
+          # Create tarball
+          mkdir -p dist
+          tar -czf dist/crazylines-linux.tar.gz -C $(dirname "$BINARY_PATH") $(basename "$BINARY_PATH")
+
+          echo "Created tarball: dist/crazylines-linux.tar.gz"
+          ls -lh dist/crazylines-linux.tar.gz
+
+      - name: Upload Linux tarball to release
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/crazylines-linux.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-homebrew:
+    name: Bump Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: puemos/homebrew-tap
+          token: ${{ secrets.GH_TOKEN }}
+          path: homebrew-tap
+
+      - name: Get release info
+        id: release
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update Formula and Cask
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          cd homebrew-tap
+
+          # Get SHA256 for Linux AppImage
+          APPIMAGE_URL="https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_${VERSION}_amd64.AppImage"
+          APPIMAGE_SHA=$(curl -sL "$APPIMAGE_URL" | sha256sum | cut -d' ' -f1)
+
+          # Get SHA256 for macOS ARM
+          ARM_URL="https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_aarch64.app.tar.gz"
+          ARM_SHA=$(curl -sL "$ARM_URL" | sha256sum | cut -d' ' -f1)
+
+          # Get SHA256 for macOS Intel
+          INTEL_URL="https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_x64.app.tar.gz"
+          INTEL_SHA=$(curl -sL "$INTEL_URL" | sha256sum | cut -d' ' -f1)
+
+          # Update Formula
+          sed -i "s|url \"https://github.com/puemos/crazylines/releases/download/v[^\"]*\"|url \"https://github.com/puemos/crazylines/releases/download/v${VERSION}/Crazylines_${VERSION}_amd64.AppImage\"|" Formula/crazylines.rb
+          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" Formula/crazylines.rb
+          sed -i "s/sha256 \"[^\"]*\"/sha256 \"${APPIMAGE_SHA}\"/" Formula/crazylines.rb
+
+          # Update Cask
+          sed -i "s/version \"[^\"]*\"/version \"${VERSION}\"/" Casks/crazylines.rb
+          sed -i "s/sha256 arm:   \"[^\"]*\"/sha256 arm:   \"${ARM_SHA}\"/" Casks/crazylines.rb
+          sed -i "s/intel: \"[^\"]*\"/intel: \"${INTEL_SHA}\"/" Casks/crazylines.rb
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "Bump crazylines to v${VERSION}"
+          git push
