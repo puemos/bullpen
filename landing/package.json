@@ -1,0 +1,17 @@
+{
+  "name": "crazylines-landing",
+  "private": true,
+  "scripts": {
+    "build": "pnpm run build:css && pnpm run build:dist",
+    "build:css": "mkdir -p ./styles && tailwindcss -i ./landing.css -o ./styles/landing.css --minify",
+    "build:dist": "rm -rf ./dist && mkdir -p ./dist/styles ./dist/assets && cp ./index.html ./dist/index.html && cp -R ../icons ./dist/assets/icons && cp -R ../frontend/public/icons ./dist/assets/agents && cp ./styles/landing.css ./dist/styles/landing.css",
+    "dev": "pnpm run sync && concurrently -k -n css,sync,serve -c blue,green,yellow \"tailwindcss -i ./landing.css -o ./dist/styles/landing.css --watch\" \"chokidar './index.html' '../icons/**/*' '../frontend/public/icons/**/*' -c 'pnpm run sync'\" \"browser-sync start --server dist --files 'dist/**/*' --no-open\"",
+    "sync": "mkdir -p ./dist/styles ./dist/assets && cp ./index.html ./dist/index.html && rm -rf ./dist/assets/icons ./dist/assets/agents && cp -R ../icons ./dist/assets/icons && cp -R ../frontend/public/icons ./dist/assets/agents"
+  },
+  "devDependencies": {
+    "browser-sync": "^3.0.3",
+    "chokidar-cli": "^3.0.0",
+    "concurrently": "^8.2.2",
+    "tailwindcss": "^3.4.17"
+  }
+}

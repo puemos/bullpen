@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Crazylines — Stock research with sources you can check</title>
+
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="128x128"
+            href="./assets/icons/128x128.png"
+        />
+
+        <meta
+            name="description"
+            content="Ask about any ticker or sector. Get a clear take and see the evidence behind every claim. Runs on your computer, with the AI you already use."
+        />
+        <meta name="robots" content="index, follow" />
+        <link rel="canonical" href="https://crazylines.dev/" />
+        <meta name="theme-color" content="#FAFAFA" />
+
+        <meta
+            property="og:title"
+            content="Crazylines — Stock research with sources you can check"
+        />
+        <meta
+            property="og:description"
+            content="Ask about any stock or sector. See the evidence behind every claim. Runs on your computer."
+        />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://crazylines.dev/" />
+        <meta property="og:site_name" content="Crazylines" />
+        <meta property="og:image" content="./assets/icons/128x128@2x.png" />
+
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@puemos" />
+        <meta
+            name="twitter:title"
+            content="Crazylines — Stock research with sources you can check"
+        />
+        <meta
+            name="twitter:description"
+            content="Ask about any stock or sector. See the evidence behind every claim. Runs on your computer."
+        />
+
+        <script type="application/ld+json">
+            {
+                "@context": "https://schema.org",
+                "@type": "SoftwareApplication",
+                "name": "Crazylines",
+                "applicationCategory": "FinanceApplication",
+                "operatingSystem": "macOS, Linux",
+                "offers": {
+                    "@type": "Offer",
+                    "price": "0",
+                    "priceCurrency": "USD"
+                },
+                "description": "Desktop app for AI-assisted stock research. Ask about a ticker or sector, get a clear take with checkable sources. Local-first.",
+                "author": {
+                    "@type": "Person",
+                    "name": "puemos",
+                    "url": "https://github.com/puemos"
+                },
+                "url": "https://crazylines.dev",
+                "downloadUrl": "https://github.com/puemos/crazylines/releases",
+                "programmingLanguage": ["Rust", "TypeScript"]
+            }
+        </script>
+
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="./styles/landing.css" />
+    </head>
+
+    <body class="bg-paper text-ink font-sans antialiased overflow-x-hidden">
+        <a href="#main-content" class="skip-link">Skip to main content</a>
+
+        <!-- ============ NAV ============ -->
+        <nav
+            aria-label="Main navigation"
+            class="sticky top-0 z-50 bg-paper/95 backdrop-blur-sm border-b border-rule"
+        >
+            <div
+                class="flex items-center justify-between px-5 md:px-8 py-3.5"
+            >
+                <a
+                    href="/"
+                    aria-label="Crazylines home"
+                    class="flex items-center gap-2.5"
+                >
+                    <img
+                        src="./assets/icons/128x128.png"
+                        alt=""
+                        class="h-6 w-6"
+                        decoding="async"
+                    />
+                    <span
+                        class="font-display font-semibold text-[17px] tracking-[-0.01em] text-ink"
+                        >Crazylines</span
+                    >
+                </a>
+                <div
+                    class="hidden md:flex items-center gap-7 text-[13px] text-muted"
+                >
+                    <a
+                        href="#features"
+                        class="hover:text-ink transition-colors"
+                        >Features</a
+                    >
+                    <a
+                        href="#how"
+                        class="hover:text-ink transition-colors"
+                        >How it works</a
+                    >
+                    <a
+                        href="https://github.com/puemos/crazylines"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="hover:text-ink transition-colors inline-flex items-baseline gap-1"
+                        >GitHub <span aria-hidden="true">↗</span></a
+                    >
+                </div>
+                <a
+                    href="#download"
+                    class="inline-flex items-center gap-2 border border-ink bg-ink text-paper px-3.5 py-2 text-[12.5px] font-medium tracking-[0.01em] hover:bg-paper hover:text-ink transition-colors"
+                    >Download</a
+                >
+            </div>
+        </nav>
+
+        <main id="main-content">
+            <!-- ============ HERO ============ -->
+            <section
+                aria-labelledby="hero-heading"
+                class="border-b border-rule"
+            >
+                <div
+                    class="px-5 md:px-8 pt-12 md:pt-20 pb-14 md:pb-24 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16 items-center max-w-7xl mx-auto"
+                >
+                    <!-- text -->
+                    <div class="lg:col-span-7 order-2 lg:order-1">
+                        <div
+                            class="flex items-center gap-2.5 mb-7 font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted"
+                        >
+                            <span
+                                class="block w-2 h-2 bg-violet"
+                                aria-hidden="true"
+                            ></span>
+                            Stock research · Local AI
+                        </div>
+                        <h1
+                            id="hero-heading"
+                            class="font-display font-semibold text-ink tracking-[-0.035em] leading-[0.98] mb-7 max-w-[15ch]"
+                            style="font-size: clamp(44px, 7.6vw, 88px);"
+                        >
+                            Stock research with sources you can check.
+                        </h1>
+                        <p
+                            class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-ink/85 max-w-[46ch] mb-9"
+                        >
+                            Ask about any ticker or sector. Get a clear take
+                            and see the evidence behind every claim. Runs on
+                            your computer, with the AI you already use.
+                        </p>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <a
+                                href="#download"
+                                class="inline-flex items-center gap-2 border border-ink bg-ink text-paper px-5 py-3 text-[13px] font-medium tracking-[0.01em] hover:bg-paper hover:text-ink transition-colors"
+                            >
+                                Download for free
+                            </a>
+                            <a
+                                href="#how"
+                                class="inline-flex items-center gap-2 text-ink px-1 py-3 text-[13px] font-medium tracking-[0.01em] hover:text-violet transition-colors"
+                            >
+                                See how it works
+                                <span aria-hidden="true">→</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- bull -->
+                    <div
+                        class="lg:col-span-5 order-1 lg:order-2 flex justify-center lg:justify-end"
+                    >
+                        <img
+                            src="./assets/icons/icon.png"
+                            alt="The Crazylines bull"
+                            class="w-[200px] sm:w-[240px] md:w-[300px] lg:w-[340px] h-auto select-none"
+                            draggable="false"
+                            decoding="async"
+                        />
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ AGENTS ROW ============ -->
+            <section
+                aria-label="Compatible AI agents"
+                class="border-b border-rule"
+            >
+                <div
+                    class="px-5 md:px-8 py-6 flex flex-col md:flex-row md:items-center gap-5 md:gap-10 max-w-7xl mx-auto"
+                >
+                    <p class="text-[13px] text-muted md:shrink-0">
+                        Works with the AI you already use
+                    </p>
+                    <div
+                        class="flex items-center gap-6 md:gap-7 overflow-x-auto scrollbar-hide -mx-5 md:mx-0 px-5 md:px-0"
+                        role="list"
+                    >
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/claude.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Claude</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/codex.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">ChatGPT</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/gemini.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Gemini</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/grok.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Grok</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/mistral.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Mistral</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/kimi.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Kimi</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/qwen.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Qwen</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/copilot.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Copilot</span>
+                        </span>
+                        <span class="flex items-center gap-2 shrink-0" role="listitem">
+                            <img src="./assets/agents/opencode.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">OpenCode</span>
+                        </span>
+                        <span class="text-[12px] text-muted/60 shrink-0">+ 4 more</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ FEATURES ============ -->
+            <section
+                id="features"
+                aria-labelledby="features-heading"
+                class="border-b border-rule"
+            >
+                <div class="px-5 md:px-8 pt-14 md:pt-24 pb-6 max-w-7xl mx-auto">
+                    <h2
+                        id="features-heading"
+                        class="font-display font-semibold text-ink tracking-[-0.025em] leading-[1.02] max-w-[22ch]"
+                        style="font-size: clamp(30px, 4.4vw, 52px);"
+                    >
+                        Research you can actually trust.
+                    </h2>
+                    <p class="mt-5 font-serif text-[17px] md:text-[18px] leading-[1.5] text-muted max-w-[50ch]">
+                        A few things that make Crazylines different from
+                        pasting a prompt into a chat window.
+                    </p>
+                </div>
+
+                <div
+                    class="grid grid-cols-1 md:grid-cols-2 border-t border-rule max-w-7xl mx-auto"
+                >
+                    <!-- feature 1 -->
+                    <article
+                        class="p-6 md:p-10 md:border-r border-b border-rule flex flex-col gap-5"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="block w-3 h-3 bg-violet"
+                                aria-hidden="true"
+                            ></span>
+                            <span
+                                class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                                >01 &middot; Evidence</span
+                            >
+                        </div>
+                        <h3
+                            class="font-display font-semibold text-[24px] md:text-[28px] leading-[1.15] tracking-[-0.015em] text-ink"
+                        >
+                            Every claim has a source
+                        </h3>
+                        <p
+                            class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
+                        >
+                            When the AI quotes a number or makes a call, you
+                            see exactly where it came from. Click through to
+                            read the source yourself.
+                        </p>
+                    </article>
+
+                    <!-- feature 2 -->
+                    <article
+                        class="p-6 md:p-10 border-b border-rule flex flex-col gap-5"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="block w-3 h-3 bg-gold"
+                                aria-hidden="true"
+                            ></span>
+                            <span
+                                class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                                >02 &middot; Position</span
+                            >
+                        </div>
+                        <h3
+                            class="font-display font-semibold text-[24px] md:text-[28px] leading-[1.15] tracking-[-0.015em] text-ink"
+                        >
+                            A clear take, not a dodge
+                        </h3>
+                        <p
+                            class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
+                        >
+                            Every report gives you a call &mdash; bullish,
+                            bearish, mixed, or neutral &mdash; and how
+                            confident it is. No "on one hand, on the other."
+                        </p>
+                    </article>
+
+                    <!-- feature 3 -->
+                    <article
+                        class="p-6 md:p-10 md:border-r border-b border-rule flex flex-col gap-5"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="block w-3 h-3 bg-magenta"
+                                aria-hidden="true"
+                            ></span>
+                            <span
+                                class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                                >03 &middot; Scenarios</span
+                            >
+                        </div>
+                        <h3
+                            class="font-display font-semibold text-[24px] md:text-[28px] leading-[1.15] tracking-[-0.015em] text-ink"
+                        >
+                            Three scenarios, side by side
+                        </h3>
+                        <p
+                            class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
+                        >
+                            Every report shows a base case, an upside, and a
+                            downside. You see the range, not just one
+                            confident-sounding guess.
+                        </p>
+                    </article>
+
+                    <!-- feature 4 -->
+                    <article
+                        class="p-6 md:p-10 border-b border-rule flex flex-col gap-5"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="block w-3 h-3 bg-plum"
+                                aria-hidden="true"
+                            ></span>
+                            <span
+                                class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                                >04 &middot; Private</span
+                            >
+                        </div>
+                        <h3
+                            class="font-display font-semibold text-[24px] md:text-[28px] leading-[1.15] tracking-[-0.015em] text-ink"
+                        >
+                            Stays on your computer
+                        </h3>
+                        <p
+                            class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
+                        >
+                            Your prompts, reports, and notes never leave your
+                            machine. No account, no cloud sync, no tracking.
+                        </p>
+                    </article>
+                </div>
+
+                <!-- stance vocabulary: small, warm, human -->
+                <div
+                    class="px-5 md:px-8 py-10 md:py-14 max-w-7xl mx-auto"
+                >
+                    <p
+                        class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted mb-5"
+                    >
+                        The four calls
+                    </p>
+                    <div
+                        class="flex flex-wrap items-center gap-x-8 gap-y-4 font-serif text-[16px]"
+                    >
+                        <span class="inline-flex items-center gap-2.5">
+                            <span
+                                class="block w-3 h-3"
+                                style="background:#059669"
+                                aria-hidden="true"
+                            ></span>
+                            <span class="text-ink">Bullish</span>
+                            <span class="italic text-muted"
+                                >&mdash; points up</span
+                            >
+                        </span>
+                        <span class="inline-flex items-center gap-2.5">
+                            <span
+                                class="block w-3 h-3"
+                                style="background:#DC2626"
+                                aria-hidden="true"
+                            ></span>
+                            <span class="text-ink">Bearish</span>
+                            <span class="italic text-muted"
+                                >&mdash; points down</span
+                            >
+                        </span>
+                        <span class="inline-flex items-center gap-2.5">
+                            <span
+                                class="block w-3 h-3"
+                                style="background:#D97706"
+                                aria-hidden="true"
+                            ></span>
+                            <span class="text-ink">Mixed</span>
+                            <span class="italic text-muted"
+                                >&mdash; it&rsquo;s contested</span
+                            >
+                        </span>
+                        <span class="inline-flex items-center gap-2.5">
+                            <span
+                                class="block w-3 h-3"
+                                style="background:#71717A"
+                                aria-hidden="true"
+                            ></span>
+                            <span class="text-ink">Neutral</span>
+                            <span class="italic text-muted"
+                                >&mdash; not enough to call it</span
+                            >
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ HOW IT WORKS ============ -->
+            <section
+                id="how"
+                aria-labelledby="how-heading"
+                class="border-b border-rule bg-lavender"
+            >
+                <div class="px-5 md:px-8 pt-14 md:pt-24 pb-16 md:pb-24 max-w-7xl mx-auto">
+                    <p
+                        class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-violet mb-4 flex items-center gap-2.5"
+                    >
+                        <span
+                            class="block w-2 h-2 bg-violet"
+                            aria-hidden="true"
+                        ></span>
+                        How it works
+                    </p>
+                    <h2
+                        id="how-heading"
+                        class="font-display font-semibold text-plum tracking-[-0.025em] leading-[1.02] max-w-[22ch] mb-12 md:mb-16"
+                        style="font-size: clamp(30px, 4.4vw, 52px);"
+                    >
+                        Three steps. Then you read.
+                    </h2>
+
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10"
+                    >
+                        <div class="flex flex-col gap-4">
+                            <div
+                                class="flex items-baseline gap-3 font-mono text-[10.5px] uppercase tracking-[0.22em] text-violet tabular-nums"
+                            >
+                                <span>Step 01</span>
+                            </div>
+                            <h3
+                                class="font-display font-semibold text-[22px] md:text-[24px] leading-[1.15] tracking-[-0.015em] text-plum"
+                            >
+                                Ask a question
+                            </h3>
+                            <p
+                                class="font-serif text-[15.5px] leading-[1.6] text-plum/80 max-w-[38ch]"
+                            >
+                                Plain English. &ldquo;Compare NVDA to
+                                AMD,&rdquo; or &ldquo;Is the energy sector
+                                overbought?&rdquo; Whatever you&rsquo;d ask a
+                                friend who reads filings.
+                            </p>
+                        </div>
+
+                        <div class="flex flex-col gap-4">
+                            <div
+                                class="flex items-baseline gap-3 font-mono text-[10.5px] uppercase tracking-[0.22em] text-violet tabular-nums"
+                            >
+                                <span>Step 02</span>
+                            </div>
+                            <h3
+                                class="font-display font-semibold text-[22px] md:text-[24px] leading-[1.15] tracking-[-0.015em] text-plum"
+                            >
+                                Pick your AI
+                            </h3>
+                            <p
+                                class="font-serif text-[15.5px] leading-[1.6] text-plum/80 max-w-[38ch]"
+                            >
+                                Claude, ChatGPT, Gemini, or anything else you
+                                already have set up. Crazylines finds it and
+                                hands it the research tools.
+                            </p>
+                        </div>
+
+                        <div class="flex flex-col gap-4">
+                            <div
+                                class="flex items-baseline gap-3 font-mono text-[10.5px] uppercase tracking-[0.22em] text-violet tabular-nums"
+                            >
+                                <span>Step 03</span>
+                            </div>
+                            <h3
+                                class="font-display font-semibold text-[22px] md:text-[24px] leading-[1.15] tracking-[-0.015em] text-plum"
+                            >
+                                Read the report
+                            </h3>
+                            <p
+                                class="font-serif text-[15.5px] leading-[1.6] text-plum/80 max-w-[38ch]"
+                            >
+                                A thesis, the key numbers, the risks, three
+                                scenarios, and a clear call. Saved locally,
+                                so you can come back to it later.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ DOWNLOAD ============ -->
+            <section
+                id="download"
+                aria-labelledby="download-heading"
+                class="border-b border-rule"
+            >
+                <div
+                    class="px-5 md:px-8 pt-16 md:pt-28 pb-20 md:pb-28 max-w-3xl mx-auto text-center"
+                >
+                    <img
+                        src="./assets/icons/128x128.png"
+                        alt=""
+                        class="w-16 h-16 mx-auto mb-6"
+                        decoding="async"
+                    />
+                    <h2
+                        id="download-heading"
+                        class="font-display font-semibold text-ink tracking-[-0.035em] leading-[0.98] mb-5"
+                        style="font-size: clamp(40px, 6.6vw, 80px);"
+                    >
+                        Get Crazylines
+                    </h2>
+                    <p
+                        class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-muted max-w-[38ch] mx-auto mb-12"
+                    >
+                        Free. Open source. Yours.
+                    </p>
+
+                    <div
+                        id="install-block"
+                        role="button"
+                        tabindex="0"
+                        aria-label="Copy install command to clipboard"
+                        class="relative group cursor-pointer select-none text-left bg-ink text-paper px-5 md:px-7 py-5 font-mono text-[13px] md:text-[14px] flex items-center justify-between gap-4 mb-8"
+                    >
+                        <div
+                            class="flex items-center gap-3 md:gap-4 overflow-x-auto scrollbar-hide"
+                        >
+                            <span
+                                class="text-gold select-none"
+                                aria-hidden="true"
+                                >$</span
+                            >
+                            <span class="whitespace-nowrap"
+                                >brew install --cask puemos/tap/crazylines</span
+                            >
+                        </div>
+                        <span
+                            aria-hidden="true"
+                            class="font-mono text-[11px] uppercase tracking-[0.2em] text-paper/50 group-hover:text-gold transition-colors shrink-0"
+                            >Copy</span
+                        >
+                        <span
+                            id="copy-feedback"
+                            class="absolute -top-8 left-1/2 -translate-x-1/2 bg-violet text-paper font-mono text-[10px] uppercase tracking-[0.2em] px-2 py-1 opacity-0 transition-opacity whitespace-nowrap pointer-events-none"
+                            >Copied</span
+                        >
+                    </div>
+
+                    <div
+                        class="flex flex-col sm:flex-row justify-center gap-3 mb-8"
+                    >
+                        <a
+                            href="https://github.com/puemos/crazylines/releases"
+                            class="inline-flex items-center justify-center gap-2 border border-rule bg-transparent text-ink hover:border-violet hover:text-violet px-5 py-3 text-[13px] font-medium tracking-[0.01em] transition-colors"
+                        >
+                            Download for macOS
+                        </a>
+                        <a
+                            href="https://github.com/puemos/crazylines/releases"
+                            class="inline-flex items-center justify-center gap-2 border border-rule bg-transparent text-ink hover:border-violet hover:text-violet px-5 py-3 text-[13px] font-medium tracking-[0.01em] transition-colors"
+                        >
+                            Download for Linux
+                        </a>
+                    </div>
+
+                    <p
+                        class="text-[13px] text-muted"
+                    >
+                        Or build from source &mdash;
+                        <code class="font-mono text-ink ml-1">cargo run</code>
+                    </p>
+                </div>
+            </section>
+
+            <!-- ============ FOOTER ============ -->
+            <footer
+                role="contentinfo"
+                aria-label="Footer"
+                class="px-5 md:px-8 py-8 max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-5"
+            >
+                <div class="flex items-center gap-2.5">
+                    <img
+                        src="./assets/icons/128x128.png"
+                        alt=""
+                        class="h-5 w-5"
+                        decoding="async"
+                    />
+                    <span
+                        class="font-display font-semibold text-[15px] tracking-[-0.01em] text-ink"
+                        >Crazylines</span
+                    >
+                    <span class="text-[13px] text-muted ml-2"
+                        >&copy; 2026</span
+                    >
+                </div>
+                <nav
+                    class="flex items-center gap-6 text-[13px] text-muted"
+                    aria-label="Footer links"
+                >
+                    <a
+                        href="https://github.com/puemos/crazylines/blob/main/docs/README.md"
+                        class="hover:text-ink transition-colors"
+                        >Docs</a
+                    >
+                    <a
+                        href="https://github.com/puemos/crazylines/releases"
+                        class="hover:text-ink transition-colors"
+                        >Releases</a
+                    >
+                    <a
+                        href="https://github.com/puemos/crazylines"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="hover:text-ink transition-colors"
+                        >GitHub</a
+                    >
+                </nav>
+                <p class="text-[12px] text-muted">
+                    MIT &middot; Not investment advice
+                </p>
+            </footer>
+        </main>
+
+        <script>
+            (function () {
+                const block = document.getElementById("install-block");
+                const feedback = document.getElementById("copy-feedback");
+                if (!block || !feedback) return;
+                const cmd = "brew install --cask puemos/tap/crazylines";
+                let hideTimer = null;
+
+                function showCopied() {
+                    feedback.classList.remove("opacity-0");
+                    feedback.classList.add("opacity-100");
+                    if (hideTimer) clearTimeout(hideTimer);
+                    hideTimer = setTimeout(function () {
+                        feedback.classList.remove("opacity-100");
+                        feedback.classList.add("opacity-0");
+                    }, 1600);
+                }
+
+                async function copy() {
+                    try {
+                        if (navigator.clipboard && window.isSecureContext) {
+                            await navigator.clipboard.writeText(cmd);
+                        } else {
+                            const ta = document.createElement("textarea");
+                            ta.value = cmd;
+                            ta.setAttribute("readonly", "");
+                            ta.style.position = "fixed";
+                            ta.style.opacity = "0";
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand("copy");
+                            document.body.removeChild(ta);
+                        }
+                        showCopied();
+                    } catch (err) {
+                        console.error("Copy failed", err);
+                    }
+                }
+
+                block.addEventListener("click", copy);
+                block.addEventListener("keydown", function (e) {
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        copy();
+                    }
+                });
+            })();
+        </script>
+    </body>
+</html>
