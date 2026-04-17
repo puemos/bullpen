@@ -19,10 +19,10 @@ pub struct ServerConfig {
 impl ServerConfig {
     pub fn from_args() -> Self {
         let args: Vec<String> = std::env::args().collect();
-        Self::from_iter(args)
+        Self::from_args_iter(args)
     }
 
-    pub fn from_iter<I>(iter: I) -> Self
+    pub fn from_args_iter<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = String>,
     {

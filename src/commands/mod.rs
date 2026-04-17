@@ -203,6 +203,7 @@ pub async fn get_run_progress(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_analysis(
     app: AppHandle,
     state: State<'_, AppState>,
