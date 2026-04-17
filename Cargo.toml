@@ -2,12 +2,40 @@
 name = "bullpen"
 version = "0.3.2"
 edition = "2024"
+rust-version = "1.85"
 default-run = "bullpen"
 license = "MIT OR Apache-2.0"
 description = "Bullpen is an ACP-powered local stock market analysis workbench."
 repository = "https://github.com/puemos/bullpen"
 keywords = ["stocks", "analysis", "ai", "acp", "tauri"]
 categories = ["finance", "gui"]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Tauri IPC commands are required to be async even when they don't await.
+unused_async = "allow"
+# ACP client returns non-Send futures by design.
+future_not_send = "allow"
+# Very noisy and rarely useful in application code.
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+# Large modules are tracked for splitting in a dedicated phase.
+too_many_lines = "allow"
+# Float equality is fine in tests and for literal sentinel comparisons here.
+float_cmp = "allow"
+# Explicit casts between integer/float widths are used intentionally in DB code.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+# Cosmetic backtick-in-doc lint is very noisy and not worth gating on.
+doc_markdown = "allow"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -24,7 +52,6 @@ futures = "0.3"
 handlebars = "6.3"
 home = "0.5"
 log = "0.4"
-libc = "0.2"
 pmcp = "1.8.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -35,8 +62,20 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["full", "process"] }
+tokio = { version = "1", features = [
+    "io-util",
+    "macros",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
 tokio-util = { version = "0.7", features = ["compat"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 uuid = { version = "1", features = ["v4"] }
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 

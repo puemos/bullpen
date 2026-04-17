@@ -1,7 +1,10 @@
 mod config;
 mod tool;
 
-pub use config::{RunContext, ServerConfig};
+pub use config::ServerConfig;
+// Re-export for call sites that still reference the old path. `RunContext`
+// is canonically defined in `crate::domain::run`.
+pub use crate::domain::RunContext;
 
 use pmcp::{Server, ServerCapabilities};
 use std::sync::Arc;

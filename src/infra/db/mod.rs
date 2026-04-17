@@ -1,5 +1,14 @@
-use crate::commands::ProgressEventPayload;
-use crate::domain::*;
+use crate::domain::{
+    Analysis, AnalysisBlock, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus,
+    AnalysisSummary, ArtifactKind, BlockKind, CounterThesis, CriterionVerdict,
+    DecisionCriterionAnswer, Entity, FinalStance, Importance, MethodologyNote, MetricSnapshot,
+    Projection, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
+    StructuredArtifact, UncertaintyEntry,
+};
+use crate::infra::progress::ProgressEventPayload;
+
+#[cfg(test)]
+use crate::domain::{ArtifactColumn, ProjectionScenario, RESEARCH_DISCLAIMER};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashSet;
@@ -29,14 +38,10 @@ impl Database {
             path,
         };
         db.init()?;
-        if std::env::var("BULLPEN_DB_PATH").is_err() {
-            unsafe {
-                std::env::set_var("BULLPEN_DB_PATH", db.path.to_string_lossy().to_string());
-            }
-        }
         Ok(db)
     }
 
+    #[must_use]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
@@ -84,11 +89,27 @@ impl Database {
             .join("db.sqlite")
     }
 
+    /// Acquire the connection lock, turning a poisoned mutex into a recoverable
+    /// error instead of a panic. A poisoned mutex means a writer panicked while
+    /// holding the lock — the in-memory connection state is still valid for
+    /// read/write, so we prefer surfacing an error over crashing the app.
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))
+    }
+
     fn init(&self) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = self.lock_conn()?;
         conn.execute_batch(
-            r#"
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;
+             PRAGMA temp_store = MEMORY;",
+        )?;
+        conn.execute_batch(
+            r"
             CREATE TABLE IF NOT EXISTS analyses (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -295,7 +316,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_uncertainty_entries_run_id ON uncertainty_entries(run_id);
             CREATE INDEX IF NOT EXISTS idx_decision_criterion_answers_run_id ON decision_criterion_answers(run_id);
             CREATE INDEX IF NOT EXISTS idx_run_progress_run_id ON run_progress(run_id);
-            "#,
+            ",
         )?;
 
         // Migrations for pre-existing databases: drop retired columns and
@@ -325,7 +346,7 @@ impl Database {
     }
 
     pub fn save_analysis(&self, analysis: &Analysis) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO analyses
             (id, title, user_prompt, intent, status, active_run_id, created_at, updated_at)
@@ -345,7 +366,7 @@ impl Database {
     }
 
     pub fn save_run(&self, run: &AnalysisRun) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO analysis_runs
             (id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error)
@@ -379,7 +400,7 @@ impl Database {
         } else {
             None
         };
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE analysis_runs SET status = ?1, completed_at = COALESCE(?2, completed_at), error = ?3 WHERE id = ?4",
             params![status.to_string(), completed_at, error, run_id],
@@ -388,7 +409,7 @@ impl Database {
     }
 
     pub fn update_analysis_status(&self, analysis_id: &str, status: AnalysisStatus) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE analyses SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![
@@ -406,15 +427,16 @@ impl Database {
         title: Option<&str>,
         intent: Option<AnalysisIntent>,
     ) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
         if let Some(title) = title {
-            conn.execute(
+            tx.execute(
                 "UPDATE analyses SET title = ?1, updated_at = ?2 WHERE id = ?3",
                 params![title, chrono::Utc::now().to_rfc3339(), analysis_id],
             )?;
         }
         if let Some(intent) = intent {
-            conn.execute(
+            tx.execute(
                 "UPDATE analyses SET intent = ?1, updated_at = ?2 WHERE id = ?3",
                 params![
                     intent.to_string(),
@@ -423,19 +445,20 @@ impl Database {
                 ],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 
     pub fn delete_analysis(&self, analysis_id: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute("DELETE FROM analyses WHERE id = ?1", [analysis_id])?;
         Ok(())
     }
 
     pub fn list_analyses(&self) -> Result<Vec<AnalysisSummary>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            r#"
+            r"
             SELECT
                 a.id, a.title, a.user_prompt, a.intent, a.status, a.active_run_id,
                 ar.status,
@@ -445,7 +468,7 @@ impl Database {
             FROM analyses a
             LEFT JOIN analysis_runs ar ON ar.id = a.active_run_id
             ORDER BY a.updated_at DESC
-            "#,
+            ",
         )?;
         let rows = stmt.query_map([], |row| {
             let active_status: Option<String> = row.get(6)?;
@@ -478,9 +501,8 @@ impl Database {
         analysis_id: &str,
         run_id_override: Option<&str>,
     ) -> Result<Option<AnalysisReport>> {
-        let analysis = match self.get_analysis(analysis_id)? {
-            Some(analysis) => analysis,
-            None => return Ok(None),
+        let Some(analysis) = self.get_analysis(analysis_id)? else {
+            return Ok(None);
         };
         let runs = self.get_runs(analysis_id)?;
         let active_run = run_id_override
@@ -526,7 +548,7 @@ impl Database {
     }
 
     fn get_analysis(&self, analysis_id: &str) -> Result<Option<Analysis>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, title, user_prompt, intent, status, active_run_id, created_at, updated_at FROM analyses WHERE id = ?1",
             [analysis_id],
@@ -548,7 +570,7 @@ impl Database {
     }
 
     pub fn get_runs(&self, analysis_id: &str) -> Result<Vec<AnalysisRun>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error
              FROM analysis_runs WHERE analysis_id = ?1 ORDER BY started_at DESC",
@@ -574,7 +596,7 @@ impl Database {
     }
 
     pub fn save_research_plan(&self, plan: &ResearchPlan) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO research_plans
             (id, run_id, intent, summary, decision_criteria, planned_checks, created_at)
@@ -593,7 +615,7 @@ impl Database {
     }
 
     pub fn save_entity(&self, entity: &Entity) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO entities
             (id, run_id, symbol, name, exchange, asset_type, sector, country, confidence, resolution_notes)
@@ -615,7 +637,7 @@ impl Database {
     }
 
     pub fn save_source(&self, source: &Source) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO sources
             (id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary)
@@ -636,7 +658,7 @@ impl Database {
     }
 
     pub fn save_metric(&self, metric: &MetricSnapshot) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO metrics
             (id, run_id, entity_id, metric, numeric_value, unit, period, as_of, source_id, prior_value, change_pct)
@@ -659,7 +681,7 @@ impl Database {
     }
 
     pub fn save_structured_artifact(&self, artifact: &StructuredArtifact) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO structured_artifacts
             (id, run_id, kind, title, summary, columns, rows, series, evidence_ids, display_order, created_at)
@@ -682,7 +704,7 @@ impl Database {
     }
 
     pub fn save_block(&self, block: &AnalysisBlock) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO analysis_blocks
             (id, run_id, kind, title, body, evidence_ids, confidence, importance, display_order, created_at)
@@ -704,7 +726,7 @@ impl Database {
     }
 
     pub fn save_projection(&self, projection: &Projection) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO projections
             (id, run_id, entity_id, horizon, metric, current_value, current_value_label, unit, scenarios, methodology, key_assumptions, evidence_ids, confidence, disclaimer, created_at)
@@ -731,7 +753,7 @@ impl Database {
     }
 
     pub fn save_final_stance(&self, stance: &FinalStance) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO final_stances
             (id, run_id, stance, horizon, confidence, summary, key_reasons, what_would_change, disclaimer, created_at)
@@ -767,7 +789,7 @@ impl Database {
     }
 
     pub fn set_active_run_if_empty(&self, analysis_id: &str, run_id: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE analyses SET active_run_id = ?1 WHERE id = ?2 AND active_run_id IS NULL",
             params![run_id, analysis_id],
@@ -794,7 +816,7 @@ impl Database {
             ProgressEventPayload::Error { .. } => "Error",
         };
         let payload = serde_json::to_string(event)?;
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO run_progress (run_id, event_type, payload) VALUES (?1, ?2, ?3)",
             params![run_id, event_type, payload],
@@ -803,7 +825,7 @@ impl Database {
     }
 
     pub fn get_run_progress(&self, run_id: &str) -> Result<Vec<ProgressEventPayload>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt =
             conn.prepare("SELECT payload FROM run_progress WHERE run_id = ?1 ORDER BY id ASC")?;
         let rows = stmt.query_map([run_id], |row| {
@@ -1126,7 +1148,7 @@ impl Database {
     }
 
     fn get_research_plan(&self, run_id: &str) -> Result<Option<ResearchPlan>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, run_id, intent, summary, decision_criteria, planned_checks, created_at FROM research_plans WHERE run_id = ?1",
             [run_id],
@@ -1149,7 +1171,7 @@ impl Database {
     }
 
     fn get_entities(&self, run_id: &str) -> Result<Vec<Entity>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, symbol, name, exchange, asset_type, sector, country, confidence, resolution_notes
              FROM entities WHERE run_id = ?1 ORDER BY name",
@@ -1172,7 +1194,7 @@ impl Database {
     }
 
     fn get_sources(&self, run_id: &str) -> Result<Vec<Source>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary
              FROM sources WHERE run_id = ?1 ORDER BY retrieved_at DESC",
@@ -1195,7 +1217,7 @@ impl Database {
     }
 
     fn get_metrics(&self, run_id: &str) -> Result<Vec<MetricSnapshot>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, entity_id, metric, numeric_value, unit, period, as_of, source_id, prior_value, change_pct
              FROM metrics WHERE run_id = ?1 ORDER BY metric",
@@ -1219,7 +1241,7 @@ impl Database {
     }
 
     fn get_structured_artifacts(&self, run_id: &str) -> Result<Vec<StructuredArtifact>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, kind, title, summary, columns, rows, series, evidence_ids, display_order, created_at
              FROM structured_artifacts WHERE run_id = ?1 ORDER BY display_order, created_at",
@@ -1251,7 +1273,7 @@ impl Database {
     }
 
     fn get_blocks(&self, run_id: &str) -> Result<Vec<AnalysisBlock>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, kind, title, body, evidence_ids, confidence, importance, display_order, created_at
              FROM analysis_blocks WHERE run_id = ?1 ORDER BY display_order, created_at",
@@ -1276,7 +1298,7 @@ impl Database {
     }
 
     pub fn get_projections(&self, run_id: &str) -> Result<Vec<Projection>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, entity_id, horizon, metric, current_value, current_value_label, unit, scenarios, methodology, key_assumptions, evidence_ids, confidence, disclaimer, created_at
              FROM projections WHERE run_id = ?1 ORDER BY created_at",
@@ -1307,7 +1329,7 @@ impl Database {
     }
 
     pub fn get_final_stance(&self, run_id: &str) -> Result<Option<FinalStance>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, run_id, stance, horizon, confidence, summary, key_reasons, what_would_change, disclaimer, created_at
              FROM final_stances WHERE run_id = ?1",
@@ -1334,7 +1356,7 @@ impl Database {
     }
 
     pub fn existing_source_ids(&self, run_id: &str) -> Result<HashSet<String>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT id FROM sources WHERE run_id = ?1")?;
         let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
         let mut out = HashSet::new();
@@ -1345,7 +1367,7 @@ impl Database {
     }
 
     pub fn existing_block_ids(&self, run_id: &str) -> Result<HashSet<String>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT id FROM analysis_blocks WHERE run_id = ?1")?;
         let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
         let mut out = HashSet::new();
@@ -1356,7 +1378,7 @@ impl Database {
     }
 
     pub fn save_counter_thesis(&self, thesis: &CounterThesis) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO counter_theses
             (id, run_id, stance_against, summary, supporting_evidence_ids, why_we_reject_or_partially_accept, residual_probability, created_at)
@@ -1376,7 +1398,7 @@ impl Database {
     }
 
     pub fn get_counter_theses(&self, run_id: &str) -> Result<Vec<CounterThesis>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, stance_against, summary, supporting_evidence_ids, why_we_reject_or_partially_accept, residual_probability, created_at
              FROM counter_theses WHERE run_id = ?1 ORDER BY created_at",
@@ -1398,7 +1420,7 @@ impl Database {
     }
 
     pub fn save_uncertainty_entry(&self, entry: &UncertaintyEntry) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO uncertainty_entries
             (id, run_id, question, why_it_matters, attempted_resolution, blocking, related_decision_criterion, created_at)
@@ -1409,7 +1431,7 @@ impl Database {
                 entry.question,
                 entry.why_it_matters,
                 entry.attempted_resolution,
-                entry.blocking as i64,
+                i64::from(entry.blocking),
                 entry.related_decision_criterion,
                 entry.created_at,
             ],
@@ -1418,7 +1440,7 @@ impl Database {
     }
 
     pub fn get_uncertainty_entries(&self, run_id: &str) -> Result<Vec<UncertaintyEntry>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, question, why_it_matters, attempted_resolution, blocking, related_decision_criterion, created_at
              FROM uncertainty_entries WHERE run_id = ?1 ORDER BY created_at",
@@ -1439,7 +1461,7 @@ impl Database {
     }
 
     pub fn save_methodology_note(&self, note: &MethodologyNote) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO methodology_notes
             (id, run_id, approach, frameworks, data_windows, known_limitations, created_at)
@@ -1458,7 +1480,7 @@ impl Database {
     }
 
     pub fn get_methodology_note(&self, run_id: &str) -> Result<Option<MethodologyNote>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, run_id, approach, frameworks, data_windows, known_limitations, created_at
              FROM methodology_notes WHERE run_id = ?1",
@@ -1483,7 +1505,7 @@ impl Database {
     }
 
     pub fn save_decision_criterion_answer(&self, answer: &DecisionCriterionAnswer) -> Result<()> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO decision_criterion_answers
             (id, run_id, criterion, verdict, summary, supporting_block_ids, supporting_evidence_ids, created_at)
@@ -1506,7 +1528,7 @@ impl Database {
         &self,
         run_id: &str,
     ) -> Result<Vec<DecisionCriterionAnswer>> {
-        let conn = self.conn.lock().expect("db lock poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, run_id, criterion, verdict, summary, supporting_block_ids, supporting_evidence_ids, created_at
              FROM decision_criterion_answers WHERE run_id = ?1 ORDER BY created_at",

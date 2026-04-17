@@ -1,3 +1,4 @@
+use crate::commands::CommandError;
 use crate::infra::shell::find_bin;
 use serde::Serialize;
 use std::process::Stdio;
@@ -30,16 +31,13 @@ pub async fn get_app_version() -> String {
 }
 
 #[tauri::command]
-pub async fn run_self_update(app: AppHandle) -> Result<(), String> {
-    let brew = match find_bin("brew") {
-        Some(path) => path,
-        None => {
-            let msg =
-                "Homebrew not found in PATH. Open Terminal and run `brew upgrade --cask bullpen`."
-                    .to_string();
-            emit_error(&app, msg.clone());
-            return Err(msg);
-        }
+pub async fn run_self_update(app: AppHandle) -> Result<(), CommandError> {
+    let Some(brew) = find_bin("brew") else {
+        let msg =
+            "Homebrew not found in PATH. Open Terminal and run `brew upgrade --cask bullpen`."
+                .to_string();
+        emit_error(&app, msg.clone());
+        return Err(msg.into());
     };
 
     emit_log(
@@ -59,7 +57,7 @@ pub async fn run_self_update(app: AppHandle) -> Result<(), String> {
         Err(err) => {
             let msg = format!("Failed to spawn brew: {err}");
             emit_error(&app, msg.clone());
-            return Err(msg);
+            return Err(msg.into());
         }
     };
 
@@ -91,14 +89,14 @@ pub async fn run_self_update(app: AppHandle) -> Result<(), String> {
         Err(err) => {
             let msg = format!("Failed waiting for brew: {err}");
             emit_error(&app, msg.clone());
-            return Err(msg);
+            return Err(msg.into());
         }
     };
 
     if !status.success() {
         let msg = format!("brew upgrade failed with status {status}");
         emit_error(&app, msg.clone());
-        return Err(msg);
+        return Err(msg.into());
     }
 
     // Best-effort detection of "already up-to-date" — brew prints this to stderr.

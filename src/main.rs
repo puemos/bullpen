@@ -3,7 +3,7 @@ use bullpen::infra::acp::analysis_mcp_server;
 use bullpen::state::AppState;
 
 fn main() {
-    env_logger::init();
+    let _ = env_logger::try_init();
 
     if std::env::args().any(|arg| arg == "--printenv") {
         bullpen::infra::shell::print_env_for_capture();
@@ -11,6 +11,12 @@ fn main() {
     }
 
     let _ = fix_path_env::fix();
+
+    // Capture the user's interactive PATH once, on the main thread, before
+    // any worker threads or the Tauri runtime spawn. Later, ACP child
+    // processes may also call this, but at that point the value is cached
+    // behind a `OnceLock` so no `env::set_var` races are possible.
+    bullpen::infra::shell::init_process_path();
 
     if std::env::args().any(|arg| arg == "--analysis-mcp-server") {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -23,10 +29,18 @@ fn main() {
         return;
     }
 
+    let state = match AppState::try_new() {
+        Ok(state) => state,
+        Err(err) => {
+            eprintln!("Failed to open Bullpen database: {err:#}");
+            std::process::exit(1);
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::new())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_agents,
             commands::get_settings,

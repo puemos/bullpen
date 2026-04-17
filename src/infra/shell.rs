@@ -43,6 +43,7 @@ fn init_process_path_internal() {
     }
 }
 
+#[must_use]
 pub fn find_bin(command: &str) -> Option<PathBuf> {
     init_process_path();
 

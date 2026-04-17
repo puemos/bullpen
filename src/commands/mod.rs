@@ -1,14 +1,19 @@
+pub mod error;
 pub mod update;
 
-use crate::domain::*;
+pub use error::CommandError;
+
+use crate::domain::{
+    Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
+};
 use crate::infra::acp::analysis_generator::{
-    GenerateAnalysisInput, ProgressEvent, generate_with_acp,
+    AcpCancelled, GenerateAnalysisInput, ProgressEvent, generate_with_acp,
 };
 use crate::infra::acp::analysis_mcp_server::RunContext;
 use crate::infra::acp::{AgentCandidate, list_agent_candidates};
 use crate::infra::app_config::{AppConfig, load_config, save_config};
 use crate::state::AppState;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -20,55 +25,7 @@ use uuid::Uuid;
 const STANDALONE_VIEWER_HTML: &str = include_str!("../../frontend/dist-viewer/viewer.html");
 const REPORT_PLACEHOLDER: &str = "\"__BULLPEN_REPORT_JSON__\"";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "event", content = "data")]
-pub enum ProgressEventPayload {
-    Log(String),
-    MessageDelta {
-        id: String,
-        delta: String,
-    },
-    ThoughtDelta {
-        id: String,
-        delta: String,
-    },
-    ToolCallStarted {
-        tool_call_id: String,
-        title: String,
-        kind: String,
-    },
-    ToolCallComplete {
-        tool_call_id: String,
-        status: String,
-        title: String,
-        raw_input: Option<serde_json::Value>,
-        raw_output: Option<serde_json::Value>,
-    },
-    Plan(FrontendPlan),
-    PlanSubmitted,
-    SourceSubmitted,
-    MetricSubmitted,
-    ArtifactSubmitted,
-    BlockSubmitted,
-    StanceSubmitted,
-    ProjectionSubmitted,
-    Completed,
-    Error {
-        message: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FrontendPlan {
-    pub entries: Vec<FrontendPlanEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FrontendPlanEntry {
-    pub content: String,
-    pub priority: String,
-    pub status: String,
-}
+pub use crate::infra::progress::{FrontendPlan, FrontendPlanEntry, ProgressEventPayload};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DataChangedPayload {
@@ -83,25 +40,27 @@ pub struct GenerateAnalysisResult {
 }
 
 #[tauri::command]
-pub async fn get_agents() -> Result<Vec<AgentCandidate>, String> {
+pub async fn get_agents() -> Result<Vec<AgentCandidate>, CommandError> {
     Ok(list_agent_candidates())
 }
 
 #[tauri::command]
-pub async fn get_settings() -> Result<AppConfig, String> {
+pub async fn get_settings() -> Result<AppConfig, CommandError> {
     Ok(load_config())
 }
 
 #[tauri::command]
-pub async fn update_settings(config: AppConfig) -> Result<AppConfig, String> {
-    save_config(&config).map_err(|err| err.to_string())?;
+pub async fn update_settings(config: AppConfig) -> Result<AppConfig, CommandError> {
+    save_config(&config)?;
     Ok(config)
 }
 
 #[tauri::command]
-pub async fn get_all_analyses(state: State<'_, AppState>) -> Result<Vec<AnalysisSummary>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
-    db.list_analyses().map_err(|err| err.to_string())
+pub async fn get_all_analyses(
+    state: State<'_, AppState>,
+) -> Result<Vec<AnalysisSummary>, CommandError> {
+    let db = &state.db;
+    Ok(db.list_analyses()?)
 }
 
 #[tauri::command]
@@ -109,26 +68,24 @@ pub async fn get_analysis_report(
     state: State<'_, AppState>,
     analysis_id: String,
     run_id: Option<String>,
-) -> Result<Option<AnalysisReport>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
-    db.get_report(&analysis_id, run_id.as_deref())
-        .map_err(|err| err.to_string())
+) -> Result<Option<AnalysisReport>, CommandError> {
+    let db = &state.db;
+    Ok(db.get_report(&analysis_id, run_id.as_deref())?)
 }
 
 #[tauri::command]
 pub async fn delete_analysis(
     state: State<'_, AppState>,
     analysis_id: String,
-) -> Result<(), String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
-    db.delete_analysis(&analysis_id)
-        .map_err(|err| err.to_string())
+) -> Result<(), CommandError> {
+    let db = &state.db;
+    Ok(db.delete_analysis(&analysis_id)?)
 }
 
 #[tauri::command]
-pub async fn stop_analysis(state: State<'_, AppState>, run_id: String) -> Result<(), String> {
+pub async fn stop_analysis(state: State<'_, AppState>, run_id: String) -> Result<(), CommandError> {
     let token = {
-        let active = state.active_runs.lock().map_err(|err| err.to_string())?;
+        let active = state.active_runs.lock()?;
         active.get(&run_id).cloned()
     };
     if let Some(token) = token {
@@ -143,14 +100,13 @@ pub struct ExportedHtml {
     pub size_bytes: usize,
 }
 
-fn build_standalone_html(report: &AnalysisReport) -> Result<String, String> {
+fn build_standalone_html(report: &AnalysisReport) -> Result<String, CommandError> {
     if !STANDALONE_VIEWER_HTML.contains(REPORT_PLACEHOLDER) {
         return Err(
-            "viewer template is missing the report placeholder; run `pnpm build:viewer`"
-                .to_string(),
+            "viewer template is missing the report placeholder; run `pnpm build:viewer`".into(),
         );
     }
-    let json = serde_json::to_string(report).map_err(|err| err.to_string())?;
+    let json = serde_json::to_string(report)?;
     // Escape sequences that would close the host <script> tag when the JSON
     // is embedded inline. Standard precaution for JSON-in-HTML.
     let safe = json.replace("</", "<\\/").replace("<!--", "<\\!--");
@@ -185,16 +141,15 @@ pub async fn export_analysis_html(
     app: AppHandle,
     state: State<'_, AppState>,
     analysis_id: String,
-) -> Result<Option<ExportedHtml>, String> {
+) -> Result<Option<ExportedHtml>, CommandError> {
     use tauri_plugin_dialog::DialogExt;
 
     let report = {
-        let db = state.db.lock().map_err(|err| err.to_string())?;
-        db.get_report(&analysis_id, None)
-            .map_err(|err| err.to_string())?
+        let db = &state.db;
+        db.get_report(&analysis_id, None)?
     };
     let Some(report) = report else {
-        return Err("analysis not found".to_string());
+        return Err("analysis not found".into());
     };
 
     let html = build_standalone_html(&report)?;
@@ -210,15 +165,16 @@ pub async fn export_analysis_html(
             let _ = tx.send(path);
         });
 
-    let Some(path) = rx.await.map_err(|err| err.to_string())? else {
+    let Some(path) = rx.await? else {
         return Ok(None);
     };
     let path_buf = path
         .into_path()
-        .map_err(|err| format!("invalid save path: {err}"))?;
+        .map_err(|err| CommandError::new(format!("invalid save path: {err}")))?;
 
     let size_bytes = html.len();
-    std::fs::write(&path_buf, html.as_bytes()).map_err(|err| format!("write failed: {err}"))?;
+    std::fs::write(&path_buf, html.as_bytes())
+        .map_err(|err| CommandError::new(format!("write failed: {err}")))?;
 
     Ok(Some(ExportedHtml {
         path: path_buf.display().to_string(),
@@ -240,14 +196,13 @@ pub struct PublishedReport {
 pub async fn publish_analysis_html(
     state: State<'_, AppState>,
     analysis_id: String,
-) -> Result<PublishedReport, String> {
+) -> Result<PublishedReport, CommandError> {
     let report = {
-        let db = state.db.lock().map_err(|err| err.to_string())?;
-        db.get_report(&analysis_id, None)
-            .map_err(|err| err.to_string())?
+        let db = &state.db;
+        db.get_report(&analysis_id, None)?
     };
     let Some(report) = report else {
-        return Err("analysis not found".to_string());
+        return Err("analysis not found".into());
     };
 
     let html = build_standalone_html(&report)?;
@@ -259,7 +214,7 @@ pub async fn publish_analysis_html(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|err| format!("http client: {err}"))?;
+        .map_err(|err| CommandError::new(format!("http client: {err}")))?;
 
     let body = serde_json::json!({
         "html": html,
@@ -272,26 +227,30 @@ pub async fn publish_analysis_html(
         .json(&body)
         .send()
         .await
-        .map_err(|err| format!("publish failed: {err}"))?;
+        .map_err(|err| CommandError::new(format!("publish failed: {err}")))?;
 
     let status = response.status();
     let text = response
         .text()
         .await
-        .map_err(|err| format!("publish failed: read body: {err}"))?;
+        .map_err(|err| CommandError::new(format!("publish failed: read body: {err}")))?;
 
     if !status.is_success() {
-        return Err(format!("publish failed: {status}: {text}"));
+        return Err(CommandError::new(format!(
+            "publish failed: {status}: {text}"
+        )));
     }
 
     let envelope: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|err| format!("publish failed: parse: {err}: {text}"))?;
+        .map_err(|err| CommandError::new(format!("publish failed: parse: {err}: {text}")))?;
 
     let data = envelope.get("data").unwrap_or(&envelope);
     let url = data
         .get("url")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("publish failed: missing url in response: {text}"))?
+        .ok_or_else(|| {
+            CommandError::new(format!("publish failed: missing url in response: {text}"))
+        })?
         .to_string();
     let site_id = data
         .get("siteId")
@@ -316,14 +275,13 @@ pub async fn publish_analysis_html(
 pub async fn export_analysis_markdown(
     state: State<'_, AppState>,
     analysis_id: String,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     let report = {
-        let db = state.db.lock().map_err(|err| err.to_string())?;
-        db.get_report(&analysis_id, None)
-            .map_err(|err| err.to_string())?
+        let db = &state.db;
+        db.get_report(&analysis_id, None)?
     };
     let Some(report) = report else {
-        return Err("analysis not found".to_string());
+        return Err("analysis not found".into());
     };
     Ok(render_markdown(&report))
 }
@@ -332,10 +290,10 @@ pub async fn export_analysis_markdown(
 pub async fn create_analysis(
     state: State<'_, AppState>,
     user_prompt: String,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     let trimmed = user_prompt.trim();
     if trimmed.is_empty() {
-        return Err("Enter a research request before starting analysis.".to_string());
+        return Err("Enter a research request before starting analysis.".into());
     }
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -349,8 +307,8 @@ pub async fn create_analysis(
         created_at: now.clone(),
         updated_at: now,
     };
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.save_analysis(&analysis).map_err(|e| e.to_string())?;
+    let db = &state.db;
+    db.save_analysis(&analysis)?;
     Ok(id)
 }
 
@@ -359,30 +317,27 @@ pub async fn set_active_run(
     state: State<'_, AppState>,
     analysis_id: String,
     run_id: String,
-) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.save_analysis(&{
-        let analysis = db
-            .get_report(&analysis_id, None)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Analysis not found".to_string())?
-            .analysis;
-        Analysis {
-            active_run_id: Some(run_id),
-            updated_at: chrono::Utc::now().to_rfc3339(),
-            ..analysis
-        }
-    })
-    .map_err(|e| e.to_string())
+) -> Result<(), CommandError> {
+    let db = &state.db;
+    let analysis = db
+        .get_report(&analysis_id, None)?
+        .ok_or_else(|| CommandError::new("Analysis not found"))?
+        .analysis;
+    db.save_analysis(&Analysis {
+        active_run_id: Some(run_id),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+        ..analysis
+    })?;
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn get_run_progress(
     state: State<'_, AppState>,
     run_id: String,
-) -> Result<Vec<ProgressEventPayload>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_run_progress(&run_id).map_err(|e| e.to_string())
+) -> Result<Vec<ProgressEventPayload>, CommandError> {
+    let db = &state.db;
+    Ok(db.get_run_progress(&run_id)?)
 }
 
 #[tauri::command]
@@ -396,10 +351,10 @@ pub async fn generate_analysis(
     analysis_id: String,
     run_id: Option<String>,
     on_progress: Channel<ProgressEventPayload>,
-) -> Result<GenerateAnalysisResult, String> {
+) -> Result<GenerateAnalysisResult, CommandError> {
     let trimmed_prompt = user_prompt.trim();
     if trimmed_prompt.is_empty() {
-        return Err("Enter a research request before starting analysis.".to_string());
+        return Err("Enter a research request before starting analysis.".into());
     }
 
     let candidates = list_agent_candidates();
@@ -407,13 +362,13 @@ pub async fn generate_analysis(
         .iter()
         .find(|candidate| candidate.id == agent_id)
         .or_else(|| candidates.iter().find(|candidate| candidate.available))
-        .ok_or_else(|| "No ACP agent is configured. Add one in Settings.".to_string())?;
+        .ok_or_else(|| CommandError::new("No ACP agent is configured. Add one in Settings."))?;
 
     let command = candidate.command.clone().ok_or_else(|| {
-        format!(
+        CommandError::new(format!(
             "Agent '{}' is not available. Configure the binary in Settings or environment.",
             candidate.label
-        )
+        ))
     })?;
     let agent_args = candidate.args.clone();
     let (model_flag, model_env) = candidate.resolve_model(model_id.as_deref());
@@ -434,16 +389,15 @@ pub async fn generate_analysis(
     };
 
     let db_path = {
-        let db = state.db.lock().map_err(|err| err.to_string())?;
-        db.save_run(&run).map_err(|err| err.to_string())?;
-        db.set_active_run_if_empty(&analysis_id, &run_id)
-            .map_err(|err| err.to_string())?;
+        let db = &state.db;
+        db.save_run(&run)?;
+        db.set_active_run_if_empty(&analysis_id, &run_id)?;
         db.path().clone()
     };
 
     let cancel_token = CancellationToken::new();
     {
-        let mut active = state.active_runs.lock().map_err(|err| err.to_string())?;
+        let mut active = state.active_runs.lock()?;
         active.insert(run_id.clone(), cancel_token.clone());
     }
 
@@ -540,9 +494,7 @@ pub async fn generate_analysis(
                 ProgressEventPayload::Completed => Some("completed"),
                 _ => None,
             };
-            if let Ok(db) = db_clone.lock() {
-                let _ = db.append_progress_event(&run_id_clone, &payload);
-            }
+            let _ = db_clone.append_progress_event(&run_id_clone, &payload);
             if data_kind.is_some() {
                 let _ = coalesce_tx.send(());
             }
@@ -573,36 +525,32 @@ pub async fn generate_analysis(
     .await;
 
     {
-        let mut active = state.active_runs.lock().map_err(|err| err.to_string())?;
+        let mut active = state.active_runs.lock()?;
         active.remove(&run_id);
     }
 
     match generation_result {
         Ok(_) => {
-            let db = state.db.lock().map_err(|err| err.to_string())?;
-            db.update_run_status(&run_id, AnalysisStatus::Completed, None)
-                .map_err(|err| err.to_string())?;
-            db.recompute_analysis_status(&analysis_id)
-                .map_err(|err| err.to_string())?;
+            let db = &state.db;
+            db.update_run_status(&run_id, AnalysisStatus::Completed, None)?;
+            db.recompute_analysis_status(&analysis_id)?;
             let _ = on_progress.send(ProgressEventPayload::Completed);
         }
         Err(err) => {
+            let is_cancelled = err.downcast_ref::<AcpCancelled>().is_some();
             let message = err.to_string();
-            let is_cancelled = message.contains("cancelled by user");
             let status = if is_cancelled {
                 AnalysisStatus::Cancelled
             } else {
                 AnalysisStatus::Failed
             };
-            let db = state.db.lock().map_err(|err| err.to_string())?;
-            db.update_run_status(&run_id, status, Some(&message))
-                .map_err(|err| err.to_string())?;
-            db.recompute_analysis_status(&analysis_id)
-                .map_err(|err| err.to_string())?;
+            let db = &state.db;
+            db.update_run_status(&run_id, status, Some(&message))?;
+            db.recompute_analysis_status(&analysis_id)?;
             let _ = on_progress.send(ProgressEventPayload::Error {
                 message: message.clone(),
             });
-            return Err(message);
+            return Err(message.into());
         }
     }
 
@@ -626,51 +574,52 @@ fn derive_title(prompt: &str) -> String {
 }
 
 fn render_markdown(report: &AnalysisReport) -> String {
+    use std::fmt::Write as _;
     let mut out = String::new();
-    out.push_str(&format!("# {}\n\n", report.analysis.title));
+    let _ = writeln!(out, "# {}\n", report.analysis.title);
     out.push_str("> Research only. Not investment advice.\n\n");
-    out.push_str(&format!("**Request:** {}\n\n", report.analysis.user_prompt));
+    let _ = writeln!(out, "**Request:** {}\n", report.analysis.user_prompt);
     if let Some(stance) = &report.final_stance {
-        out.push_str(&format!(
-            "## Final Stance\n\n**{}**, horizon: {}, confidence: {:.0}%\n\n{}\n\n",
+        let _ = writeln!(
+            out,
+            "## Final Stance\n\n**{}**, horizon: {}, confidence: {:.0}%\n\n{}\n",
             stance.stance,
             stance.horizon,
             stance.confidence * 100.0,
             stance.summary
-        ));
+        );
     }
     if !report.projections.is_empty() {
         out.push_str("## Projections\n\n");
         for projection in &report.projections {
-            out.push_str(&format!(
-                "### {} ({}) · horizon {} · current {}\n\n",
+            let _ = writeln!(
+                out,
+                "### {} ({}) · horizon {} · current {}\n",
                 projection.metric,
                 projection.entity_id,
                 projection.horizon,
                 projection.current_value_label
-            ));
-            out.push_str(&format!("**Methodology:** {}\n\n", projection.methodology));
+            );
+            let _ = writeln!(out, "**Methodology:** {}\n", projection.methodology);
             for scenario in &projection.scenarios {
-                out.push_str(&format!(
-                    "- **{}** → {} ({:+.1}%, probability {:.0}%) — {}\n",
+                let _ = writeln!(
+                    out,
+                    "- **{}** → {} ({:+.1}%, probability {:.0}%) — {}",
                     scenario.label,
                     scenario.target_label,
                     scenario.upside_pct * 100.0,
                     scenario.probability * 100.0,
                     scenario.rationale
-                ));
+                );
             }
             if !projection.key_assumptions.is_empty() {
                 out.push_str("\n**Key assumptions:**\n");
                 for assumption in &projection.key_assumptions {
-                    out.push_str(&format!("- {assumption}\n"));
+                    let _ = writeln!(out, "- {assumption}");
                 }
             }
             if !projection.evidence_ids.is_empty() {
-                out.push_str(&format!(
-                    "\nSources: `{}`\n",
-                    projection.evidence_ids.join("`, `")
-                ));
+                let _ = writeln!(out, "\nSources: `{}`", projection.evidence_ids.join("`, `"));
             }
             out.push('\n');
         }
@@ -678,35 +627,27 @@ fn render_markdown(report: &AnalysisReport) -> String {
     if !report.artifacts.is_empty() {
         out.push_str("## Structured Evidence\n\n");
         for artifact in &report.artifacts {
-            out.push_str(&format!(
-                "### {}\n\n{}\n\n",
-                artifact.title, artifact.summary
-            ));
+            let _ = writeln!(out, "### {}\n\n{}\n", artifact.title, artifact.summary);
             if !artifact.evidence_ids.is_empty() {
-                out.push_str(&format!(
-                    "Sources: `{}`\n\n",
-                    artifact.evidence_ids.join("`, `")
-                ));
+                let _ = writeln!(out, "Sources: `{}`\n", artifact.evidence_ids.join("`, `"));
             }
         }
     }
     for block in &report.blocks {
-        out.push_str(&format!("## {}\n\n{}\n\n", block.title, block.body));
+        let _ = writeln!(out, "## {}\n\n{}\n", block.title, block.body);
         if !block.evidence_ids.is_empty() {
-            out.push_str(&format!(
-                "Sources: `{}`\n\n",
-                block.evidence_ids.join("`, `")
-            ));
+            let _ = writeln!(out, "Sources: `{}`\n", block.evidence_ids.join("`, `"));
         }
     }
     if !report.sources.is_empty() {
         out.push_str("## Sources\n\n");
         for source in &report.sources {
             let link = source.url.clone().unwrap_or_default();
-            out.push_str(&format!(
-                "- `{}` {} ({}, retrieved {})\n",
+            let _ = writeln!(
+                out,
+                "- `{}` {} ({}, retrieved {})",
                 source.id, source.title, link, source.retrieved_at
-            ));
+            );
         }
     }
     out
@@ -778,7 +719,11 @@ mod tests {
     fn safe_filename_caps_long_inputs_to_eighty_chars_plus_extension() {
         let long = "a".repeat(200);
         let out = safe_filename(&long);
-        assert!(out.ends_with(".html"));
+        assert!(
+            std::path::Path::new(&out)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+        );
         // 80 base chars + ".html" = 85
         assert_eq!(out.len(), 85);
         assert!(out.chars().take(80).all(|c| c == 'a'));

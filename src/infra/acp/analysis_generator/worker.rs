@@ -17,6 +17,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Builder;
 use tokio::task::LocalSet;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,19 @@ pub struct GenerateAnalysisResult {
     pub logs: Vec<String>,
 }
 
+/// Sentinel error returned when the user cancelled a run.
+///
+/// The caller can detect cancellation with `err.downcast_ref::<AcpCancelled>()`
+/// instead of matching on the error message, which would be brittle.
+#[derive(Debug, thiserror::Error)]
+#[error("agent generation cancelled by user")]
+pub struct AcpCancelled;
+
+/// Sentinel error returned when the agent exceeds `timeout_secs`.
+#[derive(Debug, thiserror::Error)]
+#[error("agent timed out after {0}s")]
+pub struct AcpTimeout(pub u64);
+
 pub async fn generate_with_acp(input: GenerateAnalysisInput) -> Result<GenerateAnalysisResult> {
     let (sender, receiver) = futures::channel::oneshot::channel();
     let timeout_secs = input.timeout_secs.unwrap_or(1800);
@@ -87,14 +101,14 @@ pub async fn generate_with_acp(input: GenerateAnalysisInput) -> Result<GenerateA
                         result = tokio::time::timeout(
                             Duration::from_secs(timeout_secs),
                             generate_with_acp_inner(input),
-                        ) => result.map_err(|_| anyhow::anyhow!("agent timed out after {timeout_secs}s"))?,
-                        _ = async {
+                        ) => result.map_err(|_| anyhow::Error::new(AcpTimeout(timeout_secs)))?,
+                        () = async {
                             if let Some(token) = cancel_token {
                                 token.cancelled().await;
                             } else {
                                 std::future::pending::<()>().await;
                             }
-                        } => Err(anyhow::anyhow!("agent generation cancelled by user")),
+                        } => Err(anyhow::Error::new(AcpCancelled)),
                     }
                 })
             }
@@ -199,7 +213,6 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
     let thoughts = client.thoughts.clone();
     let finalization_received = client.finalization_received.clone();
 
-    use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     let stdin_compat = stdin.compat_write();
     let stdout_compat = stdout.compat();
     let spawn_fn = |fut: LocalBoxFuture<'static, ()>| {
@@ -289,7 +302,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
                     log_fn(format!("agent exited: {}", status?));
                     break;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                () = tokio::time::sleep(Duration::from_millis(200)) => {}
             }
         }
 

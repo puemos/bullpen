@@ -28,6 +28,7 @@ impl Default for AppConfig {
     }
 }
 
+#[must_use]
 pub fn load_config() -> AppConfig {
     let path = config_path();
     let Ok(raw) = std::fs::read_to_string(path) else {
@@ -100,7 +101,9 @@ mod tests {
 
     impl EnvGuard {
         fn set(path: &std::path::Path) -> Self {
-            let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let lock = ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let previous = std::env::var("BULLPEN_CONFIG_PATH").ok();
             unsafe {
                 std::env::set_var("BULLPEN_CONFIG_PATH", path);

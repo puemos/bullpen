@@ -1,4 +1,4 @@
-use crate::infra::acp::analysis_mcp_server::RunContext;
+use crate::domain::RunContext;
 use handlebars::Handlebars;
 use serde_json::json;
 

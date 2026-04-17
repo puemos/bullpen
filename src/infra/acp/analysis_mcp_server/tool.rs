@@ -1,5 +1,11 @@
 use super::config::ServerConfig;
-use crate::domain::*;
+use crate::domain::{
+    AnalysisBlock, AnalysisIntent, AnalysisStatus, ArtifactColumn, ArtifactKind, ArtifactSeries,
+    BlockKind, CounterThesis, CriterionVerdict, DecisionCriterionAnswer, Entity, FinalStance,
+    Importance, MethodologyNote, MetricSnapshot, Projection, ProjectionScenario,
+    RESEARCH_DISCLAIMER, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
+    StructuredArtifact, UncertaintyEntry,
+};
 use crate::infra::db::Database;
 use pmcp::{SimpleTool, ToolHandler};
 use serde::Deserialize;
@@ -55,7 +61,7 @@ fn validate_evidence_ids(
     let unknown: Vec<&str> = ids
         .iter()
         .filter(|id| !existing.contains(id.as_str()))
-        .map(|s| s.as_str())
+        .map(std::string::String::as_str)
         .collect();
     if !unknown.is_empty() {
         return Err(pmcp::Error::Validation(format!(
@@ -76,7 +82,7 @@ fn jaccard_similarity(a: &[String], b: &[String]) -> f64 {
                 s.to_lowercase()
                     .split(|c: char| !c.is_alphanumeric())
                     .filter(|t| !t.is_empty() && t.len() > 2)
-                    .map(|t| t.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<_>>()
             })
             .collect()
@@ -473,7 +479,7 @@ fn validate_scenario_matrix_rows(
     }
     let sum: f64 = rows
         .iter()
-        .filter_map(|row| row.get("probability").and_then(|v| v.as_f64()))
+        .filter_map(|row| row.get("probability").and_then(serde_json::Value::as_f64))
         .sum();
     if (sum - 1.0).abs() > 0.02 {
         return Err(pmcp::Error::Validation(format!(
@@ -1003,7 +1009,7 @@ pub fn create_submit_decision_criterion_answer_tool(config: Arc<ServerConfig>) -
                     .supporting_block_ids
                     .iter()
                     .filter(|id| !existing_blocks.contains(id.as_str()))
-                    .map(|s| s.as_str())
+                    .map(std::string::String::as_str)
                     .collect();
                 if !unknown_blocks.is_empty() {
                     return Err(pmcp::Error::Validation(format!(
@@ -1077,8 +1083,8 @@ pub fn create_finalize_analysis_tool(config: Arc<ServerConfig>) -> impl ToolHand
 
 #[cfg(test)]
 mod tests {
-    use super::super::config::RunContext;
     use super::*;
+    use crate::domain::RunContext;
     use crate::infra::db::tests::{save_source, seed_full_single_equity, seed_run};
     use pmcp::{RequestHandlerExtra, ToolHandler};
     use tempfile::TempDir;

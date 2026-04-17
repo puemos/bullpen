@@ -82,7 +82,6 @@ impl FromStr for AnalysisIntent {
             "sector_analysis" => Ok(Self::SectorAnalysis),
             "macro_theme" => Ok(Self::MacroTheme),
             "watchlist" => Ok(Self::Watchlist),
-            "general_research" => Ok(Self::GeneralResearch),
             _ => Ok(Self::GeneralResearch),
         }
     }
@@ -185,7 +184,6 @@ impl FromStr for SourceReliability {
         match value.to_ascii_lowercase().as_str() {
             "primary" => Ok(Self::Primary),
             "high" => Ok(Self::High),
-            "medium" => Ok(Self::Medium),
             "low" => Ok(Self::Low),
             _ => Ok(Self::Medium),
         }
@@ -474,7 +472,6 @@ impl FromStr for StanceKind {
             "neutral" => Ok(Self::Neutral),
             "bearish" => Ok(Self::Bearish),
             "mixed" => Ok(Self::Mixed),
-            "insufficient_data" => Ok(Self::InsufficientData),
             _ => Ok(Self::InsufficientData),
         }
     }

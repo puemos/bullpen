@@ -1,14 +1,5 @@
-use serde::{Deserialize, Serialize};
+use crate::domain::RunContext;
 use std::path::PathBuf;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunContext {
-    pub analysis_id: String,
-    pub run_id: String,
-    pub agent_id: String,
-    pub user_prompt: String,
-    pub created_at: String,
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct ServerConfig {
@@ -17,6 +8,7 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
+    #[must_use]
     pub fn from_args() -> Self {
         let args: Vec<String> = std::env::args().collect();
         Self::from_args_iter(args)

@@ -81,7 +81,6 @@ impl BullpenClient {
     }
 
     fn append_streamed_content(
-        &self,
         store: &Arc<Mutex<Vec<String>>>,
         last_id: &Arc<Mutex<Option<String>>>,
         meta: Option<&Meta>,
@@ -212,13 +211,11 @@ impl agent_client_protocol::Client for BullpenClient {
             )
         });
 
-        let outcome = allow_option
-            .map(|option| {
-                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                    option.option_id.clone(),
-                ))
-            })
-            .unwrap_or(RequestPermissionOutcome::Cancelled);
+        let outcome = allow_option.map_or(RequestPermissionOutcome::Cancelled, |option| {
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                option.option_id.clone(),
+            ))
+        });
 
         Ok(RequestPermissionResponse::new(outcome))
     }
@@ -230,7 +227,7 @@ impl agent_client_protocol::Client for BullpenClient {
         match notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = &chunk.content {
-                    let full = self.append_streamed_content(
+                    let full = Self::append_streamed_content(
                         &self.messages,
                         &self.last_message_id,
                         chunk.meta.as_ref(),
@@ -258,7 +255,7 @@ impl agent_client_protocol::Client for BullpenClient {
             }
             SessionUpdate::AgentThoughtChunk(chunk) => {
                 if let ContentBlock::Text(text) = &chunk.content {
-                    let full = self.append_streamed_content(
+                    let full = Self::append_streamed_content(
                         &self.thoughts,
                         &self.last_thought_id,
                         chunk.meta.as_ref(),
@@ -417,7 +414,7 @@ impl agent_client_protocol::Client for BullpenClient {
                         entry.0 = title;
                     }
                     if let Some(kind) = update.fields.kind {
-                        entry.1 = format!("{:?}", kind).to_lowercase();
+                        entry.1 = format!("{kind:?}").to_lowercase();
                     }
                     if let Some(raw_input) = update.fields.raw_input.clone() {
                         entry.2 = Some(raw_input);
@@ -441,9 +438,10 @@ impl agent_client_protocol::Client for BullpenClient {
         } else {
             serde_json::json!({ "status": "ignored" })
         };
-        let raw = RawValue::from_string(response_value.to_string())
-            .map(Arc::from)
-            .unwrap_or_else(|_| Arc::from(RawValue::from_string("null".into()).unwrap()));
+        let raw = RawValue::from_string(response_value.to_string()).map_or_else(
+            |_| Arc::from(RawValue::from_string("null".into()).unwrap()),
+            Arc::from,
+        );
         Ok(ExtResponse::new(raw))
     }
 

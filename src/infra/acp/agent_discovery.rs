@@ -28,11 +28,12 @@ impl AgentCandidate {
     /// model id. Either/both may be None — when None, the agent runs with its
     /// default model.
     #[allow(clippy::type_complexity)]
+    #[must_use]
     pub fn resolve_model(
         &self,
         model_id: Option<&str>,
     ) -> (Option<(String, String)>, Option<(String, String)>) {
-        let Some(model_id) = model_id.map(|m| m.trim()).filter(|m| !m.is_empty()) else {
+        let Some(model_id) = model_id.map(str::trim).filter(|m| !m.is_empty()) else {
             return (None, None);
         };
 
@@ -69,6 +70,7 @@ fn model(id: &str, name: &str) -> AgentModel {
     }
 }
 
+#[must_use]
 pub fn list_agent_candidates() -> Vec<AgentCandidate> {
     let config = crate::infra::app_config::load_config();
     let mut agents = vec![
