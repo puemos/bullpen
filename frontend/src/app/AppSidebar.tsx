@@ -23,6 +23,9 @@ interface AppSidebarProps {
   selectedAnalysisId: string | null;
   onViewChange: (view: AppView) => void;
   onSelectAnalysis: (analysisId: string) => void | Promise<void>;
+  currentVersion: string | null;
+  updateAvailable: boolean;
+  onUpdateClick: () => void;
 }
 
 export function AppSidebar({
@@ -31,6 +34,9 @@ export function AppSidebar({
   selectedAnalysisId,
   onViewChange,
   onSelectAnalysis,
+  currentVersion,
+  updateAvailable,
+  onUpdateClick,
 }: AppSidebarProps) {
   return (
     <Sidebar className="border-r border-sidebar-border bg-sidebar" variant="sidebar">
@@ -97,19 +103,35 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="px-4 pb-4 pt-2">
-        <button
-          type="button"
-          onClick={() => onViewChange("settings")}
-          className={cn(
-            "self-start text-[12.5px] transition-colors",
-            currentView === "settings"
-              ? "text-sidebar-foreground"
-              : "text-sidebar-foreground/50 hover:text-sidebar-foreground",
+      <SidebarFooter className="gap-2 px-4 pb-4 pt-2">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => onViewChange("settings")}
+            className={cn(
+              "text-[12.5px] transition-colors",
+              currentView === "settings"
+                ? "text-sidebar-foreground"
+                : "text-sidebar-foreground/50 hover:text-sidebar-foreground",
+            )}
+          >
+            Settings
+          </button>
+          {updateAvailable && (
+            <button
+              type="button"
+              onClick={onUpdateClick}
+              className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground"
+            >
+              Update ↑
+            </button>
           )}
-        >
-          Settings
-        </button>
+        </div>
+        {currentVersion && (
+          <span className="font-mono text-[10.5px] tabular-nums text-sidebar-foreground/35">
+            v{currentVersion}
+          </span>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

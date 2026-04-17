@@ -1,3 +1,5 @@
+pub mod update;
+
 use crate::domain::*;
 use crate::infra::acp::analysis_generator::{
     GenerateAnalysisInput, ProgressEvent, generate_with_acp,

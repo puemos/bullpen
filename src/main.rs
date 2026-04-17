@@ -42,6 +42,8 @@ fn main() {
             commands::export_analysis_markdown,
             commands::export_analysis_html,
             commands::publish_analysis_html,
+            commands::update::get_app_version,
+            commands::update::run_self_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bullpen");

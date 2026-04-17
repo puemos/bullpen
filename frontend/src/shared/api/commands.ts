@@ -75,6 +75,14 @@ export async function getRunProgress(runId: string): Promise<ProgressEventPayloa
   return invoke("get_run_progress", { runId });
 }
 
+export async function getAppVersion(): Promise<string> {
+  return invoke("get_app_version");
+}
+
+export async function runSelfUpdate(): Promise<void> {
+  return invoke("run_self_update");
+}
+
 export async function generateAnalysis(
   userPrompt: string,
   agentId: string,

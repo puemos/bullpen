@@ -1,12 +1,14 @@
 import { WarningCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
-import { Toaster } from "sonner";
+import { toast, Toaster } from "sonner";
 import { AppSidebar } from "@/app/AppSidebar";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AnalysisPage } from "@/features/analysis/AnalysisPage";
 import { ResearchPage } from "@/features/run-analysis/ResearchPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { UpdateDialog } from "@/features/updates/UpdateDialog";
 import { useBackendEvent } from "@/hooks/useBackendEvent";
+import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { getAgents, getAllAnalyses, getAnalysisReport, getSettings } from "@/shared/api/commands";
 import { getState, setSelectedReport, setState, useAppStore } from "@/store";
 import type { AgentCandidate, DataChangedPayload } from "@/types";
@@ -21,6 +23,24 @@ export function App() {
   const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
   const [agents, setAgents] = useState<AgentCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { currentVersion, updateAvailable } = useUpdateCheck();
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const toastFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (!updateAvailable || toastFiredRef.current) return;
+    toastFiredRef.current = true;
+    toast("Update available", {
+      description: `v${updateAvailable.latestVersion} is ready to install.`,
+      action: {
+        label: "Details",
+        onClick: () => setUpdateDialogOpen(true),
+      },
+      duration: 12000,
+    });
+  }, [updateAvailable]);
+
+  const openUpdateDialog = useCallback(() => setUpdateDialogOpen(true), []);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -175,6 +195,9 @@ export function App() {
         selectedAnalysisId={selectedAnalysisId}
         onViewChange={changeView}
         onSelectAnalysis={selectAnalysis}
+        currentVersion={currentVersion}
+        updateAvailable={Boolean(updateAvailable)}
+        onUpdateClick={openUpdateDialog}
       />
       <SidebarInset className="h-screen min-w-0 overflow-hidden">
         <div data-tauri-drag-region className="absolute left-0 right-0 top-0 z-10 h-3" />
@@ -193,6 +216,14 @@ export function App() {
           {view === "settings" && <SettingsPage agents={agents} />}
         </div>
       </SidebarInset>
+      {updateAvailable && currentVersion && (
+        <UpdateDialog
+          open={updateDialogOpen}
+          onOpenChange={setUpdateDialogOpen}
+          currentVersion={currentVersion}
+          updateInfo={updateAvailable}
+        />
+      )}
       <Toaster
         position="bottom-right"
         toastOptions={{
