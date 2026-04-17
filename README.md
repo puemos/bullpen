@@ -1,83 +1,118 @@
 # Bullpen
 
-Bullpen is a local desktop workbench for ACP-powered stock market research. It follows the same core idea as LaReview: the agent can research broadly, but it must submit typed blocks through app-owned MCP tools instead of returning one opaque markdown answer.
+> Local desktop workbench for ACP-powered equity research. Agents research broadly — but submit typed, source-backed blocks through app-owned MCP tools, never a single opaque markdown answer.
 
-The first implementation is research-only. It does not execute trades, prepare orders, size positions, or provide personalized investment advice.
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-black)](#license)
+[![Rust](https://img.shields.io/badge/rust-edition%202024-black)](rust-toolchain.toml)
+[![Tauri](https://img.shields.io/badge/tauri-desktop-black)](https://tauri.app)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-black)]()
 
 <p align="center">
-  <img width="880" alt="A Bullpen analysis report showing the thesis, stance, and confidence at the top of the page." src="assets/screenshots/analysis-thesis.png" />
+  <video src="assets/videos/new-analysis.mp4" width="880" controls></video>
+  <br/>
+  <em>Prompt → ACP agent → typed MCP submissions → final stance, in one run.</em>
 </p>
 
-## What It Does
+> ⚠️ **Research only.** Bullpen does not execute trades, prepare orders, size positions, or provide personalized investment advice.
 
-- Accepts free-text prompts such as `Compare NVDA to AMD` or `Analyze the energy sector`.
-- Starts a configured ACP agent.
-- Mounts a `bullpen-analysis` MCP server with structured submission tools.
-- Persists reports locally in SQLite.
-- Renders a simple three-page UI:
-  - Ask: prompt, agent selection, live process stream.
-  - Reports: submitted blocks, metrics, sources, and final stance.
-  - Settings: detected agents and guardrail summary.
+---
+
+## Why Bullpen
+
+LLM research agents default to one long markdown reply. Bullpen inverts that: the agent runs freely, but every claim lands as a **typed block** — a thesis, a metric, a source, a scenario, a stance — submitted through MCP tools Bullpen controls. The report is assembled from those blocks, not parsed from prose. Runs that lack a thesis, risks, sources, or a final stance **fail to finalize**.
+
+## How It Works
+
+1. **Ask** — free-text prompt, pick an ACP agent, watch the process stream live.
+2. **Agent submits typed blocks** — the agent calls `submit_*` tools on the `bullpen-analysis` MCP server. Each call is validated and persisted to SQLite as it arrives.
+3. **Read the report** — thesis, stance, scenarios, projections, and every source behind the call.
+
+---
+
+## Quick Start
+
+```bash
+# prerequisites: Rust stable (see rust-toolchain.toml), pnpm, Node 20+
+git clone https://github.com/puemos/bullpen && cd bullpen
+cd frontend && pnpm install && pnpm build && cd ..
+cargo run
+```
+
+Bullpen auto-discovers any ACP agent on your PATH (Codex, Claude, Gemini, Qwen, Mistral, Kimi, OpenCode).
+
+## The MCP Contract
+
+The agent must submit through these tools. Finalization fails unless the checked requirements are met.
+
+| Tool                      | Purpose                             | Required to finalize          |
+| ------------------------- | ----------------------------------- | :---------------------------- |
+| `submit_research_plan`    | Up-front plan of attack             |                               |
+| `submit_entity_resolution`| Disambiguate tickers / entities     |                               |
+| `submit_source`           | Cite a URL + retrieval context      | ≥ 1                           |
+| `submit_metric_snapshot`  | Structured KPI / metric point       |                               |
+| `submit_analysis_block`   | Thesis, risks, scenarios, etc.      | thesis + risks, source-backed |
+| `submit_final_stance`     | Rating + confidence                 | ✓                             |
+| `finalize_analysis`       | Seal the run                        | —                             |
+
+## Agent Configuration
+
+Bullpen discovers ACP agents via standard commands. You only need one.
+
+<details>
+<summary><strong>Built-in agents</strong> (no config needed if installed)</summary>
+
+- Codex — `npx -y @zed-industries/codex-acp@latest`
+- Claude — `npx -y @zed-industries/claude-code-acp`
+- Gemini / Qwen / Mistral / Kimi — via each CLI's `--experimental-acp`
+- OpenCode — `opencode acp`
+</details>
+
+<details>
+<summary><strong>Override binaries</strong></summary>
+
+`CODEX_ACP_BIN`, `CODEX_ACP_PACKAGE`, `CLAUDE_ACP_BIN`, `GEMINI_ACP_BIN`, `QWEN_ACP_BIN`, `MISTRAL_ACP_BIN`, `KIMI_ACP_BIN`, `OPENCODE_ACP_BIN`
+</details>
+
+<details>
+<summary><strong>Custom agent</strong></summary>
+
+`BULLPEN_CUSTOM_AGENT`, `BULLPEN_CUSTOM_AGENT_ARGS`
+</details>
+
+<details>
+<summary><strong>Storage</strong></summary>
+
+`BULLPEN_DB_PATH` — defaults to the OS app data directory.
+</details>
+
+## Screens
 
 <p align="center">
-  <img width="880" alt="The scenario matrix showing base, upside, and downside cases side by side." src="assets/screenshots/analysis-scenario-matrix.png" />
-</p>
-
-## Structured MCP Tools
-
-The agent must use these tools:
-
-- `submit_research_plan`
-- `submit_entity_resolution`
-- `submit_source`
-- `submit_metric_snapshot`
-- `submit_analysis_block`
-- `submit_final_stance`
-- `finalize_analysis`
-
-Finalization fails unless the run has a thesis block, risks block, at least one source, a final stance, and source-backed material blocks.
-
-<p align="center">
-  <img width="880" alt="The sources panel listing every citation behind the report's claims." src="assets/screenshots/analysis-sources.png" />
+  <img width="260" src="assets/screenshots/analysis-thesis.png" alt="Thesis" />
+  <img width="260" src="assets/screenshots/analysis-scenario-matrix.png" alt="Scenario matrix" />
+  <img width="260" src="assets/screenshots/analysis-projection.png" alt="Projections" />
+  <br/>
+  <img width="260" src="assets/screenshots/analysis-sources.png" alt="Sources" />
+  <img width="260" src="assets/screenshots/analysis-data-points.png" alt="Data points" />
+  <img width="260" src="assets/screenshots/analysis-final-stance.png" alt="Final stance" />
 </p>
 
 ## Development
 
-```bash
-cd frontend
-pnpm install
-pnpm build
-cd ..
-cargo check
-cargo test
-```
+| Command                                      | Purpose                          |
+| -------------------------------------------- | -------------------------------- |
+| `cd frontend && pnpm dev`                    | Vite dev server                  |
+| `cd frontend && pnpm build`                  | Type-check + build frontend      |
+| `cargo run`                                  | Run the Tauri desktop app        |
+| `cargo check`                                | Validate Rust compilation        |
+| `cargo test`                                 | Run Rust tests                   |
+| `cargo fmt`                                  | Format Rust with rustfmt         |
+| `cargo clippy --all-targets --all-features`  | Lint                             |
 
-Run the desktop app:
+## Architecture
 
-```bash
-cargo run
-```
+Rust/Tauri backend + Vite/React frontend. Domain types in `src/domain`, SQLite in `src/infra/db`, ACP + MCP server in `src/infra/acp`, Tauri IPC in `src/commands`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Agent Configuration
+## License
 
-Bullpen discovers the same kinds of ACP agents as LaReview:
-
-- Codex via `npx -y @zed-industries/codex-acp@latest`
-- Claude via `npx -y @zed-industries/claude-code-acp`
-- Gemini/Qwen/Mistral/Kimi via their `--experimental-acp` commands
-- OpenCode via `opencode acp`
-
-Environment overrides:
-
-- `CODEX_ACP_BIN`
-- `CODEX_ACP_PACKAGE`
-- `CLAUDE_ACP_BIN`
-- `GEMINI_ACP_BIN`
-- `QWEN_ACP_BIN`
-- `MISTRAL_ACP_BIN`
-- `KIMI_ACP_BIN`
-- `OPENCODE_ACP_BIN`
-- `BULLPEN_CUSTOM_AGENT`
-- `BULLPEN_CUSTOM_AGENT_ARGS`
-
-The local database defaults to the OS app data directory. Override it with `BULLPEN_DB_PATH`.
+Licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
