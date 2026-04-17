@@ -171,10 +171,13 @@ pub fn list_agent_candidates() -> Vec<AgentCandidate> {
         } else {
             config.custom_agent_args
         };
+        let resolved = crate::infra::shell::find_bin(&custom)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(custom);
         agents.push(AgentCandidate {
             id: "custom".into(),
             label: "Custom".into(),
-            command: Some(custom),
+            command: Some(resolved),
             args,
             available: true,
             models: Vec::new(),
@@ -201,10 +204,13 @@ fn codex_candidate() -> AgentCandidate {
     if let Ok(path) = std::env::var("CODEX_ACP_BIN")
         && !path.trim().is_empty()
     {
+        let resolved = crate::infra::shell::find_bin(&path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(path);
         return AgentCandidate {
             id: "codex".into(),
             label: "Codex".into(),
-            command: Some(path),
+            command: Some(resolved),
             args: Vec::new(),
             available: true,
             models: codex_models,
@@ -214,8 +220,7 @@ fn codex_candidate() -> AgentCandidate {
         };
     }
 
-    let command = which::which("npx")
-        .ok()
+    let command = crate::infra::shell::find_bin("npx")
         .map(|path| path.to_string_lossy().to_string());
     let package = std::env::var("CODEX_ACP_PACKAGE")
         .unwrap_or_else(|_| "@zed-industries/codex-acp@latest".to_string());
@@ -236,10 +241,13 @@ fn npx_candidate(id: &str, label: &str, env_var: &str, package: &str) -> AgentCa
     if let Ok(path) = std::env::var(env_var)
         && !path.trim().is_empty()
     {
+        let resolved = crate::infra::shell::find_bin(&path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(path);
         return AgentCandidate {
             id: id.into(),
             label: label.into(),
-            command: Some(path),
+            command: Some(resolved),
             args: Vec::new(),
             available: true,
             models: Vec::new(),
@@ -249,8 +257,7 @@ fn npx_candidate(id: &str, label: &str, env_var: &str, package: &str) -> AgentCa
         };
     }
 
-    let command = which::which("npx")
-        .ok()
+    let command = crate::infra::shell::find_bin("npx")
         .map(|path| path.to_string_lossy().to_string());
     AgentCandidate {
         id: id.into(),
@@ -275,10 +282,13 @@ fn command_candidate(
     if let Ok(path) = std::env::var(env_var)
         && !path.trim().is_empty()
     {
+        let resolved = crate::infra::shell::find_bin(&path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(path);
         return AgentCandidate {
             id: id.into(),
             label: label.into(),
-            command: Some(path),
+            command: Some(resolved),
             args: args.iter().map(|arg| (*arg).to_string()).collect(),
             available: true,
             models: Vec::new(),
@@ -288,8 +298,7 @@ fn command_candidate(
         };
     }
 
-    let command = which::which(bin)
-        .ok()
+    let command = crate::infra::shell::find_bin(bin)
         .map(|path| path.to_string_lossy().to_string());
 
     AgentCandidate {

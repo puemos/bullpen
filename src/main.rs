@@ -5,6 +5,13 @@ use bullpen::state::AppState;
 fn main() {
     env_logger::init();
 
+    if std::env::args().any(|arg| arg == "--printenv") {
+        bullpen::infra::shell::print_env_for_capture();
+        return;
+    }
+
+    let _ = fix_path_env::fix();
+
     if std::env::args().any(|arg| arg == "--analysis-mcp-server") {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
