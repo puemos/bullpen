@@ -84,3 +84,92 @@ fn config_path() -> PathBuf {
         .join(".bullpen")
         .join("config.json")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // BULLPEN_CONFIG_PATH is process-global; serialize tests that touch it.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(path: &std::path::Path) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let previous = std::env::var("BULLPEN_CONFIG_PATH").ok();
+            unsafe {
+                std::env::set_var("BULLPEN_CONFIG_PATH", path);
+            }
+            Self {
+                _lock: lock,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var("BULLPEN_CONFIG_PATH", value),
+                    None => std::env::remove_var("BULLPEN_CONFIG_PATH"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn load_returns_default_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("absent.json");
+        let _guard = EnvGuard::set(&path);
+        assert_eq!(load_config(), AppConfig::default());
+    }
+
+    #[test]
+    fn load_returns_default_when_file_is_malformed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        let _guard = EnvGuard::set(&path);
+        assert_eq!(load_config(), AppConfig::default());
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let _guard = EnvGuard::set(&path);
+
+        let mut model_by_agent = BTreeMap::new();
+        model_by_agent.insert("codex".into(), "gpt-5-codex".into());
+        model_by_agent.insert("claude".into(), "claude-opus-4-7".into());
+        let config = AppConfig {
+            custom_agent_command: Some("/usr/local/bin/codex".to_string()),
+            custom_agent_args: vec!["--mode".into(), "acp".into()],
+            timeout_secs: 600,
+            source_freshness_days: 14,
+            disclaimer: "Custom disclaimer.".into(),
+            model_by_agent,
+        };
+
+        save_config(&config).unwrap();
+        let loaded = load_config();
+        assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn save_creates_missing_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a").join("b").join("config.json");
+        let _guard = EnvGuard::set(&nested);
+
+        save_config(&AppConfig::default()).unwrap();
+        assert!(nested.exists());
+    }
+}

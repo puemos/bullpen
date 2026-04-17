@@ -1074,3 +1074,392 @@ pub fn create_finalize_analysis_tool(config: Arc<ServerConfig>) -> impl ToolHand
         "properties": {}
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::config::RunContext;
+    use super::*;
+    use crate::infra::db::tests::{save_source, seed_full_single_equity, seed_run};
+    use pmcp::{RequestHandlerExtra, ToolHandler};
+    use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
+
+    fn extra() -> RequestHandlerExtra {
+        RequestHandlerExtra::new("test-req".into(), CancellationToken::new())
+    }
+
+    /// Build a ServerConfig backed by a tempfile-resident SQLite db and a
+    /// run-context JSON file. Returns the tempdir (must outlive the test),
+    /// the shared config, the db handle (for direct seeding) and the run id.
+    fn setup() -> (TempDir, Arc<ServerConfig>, Database, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("bullpen-test.sqlite");
+        let ctx_path = tmp.path().join("ctx.json");
+
+        let db = Database::open_at(db_path.clone()).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+
+        let context = RunContext {
+            analysis_id: "a".into(),
+            run_id: run_id.clone(),
+            agent_id: "fake".into(),
+            user_prompt: "Analyze AAPL".into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        std::fs::write(&ctx_path, serde_json::to_string(&context).unwrap()).unwrap();
+
+        let config = Arc::new(ServerConfig {
+            run_context: Some(ctx_path),
+            db_path: Some(db_path),
+        });
+        (tmp, config, db, run_id)
+    }
+
+    // -------- pure validators --------
+
+    #[test]
+    fn parse_confidence_rejects_none() {
+        let err = parse_confidence("confidence", None).unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(ref m) if m.contains("required")));
+    }
+
+    #[test]
+    fn parse_confidence_rejects_nan_and_out_of_range() {
+        assert!(matches!(
+            parse_confidence("c", Some(f64::NAN)),
+            Err(pmcp::Error::Validation(_))
+        ));
+        assert!(matches!(
+            parse_confidence("c", Some(-0.1)),
+            Err(pmcp::Error::Validation(_))
+        ));
+        assert!(matches!(
+            parse_confidence("c", Some(1.1)),
+            Err(pmcp::Error::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn parse_confidence_accepts_endpoints_and_midpoint() {
+        assert_eq!(parse_confidence("c", Some(0.0)).unwrap(), 0.0);
+        assert_eq!(parse_confidence("c", Some(0.5)).unwrap(), 0.5);
+        assert_eq!(parse_confidence("c", Some(1.0)).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn parse_probability_rejects_nan_and_out_of_range() {
+        assert!(matches!(
+            parse_probability("p", f64::NAN),
+            Err(pmcp::Error::Validation(_))
+        ));
+        assert!(matches!(
+            parse_probability("p", -0.1),
+            Err(pmcp::Error::Validation(_))
+        ));
+        assert!(matches!(
+            parse_probability("p", 1.1),
+            Err(pmcp::Error::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn parse_probability_accepts_endpoints() {
+        assert_eq!(parse_probability("p", 0.0).unwrap(), 0.0);
+        assert_eq!(parse_probability("p", 0.5).unwrap(), 0.5);
+        assert_eq!(parse_probability("p", 1.0).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn jaccard_empty_inputs_return_zero() {
+        assert_eq!(jaccard_similarity(&[], &[]), 0.0);
+        // Tokenisation drops 1- and 2-letter tokens, so only-short input is
+        // effectively empty.
+        assert_eq!(
+            jaccard_similarity(&["it".into()], &["a".into(), "is".into()]),
+            0.0
+        );
+    }
+
+    #[test]
+    fn jaccard_identical_inputs_return_one() {
+        let a = vec!["valuation supports thesis".into()];
+        let b = vec!["valuation supports thesis".into()];
+        assert!((jaccard_similarity(&a, &b) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn jaccard_disjoint_inputs_return_zero() {
+        let a = vec!["alpha beta gamma".into()];
+        let b = vec!["delta epsilon zeta".into()];
+        assert_eq!(jaccard_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn jaccard_partial_overlap_returns_expected_ratio() {
+        let a = vec!["alpha beta gamma".into()];
+        let b = vec!["alpha beta delta".into()];
+        // tokens A = {alpha, beta, gamma}, B = {alpha, beta, delta}
+        // intersection = 2, union = 4 → 0.5
+        assert!((jaccard_similarity(&a, &b) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn jaccard_drops_short_tokens_and_is_case_insensitive() {
+        let a = vec!["AAA Bb cc".into()]; // tokens after filter: {aaa}
+        let b = vec!["aaa".into()];
+        assert!((jaccard_similarity(&a, &b) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn jaccard_splits_on_non_alphanumeric() {
+        let a = vec!["alpha-beta_gamma!delta".into()];
+        let b = vec![
+            "alpha".into(),
+            "beta".into(),
+            "gamma".into(),
+            "delta".into(),
+        ];
+        assert!((jaccard_similarity(&a, &b) - 1.0).abs() < f64::EPSILON);
+    }
+
+    // -------- DB-backed validator --------
+
+    #[test]
+    fn validate_evidence_ids_empty_is_ok() {
+        let (_tmp, _config, db, run_id) = setup();
+        validate_evidence_ids(&db, &run_id, "evidence_ids", &[]).unwrap();
+    }
+
+    #[test]
+    fn validate_evidence_ids_known_is_ok() {
+        let (_tmp, _config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+        validate_evidence_ids(&db, &run_id, "evidence_ids", &[source_id]).unwrap();
+    }
+
+    #[test]
+    fn validate_evidence_ids_unknown_is_validation_error() {
+        let (_tmp, _config, db, run_id) = setup();
+        save_source(&db, &run_id);
+        let err = validate_evidence_ids(
+            &db,
+            &run_id,
+            "evidence_ids",
+            &["source-1".into(), "ghost".into()],
+        )
+        .unwrap_err();
+        match err {
+            pmcp::Error::Validation(message) => {
+                assert!(message.contains("ghost"), "{message}");
+                assert!(!message.contains("source-1"), "{message}");
+            }
+            other => panic!("expected Validation error, got {other:?}"),
+        }
+    }
+
+    // -------- handler tests --------
+
+    #[tokio::test]
+    async fn submit_source_then_submit_block_succeeds() {
+        let (_tmp, config, db, run_id) = setup();
+
+        let source_handler = create_submit_source_tool(config.clone());
+        let result = source_handler
+            .handle(
+                json!({
+                    "id": "src-1",
+                    "title": "Annual filing",
+                    "summary": "Apple FY24 10-K excerpt.",
+                    "reliability": "primary",
+                }),
+                extra(),
+            )
+            .await
+            .expect("source handler succeeds");
+        assert_eq!(result["status"], "ok");
+        assert!(db.existing_source_ids(&run_id).unwrap().contains("src-1"));
+
+        let block_handler = create_submit_analysis_block_tool(config.clone());
+        let block_result = block_handler
+            .handle(
+                json!({
+                    "kind": "thesis",
+                    "title": "Buy AAPL",
+                    "body": "Services growth and capital returns drive the thesis.",
+                    "evidence_ids": ["src-1"],
+                    "confidence": 0.7,
+                    "importance": "high",
+                }),
+                extra(),
+            )
+            .await
+            .expect("block handler succeeds with known evidence");
+        assert_eq!(block_result["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn submit_block_with_unknown_evidence_fails() {
+        let (_tmp, config, _db, _run_id) = setup();
+        let block_handler = create_submit_analysis_block_tool(config);
+
+        let err = block_handler
+            .handle(
+                json!({
+                    "kind": "thesis",
+                    "title": "Buy AAPL",
+                    "body": "Long thesis body.",
+                    "evidence_ids": ["nonexistent-source"],
+                    "confidence": 0.7,
+                    "importance": "high",
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        match err {
+            pmcp::Error::Validation(message) => {
+                assert!(message.contains("nonexistent-source"), "{message}");
+            }
+            other => panic!("expected Validation error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_stance_rejects_out_of_range_confidence() {
+        let (_tmp, config, _db, _run_id) = setup();
+        let stance_handler = create_submit_final_stance_tool(config);
+
+        let err = stance_handler
+            .handle(
+                json!({
+                    "stance": "neutral",
+                    "horizon": "12 months",
+                    "confidence": 1.5,
+                    "summary": "Mixed signals.",
+                    "key_reasons": ["Valuation rich"],
+                    "what_would_change": ["Margin compression"],
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(_)));
+    }
+
+    #[tokio::test]
+    async fn submit_projection_rejects_when_probabilities_dont_sum_to_one() {
+        let (_tmp, config, db, run_id) = setup();
+        save_source(&db, &run_id);
+
+        let handler = create_submit_projection_tool(config);
+        let err = handler
+            .handle(
+                json!({
+                    "entity_id": "AAPL",
+                    "horizon": "12 months",
+                    "metric": "stock_price",
+                    "current_value": 200.0,
+                    "scenarios": [
+                        {
+                            "label": "bull",
+                            "target_value": 260.0,
+                            "probability": 0.4,
+                            "rationale": "Upside.",
+                            "catalysts": ["Product cycle"],
+                            "risks": ["Macro"],
+                        },
+                        {
+                            "label": "base",
+                            "target_value": 220.0,
+                            "probability": 0.4,
+                            "rationale": "Steady.",
+                            "catalysts": ["Buybacks"],
+                            "risks": ["FX"],
+                        },
+                        {
+                            "label": "bear",
+                            "target_value": 160.0,
+                            "probability": 0.4,
+                            "rationale": "Downside.",
+                            "catalysts": ["Pricing war"],
+                            "risks": ["Demand soft"],
+                        }
+                    ],
+                    "methodology": "DCF",
+                    "key_assumptions": ["Steady growth"],
+                    "evidence_ids": ["source-1"],
+                    "confidence": 0.6,
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        match err {
+            pmcp::Error::Validation(message) => assert!(
+                message.contains("sum to") && message.contains("1.0"),
+                "{message}"
+            ),
+            other => panic!("expected Validation error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_on_incomplete_run_returns_same_errors_as_validate() {
+        let (_tmp, config, db, run_id) = setup();
+        let validation_errors = db.validate_finalization(&run_id).unwrap();
+        assert!(!validation_errors.is_empty());
+
+        let handler = create_finalize_analysis_tool(config);
+        let err = handler.handle(json!({}), extra()).await.unwrap_err();
+        match err {
+            pmcp::Error::Validation(message) => {
+                // Each validation message should appear in the joined response.
+                for expected in &validation_errors {
+                    assert!(
+                        message.contains(expected),
+                        "missing {expected:?} in {message}"
+                    );
+                }
+            }
+            other => panic!("expected Validation error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_on_complete_single_equity_succeeds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("bullpen-test.sqlite");
+        let ctx_path = tmp.path().join("ctx.json");
+
+        let db = Database::open_at(db_path.clone()).unwrap();
+        let (run_id, _) = seed_full_single_equity(&db);
+
+        let context = RunContext {
+            analysis_id: "a".into(),
+            run_id: run_id.clone(),
+            agent_id: "fake".into(),
+            user_prompt: "Analyze AAPL".into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        std::fs::write(&ctx_path, serde_json::to_string(&context).unwrap()).unwrap();
+        let config = Arc::new(ServerConfig {
+            run_context: Some(ctx_path),
+            db_path: Some(db_path),
+        });
+
+        // sanity check: validator agrees the run is finalize-ready
+        let validation_errors = db.validate_finalization(&run_id).unwrap();
+        assert!(validation_errors.is_empty(), "{validation_errors:?}");
+
+        let handler = create_finalize_analysis_tool(config);
+        let result = handler
+            .handle(json!({}), extra())
+            .await
+            .expect("finalize succeeds on complete run");
+        assert_eq!(result["status"], "ok");
+
+        // Status flipped to Completed.
+        let runs = db.get_runs("a").unwrap();
+        assert_eq!(runs[0].status, AnalysisStatus::Completed);
+    }
+}

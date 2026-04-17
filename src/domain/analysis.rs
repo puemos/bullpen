@@ -625,3 +625,160 @@ pub struct AnalysisReport {
     pub methodology_note: Option<MethodologyNote>,
     pub decision_criterion_answers: Vec<DecisionCriterionAnswer>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analysis_status_parses_canonical_variants() {
+        assert_eq!(
+            AnalysisStatus::from_str("queued"),
+            Ok(AnalysisStatus::Queued)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("running"),
+            Ok(AnalysisStatus::Running)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("completed"),
+            Ok(AnalysisStatus::Completed)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("failed"),
+            Ok(AnalysisStatus::Failed)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("cancelled"),
+            Ok(AnalysisStatus::Cancelled)
+        );
+    }
+
+    #[test]
+    fn analysis_status_accepts_aliases() {
+        assert_eq!(
+            AnalysisStatus::from_str("in_progress"),
+            Ok(AnalysisStatus::Running)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("done"),
+            Ok(AnalysisStatus::Completed)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("error"),
+            Ok(AnalysisStatus::Failed)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("canceled"),
+            Ok(AnalysisStatus::Cancelled)
+        );
+    }
+
+    #[test]
+    fn analysis_status_is_case_insensitive() {
+        assert_eq!(
+            AnalysisStatus::from_str("RUNNING"),
+            Ok(AnalysisStatus::Running)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("In_Progress"),
+            Ok(AnalysisStatus::Running)
+        );
+        assert_eq!(
+            AnalysisStatus::from_str("DONE"),
+            Ok(AnalysisStatus::Completed)
+        );
+    }
+
+    #[test]
+    fn analysis_status_rejects_unknown_input() {
+        let err = AnalysisStatus::from_str("nope").unwrap_err();
+        assert!(
+            err.contains("nope"),
+            "expected error to mention input, got {err}"
+        );
+    }
+
+    #[test]
+    fn analysis_status_display_round_trip() {
+        for status in [
+            AnalysisStatus::Queued,
+            AnalysisStatus::Running,
+            AnalysisStatus::Completed,
+            AnalysisStatus::Failed,
+            AnalysisStatus::Cancelled,
+        ] {
+            let parsed = AnalysisStatus::from_str(&status.to_string()).unwrap();
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn analysis_intent_parses_canonical_variants() {
+        assert_eq!(
+            AnalysisIntent::from_str("single_equity"),
+            Ok(AnalysisIntent::SingleEquity)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str("compare_equities"),
+            Ok(AnalysisIntent::CompareEquities)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str("sector_analysis"),
+            Ok(AnalysisIntent::SectorAnalysis)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str("macro_theme"),
+            Ok(AnalysisIntent::MacroTheme)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str("watchlist"),
+            Ok(AnalysisIntent::Watchlist)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str("general_research"),
+            Ok(AnalysisIntent::GeneralResearch)
+        );
+    }
+
+    #[test]
+    fn analysis_intent_is_case_insensitive() {
+        assert_eq!(
+            AnalysisIntent::from_str("SINGLE_EQUITY"),
+            Ok(AnalysisIntent::SingleEquity)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str("Macro_Theme"),
+            Ok(AnalysisIntent::MacroTheme)
+        );
+    }
+
+    #[test]
+    fn analysis_intent_unknown_falls_back_to_general_research() {
+        // This is silently lossy by design — pin the behavior so callers
+        // know parse never fails.
+        assert_eq!(
+            AnalysisIntent::from_str("nope"),
+            Ok(AnalysisIntent::GeneralResearch)
+        );
+        assert_eq!(
+            AnalysisIntent::from_str(""),
+            Ok(AnalysisIntent::GeneralResearch)
+        );
+    }
+
+    #[test]
+    fn analysis_intent_display_round_trip() {
+        for intent in [
+            AnalysisIntent::SingleEquity,
+            AnalysisIntent::CompareEquities,
+            AnalysisIntent::SectorAnalysis,
+            AnalysisIntent::MacroTheme,
+            AnalysisIntent::Watchlist,
+            AnalysisIntent::GeneralResearch,
+        ] {
+            let parsed = AnalysisIntent::from_str(&intent.to_string()).unwrap();
+            assert_eq!(parsed, intent);
+        }
+    }
+}

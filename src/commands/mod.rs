@@ -761,4 +761,96 @@ mod tests {
         assert_eq!(safe_filename(""), "bullpen-report.html");
         assert_eq!(safe_filename("  "), "bullpen-report.html");
     }
+
+    #[test]
+    fn safe_filename_handles_pure_punctuation_and_unicode() {
+        // Pure punctuation: every character maps to '_', then trim_matches
+        // strips them all, leaving empty → fallback name.
+        assert_eq!(safe_filename("!!!???"), "bullpen-report.html");
+
+        // Non-ASCII letters are not ASCII-alphanumeric, so they become
+        // underscores. Trailing underscores are trimmed but interior ones
+        // remain.
+        assert_eq!(safe_filename("néon"), "n_on.html");
+    }
+
+    #[test]
+    fn safe_filename_caps_long_inputs_to_eighty_chars_plus_extension() {
+        let long = "a".repeat(200);
+        let out = safe_filename(&long);
+        assert!(out.ends_with(".html"));
+        // 80 base chars + ".html" = 85
+        assert_eq!(out.len(), 85);
+        assert!(out.chars().take(80).all(|c| c == 'a'));
+    }
+
+    #[test]
+    fn standalone_html_escapes_script_close_and_html_comment() {
+        let mut report = sample_report("Sample");
+        report.analysis.user_prompt =
+            "BULLPENPAYLOAD </script><!-- and </Script> noise".to_string();
+        let html = build_standalone_html(&report).expect("build");
+
+        // The viewer template legitimately contains </script> tags and HTML
+        // comments. Confirm the *injected JSON payload* never carries raw
+        // </ or <!-- after escaping: the marker token only appears inside the
+        // injected JSON, so the escaped forms must surround it and the
+        // originals must be absent from the JSON segment.
+        assert!(
+            html.contains("BULLPENPAYLOAD <\\/script><\\!--"),
+            "expected escaped sequence in html"
+        );
+        assert!(!html.contains("BULLPENPAYLOAD </script>"));
+        assert!(!html.contains("BULLPENPAYLOAD <!--"));
+    }
+
+    #[test]
+    fn derive_title_falls_back_for_empty_or_whitespace_lines() {
+        assert_eq!(derive_title(""), "Stock analysis");
+        assert_eq!(derive_title("\n\n"), "Stock analysis");
+        assert_eq!(derive_title("   \nrest"), "Stock analysis");
+    }
+
+    #[test]
+    fn derive_title_returns_short_prompts_unchanged() {
+        assert_eq!(derive_title("Buy AAPL?"), "Buy AAPL?");
+    }
+
+    #[test]
+    fn derive_title_truncates_long_prompts_at_seventy_two_chars() {
+        let prompt = "a".repeat(80);
+        let out = derive_title(&prompt);
+        assert!(out.ends_with("..."));
+        assert_eq!(out.chars().count(), 75); // 72 chars + "..."
+        assert!(out.starts_with(&"a".repeat(72)));
+    }
+
+    #[test]
+    fn derive_title_uses_only_first_line() {
+        assert_eq!(
+            derive_title("Headline goes here\nbody continues below"),
+            "Headline goes here"
+        );
+    }
+
+    #[test]
+    fn render_markdown_includes_title_stance_and_disclaimer() {
+        use crate::infra::db::Database;
+        use crate::infra::db::tests::seed_full_single_equity;
+        use std::path::PathBuf;
+
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, _) = seed_full_single_equity(&db);
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+
+        let md = render_markdown(&report);
+        assert!(md.starts_with(&format!("# {}", report.analysis.title)));
+        assert!(md.contains("> Research only. Not investment advice."));
+        assert!(md.contains("## Final Stance"));
+
+        // confidence rendered as a whole percent (0.7 → 70%)
+        let stance = report.final_stance.as_ref().unwrap();
+        let percent = format!("confidence: {:.0}%", stance.confidence * 100.0);
+        assert!(md.contains(&percent), "expected {percent:?} in markdown");
+    }
 }

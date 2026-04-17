@@ -1571,10 +1571,10 @@ fn collect_rows<T>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn seed_run(db: &Database, prompt: &str, intent: AnalysisIntent) -> String {
+    pub(crate) fn seed_run(db: &Database, prompt: &str, intent: AnalysisIntent) -> String {
         let run_id = "run-1".to_string();
         let now = chrono::Utc::now().to_rfc3339();
         db.save_analysis(&Analysis {
@@ -1603,7 +1603,7 @@ mod tests {
         run_id
     }
 
-    fn save_plan(db: &Database, run_id: &str, intent: AnalysisIntent) {
+    pub(crate) fn save_plan(db: &Database, run_id: &str, intent: AnalysisIntent) {
         db.save_research_plan(&ResearchPlan {
             id: "plan-1".into(),
             run_id: run_id.into(),
@@ -1616,11 +1616,11 @@ mod tests {
         .unwrap();
     }
 
-    fn save_source(db: &Database, run_id: &str) -> String {
+    pub(crate) fn save_source(db: &Database, run_id: &str) -> String {
         save_source_with(db, run_id, "source-1", SourceReliability::Primary)
     }
 
-    fn save_source_with(
+    pub(crate) fn save_source_with(
         db: &Database,
         run_id: &str,
         id: &str,
@@ -1641,7 +1641,7 @@ mod tests {
         id.to_string()
     }
 
-    fn save_block(db: &Database, run_id: &str, kind: BlockKind, source_id: &str) {
+    pub(crate) fn save_block(db: &Database, run_id: &str, kind: BlockKind, source_id: &str) {
         db.save_block(&AnalysisBlock {
             id: format!("block-{kind}"),
             run_id: run_id.into(),
@@ -1657,11 +1657,16 @@ mod tests {
         .unwrap();
     }
 
-    fn save_stance(db: &Database, run_id: &str) {
+    pub(crate) fn save_stance(db: &Database, run_id: &str) {
         save_stance_with(db, run_id, StanceKind::Neutral, 0.7);
     }
 
-    fn save_stance_with(db: &Database, run_id: &str, stance: StanceKind, confidence: f64) {
+    pub(crate) fn save_stance_with(
+        db: &Database,
+        run_id: &str,
+        stance: StanceKind,
+        confidence: f64,
+    ) {
         db.save_final_stance(&FinalStance {
             id: "stance-1".into(),
             run_id: run_id.into(),
@@ -1677,7 +1682,7 @@ mod tests {
         .unwrap();
     }
 
-    fn save_methodology(db: &Database, run_id: &str) {
+    pub(crate) fn save_methodology(db: &Database, run_id: &str) {
         db.save_methodology_note(&MethodologyNote {
             id: "methodology-1".into(),
             run_id: run_id.into(),
@@ -1690,7 +1695,7 @@ mod tests {
         .unwrap();
     }
 
-    fn save_criterion_answers(db: &Database, run_id: &str) {
+    pub(crate) fn save_criterion_answers(db: &Database, run_id: &str) {
         for (index, criterion) in ["valuation", "risk"].iter().enumerate() {
             db.save_decision_criterion_answer(&DecisionCriterionAnswer {
                 id: format!("answer-{index}"),
@@ -1706,7 +1711,7 @@ mod tests {
         }
     }
 
-    fn valid_scenarios() -> Vec<ProjectionScenario> {
+    pub(crate) fn valid_scenarios() -> Vec<ProjectionScenario> {
         vec![
             ProjectionScenario {
                 label: ScenarioLabel::Bull,
@@ -1741,7 +1746,7 @@ mod tests {
         ]
     }
 
-    fn save_projection(
+    pub(crate) fn save_projection(
         db: &Database,
         run_id: &str,
         entity_id: &str,
@@ -1768,7 +1773,7 @@ mod tests {
         .unwrap();
     }
 
-    fn save_artifact(db: &Database, run_id: &str, kind: ArtifactKind, source_id: &str) {
+    pub(crate) fn save_artifact(db: &Database, run_id: &str, kind: ArtifactKind, source_id: &str) {
         db.save_structured_artifact(&StructuredArtifact {
             id: format!("artifact-{kind}"),
             run_id: run_id.into(),
@@ -1790,7 +1795,7 @@ mod tests {
         .unwrap();
     }
 
-    fn seed_full_single_equity(db: &Database) -> (String, String) {
+    pub(crate) fn seed_full_single_equity(db: &Database) -> (String, String) {
         let run_id = seed_run(db, "Analyze AAPL", AnalysisIntent::SingleEquity);
         let source_id = save_source(db, &run_id);
         save_plan(db, &run_id, AnalysisIntent::SingleEquity);
@@ -2058,5 +2063,259 @@ mod tests {
                 .any(|e| e.contains("decision criterion 'risk'")),
             "expected missing-criterion-answer, got {errors:?}"
         );
+    }
+
+    #[test]
+    fn entity_round_trips_with_optional_fields_populated() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        db.save_entity(&Entity {
+            id: "AAPL".into(),
+            run_id: run_id.clone(),
+            symbol: Some("AAPL".into()),
+            name: "Apple Inc.".into(),
+            exchange: Some("NASDAQ".into()),
+            asset_type: "equity".into(),
+            sector: Some("Technology".into()),
+            country: Some("US".into()),
+            confidence: 0.95,
+            resolution_notes: Some("ticker confirmed via filings".into()),
+        })
+        .unwrap();
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        assert_eq!(report.entities.len(), 1);
+        let entity = &report.entities[0];
+        assert_eq!(entity.id, "AAPL");
+        assert_eq!(entity.symbol.as_deref(), Some("AAPL"));
+        assert_eq!(entity.exchange.as_deref(), Some("NASDAQ"));
+        assert_eq!(entity.sector.as_deref(), Some("Technology"));
+        assert_eq!(entity.country.as_deref(), Some("US"));
+        assert!((entity.confidence - 0.95).abs() < f64::EPSILON);
+        assert_eq!(
+            entity.resolution_notes.as_deref(),
+            Some("ticker confirmed via filings")
+        );
+    }
+
+    #[test]
+    fn entity_round_trips_with_optional_fields_empty() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        db.save_entity(&Entity {
+            id: "anon".into(),
+            run_id: run_id.clone(),
+            symbol: None,
+            name: "Anonymous Co".into(),
+            exchange: None,
+            asset_type: "equity".into(),
+            sector: None,
+            country: None,
+            confidence: 0.5,
+            resolution_notes: None,
+        })
+        .unwrap();
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        let entity = &report.entities[0];
+        assert!(entity.symbol.is_none());
+        assert!(entity.exchange.is_none());
+        assert!(entity.sector.is_none());
+        assert!(entity.country.is_none());
+        assert!(entity.resolution_notes.is_none());
+    }
+
+    #[test]
+    fn existing_source_ids_returns_set_of_saved_ids() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        save_source_with(&db, &run_id, "src-a", SourceReliability::Primary);
+        save_source_with(&db, &run_id, "src-b", SourceReliability::High);
+
+        let ids = db.existing_source_ids(&run_id).unwrap();
+        assert!(ids.contains("src-a"));
+        assert!(ids.contains("src-b"));
+        assert_eq!(ids.len(), 2);
+
+        let other = db.existing_source_ids("missing-run").unwrap();
+        assert!(other.is_empty());
+    }
+
+    #[test]
+    fn block_round_trips_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(&db, &run_id);
+        save_block(&db, &run_id, BlockKind::Thesis, &source_id);
+
+        let blocks = db.get_blocks_for(&run_id).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, BlockKind::Thesis);
+        assert_eq!(blocks[0].evidence_ids, vec![source_id]);
+        assert_eq!(blocks[0].importance, Importance::High);
+
+        let existing = db.existing_block_ids(&run_id).unwrap();
+        assert!(existing.contains("block-thesis"));
+    }
+
+    #[test]
+    fn artifact_round_trips_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Compare", AnalysisIntent::CompareEquities);
+        let source_id = save_source(&db, &run_id);
+        save_artifact(&db, &run_id, ArtifactKind::ComparisonMatrix, &source_id);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        assert_eq!(report.artifacts.len(), 1);
+        let artifact = &report.artifacts[0];
+        assert_eq!(artifact.kind, ArtifactKind::ComparisonMatrix);
+        assert_eq!(artifact.columns.len(), 1);
+        assert_eq!(artifact.rows.len(), 1);
+        assert_eq!(artifact.evidence_ids, vec![source_id]);
+    }
+
+    #[test]
+    fn stance_round_trips_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        save_stance_with(&db, &run_id, StanceKind::Bullish, 0.4);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        let stance = report.final_stance.unwrap();
+        assert_eq!(stance.stance, StanceKind::Bullish);
+        assert!((stance.confidence - 0.4).abs() < f64::EPSILON);
+        assert_eq!(stance.disclaimer, RESEARCH_DISCLAIMER);
+        assert_eq!(stance.key_reasons.len(), 1);
+        assert_eq!(stance.what_would_change.len(), 1);
+    }
+
+    #[test]
+    fn projection_round_trips_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(&db, &run_id);
+        save_projection(&db, &run_id, "AAPL", &source_id, valid_scenarios());
+
+        let projections = db.get_projections(&run_id).unwrap();
+        assert_eq!(projections.len(), 1);
+        let projection = &projections[0];
+        assert_eq!(projection.entity_id, "AAPL");
+        assert_eq!(projection.scenarios.len(), 3);
+        let labels: HashSet<ScenarioLabel> = projection.scenarios.iter().map(|s| s.label).collect();
+        assert!(labels.contains(&ScenarioLabel::Bull));
+        assert!(labels.contains(&ScenarioLabel::Base));
+        assert!(labels.contains(&ScenarioLabel::Bear));
+    }
+
+    #[test]
+    fn criterion_answers_round_trip_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        save_criterion_answers(&db, &run_id);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        assert_eq!(report.decision_criterion_answers.len(), 2);
+        assert!(
+            report
+                .decision_criterion_answers
+                .iter()
+                .any(|a| a.criterion == "valuation"
+                    && a.verdict == CriterionVerdict::Confirmed
+                    && a.supporting_evidence_ids == vec!["source-1".to_string()])
+        );
+    }
+
+    #[test]
+    fn get_report_assembles_full_single_equity_picture() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, _) = seed_full_single_equity(&db);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        assert_eq!(report.analysis.id, "a");
+        assert!(report.research_plan.is_some());
+        assert!(report.methodology_note.is_some());
+        assert!(report.final_stance.is_some());
+        // sources, blocks, projections, criterion answers populated by the seeder
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].reliability, SourceReliability::Primary);
+        assert_eq!(report.blocks.len(), 5);
+        assert_eq!(report.projections.len(), 1);
+        assert_eq!(report.decision_criterion_answers.len(), 2);
+    }
+
+    #[test]
+    fn recompute_status_prefers_running_then_completed_then_cancelled_else_failed() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let _run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Add a second run for the same analysis.
+        db.save_run(&AnalysisRun {
+            id: "run-2".into(),
+            analysis_id: "a".into(),
+            agent_id: "fake".into(),
+            model_id: None,
+            prompt_text: "second pass".into(),
+            status: AnalysisStatus::Failed,
+            started_at: now.clone(),
+            completed_at: Some(now.clone()),
+            error: Some("boom".into()),
+        })
+        .unwrap();
+
+        // run-1 still Running → analysis becomes Running
+        db.recompute_analysis_status("a").unwrap();
+        let report = db.get_report("a", None).unwrap().unwrap();
+        assert_eq!(report.analysis.status, AnalysisStatus::Running);
+
+        // Move run-1 to Completed → analysis becomes Completed (Completed beats Failed)
+        db.update_run_status("run-1", AnalysisStatus::Completed, None)
+            .unwrap();
+        db.recompute_analysis_status("a").unwrap();
+        let report = db.get_report("a", None).unwrap().unwrap();
+        assert_eq!(report.analysis.status, AnalysisStatus::Completed);
+
+        // Both Cancelled → Cancelled
+        db.update_run_status("run-1", AnalysisStatus::Cancelled, None)
+            .unwrap();
+        db.update_run_status("run-2", AnalysisStatus::Cancelled, None)
+            .unwrap();
+        db.recompute_analysis_status("a").unwrap();
+        let report = db.get_report("a", None).unwrap().unwrap();
+        assert_eq!(report.analysis.status, AnalysisStatus::Cancelled);
+
+        // No Running, no Completed, mixed Failed/Cancelled → Failed
+        db.update_run_status("run-2", AnalysisStatus::Failed, Some("err"))
+            .unwrap();
+        db.recompute_analysis_status("a").unwrap();
+        let report = db.get_report("a", None).unwrap().unwrap();
+        assert_eq!(report.analysis.status, AnalysisStatus::Failed);
+    }
+
+    #[test]
+    fn save_run_twice_with_same_id_upserts() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let _run_id = seed_run(&db, "first", AnalysisIntent::SingleEquity);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        db.save_run(&AnalysisRun {
+            id: "run-1".into(),
+            analysis_id: "a".into(),
+            agent_id: "different".into(),
+            model_id: Some("gpt-5".into()),
+            prompt_text: "second".into(),
+            status: AnalysisStatus::Completed,
+            started_at: now.clone(),
+            completed_at: Some(now),
+            error: None,
+        })
+        .unwrap();
+
+        let runs = db.get_runs("a").unwrap();
+        assert_eq!(runs.len(), 1, "save_run should UPSERT, not duplicate");
+        assert_eq!(runs[0].agent_id, "different");
+        assert_eq!(runs[0].model_id.as_deref(), Some("gpt-5"));
+        assert_eq!(runs[0].status, AnalysisStatus::Completed);
+        assert_eq!(runs[0].prompt_text, "second");
     }
 }
