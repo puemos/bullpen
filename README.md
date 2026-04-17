@@ -4,6 +4,10 @@ Bullpen is a local desktop workbench for ACP-powered stock market research. It f
 
 The first implementation is research-only. It does not execute trades, prepare orders, size positions, or provide personalized investment advice.
 
+<p align="center">
+  <img width="880" alt="A Bullpen analysis report showing the thesis, stance, and confidence at the top of the page." src="assets/screenshots/analysis-thesis.png" />
+</p>
+
 ## What It Does
 
 - Accepts free-text prompts such as `Compare NVDA to AMD` or `Analyze the energy sector`.
@@ -14,6 +18,10 @@ The first implementation is research-only. It does not execute trades, prepare o
   - Ask: prompt, agent selection, live process stream.
   - Reports: submitted blocks, metrics, sources, and final stance.
   - Settings: detected agents and guardrail summary.
+
+<p align="center">
+  <img width="880" alt="The scenario matrix showing base, upside, and downside cases side by side." src="assets/screenshots/analysis-scenario-matrix.png" />
+</p>
 
 ## Structured MCP Tools
 
@@ -28,6 +36,10 @@ The agent must use these tools:
 - `finalize_analysis`
 
 Finalization fails unless the run has a thesis block, risks block, at least one source, a final stance, and source-backed material blocks.
+
+<p align="center">
+  <img width="880" alt="The sources panel listing every citation behind the report's claims." src="assets/screenshots/analysis-sources.png" />
+</p>
 
 ## Development
 

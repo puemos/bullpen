@@ -137,10 +137,10 @@
             <!-- ============ HERO ============ -->
             <section
                 aria-labelledby="hero-heading"
-                class="border-b border-rule"
+                class="border-b border-rule lg:min-h-[78vh] flex items-center"
             >
                 <div
-                    class="px-5 md:px-8 pt-12 md:pt-20 pb-14 md:pb-24 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16 items-center max-w-7xl mx-auto"
+                    class="w-full px-5 md:px-8 pt-12 md:pt-16 pb-14 md:pb-16 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16 items-center max-w-7xl mx-auto"
                 >
                     <!-- text -->
                     <div class="lg:col-span-7 order-2 lg:order-1">
@@ -164,14 +164,14 @@
                             class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-ink/85 max-w-[48ch] mb-5"
                         >
                             Ask about a ticker or a sector. Your ACP agent
-                            does the work &mdash; Claude Code, Codex, Gemini,
+                            does the work. Claude Code, Codex, Gemini,
                             whatever you already run. The report is
                             structured, sourced, and stays on your machine.
                         </p>
                         <p
                             class="font-mono text-[11.5px] uppercase tracking-[0.18em] text-muted mb-9"
                         >
-                            Your agent&rsquo;s auth. Your tokens. Your subscription.
+                            Runs on your agent&rsquo;s auth and your own tokens.
                         </p>
                         <div class="flex flex-wrap items-center gap-3">
                             <a
@@ -190,7 +190,7 @@
                         </div>
                     </div>
 
-                    <!-- bull -->
+                    <!-- hero mark -->
                     <div
                         class="lg:col-span-5 order-1 lg:order-2 flex justify-center lg:justify-end"
                     >
@@ -203,6 +203,31 @@
                         />
                     </div>
                 </div>
+            </section>
+
+            <!-- ============ HERO VIDEO ============ -->
+            <section
+                aria-label="Product walkthrough"
+                class="border-b border-rule bg-paper px-5 md:px-8 py-5 md:py-8"
+            >
+                <video
+                    class="block w-full h-auto border border-rule select-none"
+                    width="1664"
+                    height="1080"
+                    poster="./assets/screenshots/new-analysis-poster.webp"
+                    autoplay
+                    muted
+                    loop
+                    playsinline
+                    controls
+                    preload="metadata"
+                    aria-label="A short walkthrough of starting a Bullpen analysis."
+                >
+                    <source
+                        src="./assets/screenshots/new-analysis.mp4"
+                        type="video/mp4"
+                    />
+                </video>
             </section>
 
             <!-- ============ AGENTS ROW ============ -->
@@ -298,6 +323,135 @@
                             cloud sync. The only network call is your
                             agent&rsquo;s own.
                         </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ THE REPORT (gallery) ============ -->
+            <section
+                aria-label="The report"
+                class="border-b border-rule"
+            >
+                <div
+                    class="px-5 md:px-8 pt-14 md:pt-24 pb-14 md:pb-24 max-w-7xl mx-auto"
+                >
+                    <p
+                        class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted mb-4 flex items-center gap-2.5"
+                    >
+                        <span
+                            class="block w-2 h-2 bg-violet"
+                            aria-hidden="true"
+                        ></span>
+                        The report
+                    </p>
+                    <h2
+                        class="font-display font-semibold text-ink tracking-[-0.025em] leading-[1.02] max-w-[22ch] mb-12 md:mb-16"
+                        style="font-size: clamp(30px, 4.4vw, 52px);"
+                    >
+                        What you actually get back.
+                    </h2>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-12">
+                    <figure class="flex flex-col gap-4">
+                        <div
+                            class="flex items-baseline gap-3 font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                        >
+                            <span>01</span>
+                            <span>Scenarios</span>
+                        </div>
+                        <picture>
+                            <source
+                                type="image/avif"
+                                srcset="./assets/screenshots/analysis-scenario-matrix.avif"
+                            />
+                            <source
+                                type="image/webp"
+                                srcset="./assets/screenshots/analysis-scenario-matrix.webp"
+                            />
+                            <img
+                                src="./assets/screenshots/analysis-scenario-matrix.webp"
+                                alt="The scenario matrix showing base, upside, and downside cases side by side."
+                                width="2000"
+                                height="1298"
+                                loading="lazy"
+                                decoding="async"
+                                class="w-full h-auto border border-rule"
+                            />
+                        </picture>
+                        <figcaption
+                            class="font-serif text-[15.5px] leading-[1.55] text-muted max-w-[60ch]"
+                        >
+                            Base, upside, downside. All three, or the run
+                            doesn&rsquo;t close.
+                        </figcaption>
+                    </figure>
+
+                    <figure class="flex flex-col gap-4">
+                        <div
+                            class="flex items-baseline gap-3 font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                        >
+                            <span>02</span>
+                            <span>Sources</span>
+                        </div>
+                        <picture>
+                            <source
+                                type="image/avif"
+                                srcset="./assets/screenshots/analysis-sources.avif"
+                            />
+                            <source
+                                type="image/webp"
+                                srcset="./assets/screenshots/analysis-sources.webp"
+                            />
+                            <img
+                                src="./assets/screenshots/analysis-sources.webp"
+                                alt="The sources panel listing every citation behind the report's claims."
+                                width="2000"
+                                height="1298"
+                                loading="lazy"
+                                decoding="async"
+                                class="w-full h-auto border border-rule"
+                            />
+                        </picture>
+                        <figcaption
+                            class="font-serif text-[15.5px] leading-[1.55] text-muted max-w-[60ch]"
+                        >
+                            Every number and quote traces back. Click the
+                            citation.
+                        </figcaption>
+                    </figure>
+
+                    <figure class="flex flex-col gap-4 md:col-span-2">
+                        <div
+                            class="flex items-baseline gap-3 font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                        >
+                            <span>03</span>
+                            <span>Final stance</span>
+                        </div>
+                        <picture>
+                            <source
+                                type="image/avif"
+                                srcset="./assets/screenshots/analysis-final-stance.avif"
+                            />
+                            <source
+                                type="image/webp"
+                                srcset="./assets/screenshots/analysis-final-stance.webp"
+                            />
+                            <img
+                                src="./assets/screenshots/analysis-final-stance.webp"
+                                alt="The final stance block with direction and confidence."
+                                width="2000"
+                                height="1298"
+                                loading="lazy"
+                                decoding="async"
+                                class="w-full h-auto border border-rule"
+                            />
+                        </picture>
+                        <figcaption
+                            class="font-serif text-[15.5px] leading-[1.55] text-muted max-w-[60ch]"
+                        >
+                            A stance with confidence. No hedging out.
+                        </figcaption>
+                    </figure>
                     </div>
                 </div>
             </section>
@@ -563,7 +717,7 @@
                                 machine &mdash; Claude Code, Codex, Gemini,
                                 OpenCode, or your own via
                                 <code class="font-mono text-[13px] text-plum">BULLPEN_CUSTOM_AGENT</code>.
-                                It uses their auth, not ours.
+                                It uses the agent&rsquo;s own auth.
                             </p>
                         </div>
 
@@ -615,7 +769,7 @@
                     <p
                         class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-muted max-w-[38ch] mx-auto mb-4"
                     >
-                        Free. Open source. Yours.
+                        Free and open source.
                     </p>
                     <p
                         class="font-mono text-[11px] uppercase tracking-[0.18em] text-muted/80 mb-12"
@@ -724,7 +878,7 @@
                     >
                 </nav>
                 <p class="text-[12px] text-muted">
-                    MIT &middot; Research tool. Not a broker. Not real-time. Not advice.
+                    MIT &middot; Research tool, not financial advice.
                 </p>
             </footer>
         </main>
