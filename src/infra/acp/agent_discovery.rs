@@ -220,8 +220,8 @@ fn codex_candidate() -> AgentCandidate {
         };
     }
 
-    let command = crate::infra::shell::find_bin("npx")
-        .map(|path| path.to_string_lossy().to_string());
+    let command =
+        crate::infra::shell::find_bin("npx").map(|path| path.to_string_lossy().to_string());
     let package = std::env::var("CODEX_ACP_PACKAGE")
         .unwrap_or_else(|_| "@zed-industries/codex-acp@latest".to_string());
     AgentCandidate {
@@ -257,8 +257,8 @@ fn npx_candidate(id: &str, label: &str, env_var: &str, package: &str) -> AgentCa
         };
     }
 
-    let command = crate::infra::shell::find_bin("npx")
-        .map(|path| path.to_string_lossy().to_string());
+    let command =
+        crate::infra::shell::find_bin("npx").map(|path| path.to_string_lossy().to_string());
     AgentCandidate {
         id: id.into(),
         label: label.into(),
@@ -298,8 +298,7 @@ fn command_candidate(
         };
     }
 
-    let command = crate::infra::shell::find_bin(bin)
-        .map(|path| path.to_string_lossy().to_string());
+    let command = crate::infra::shell::find_bin(bin).map(|path| path.to_string_lossy().to_string());
 
     AgentCandidate {
         id: id.into(),

@@ -34,7 +34,9 @@ pub async fn run_self_update(app: AppHandle) -> Result<(), String> {
     let brew = match find_bin("brew") {
         Some(path) => path,
         None => {
-            let msg = "Homebrew not found in PATH. Open Terminal and run `brew upgrade --cask bullpen`.".to_string();
+            let msg =
+                "Homebrew not found in PATH. Open Terminal and run `brew upgrade --cask bullpen`."
+                    .to_string();
             emit_error(&app, msg.clone());
             return Err(msg);
         }
