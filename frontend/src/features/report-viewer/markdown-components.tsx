@@ -1,4 +1,4 @@
-import type { Components } from 'react-markdown';
+import type { Components } from "react-markdown";
 import {
   Table,
   TableBody,
@@ -6,7 +6,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
+} from "@/components/ui/table";
 
 export const reportMarkdownComponents: Components = {
   table: ({ children }) => <Table className="text-[13px]">{children}</Table>,
@@ -47,7 +47,9 @@ export const reportMarkdownComponents: Components = {
     </blockquote>
   ),
   h1: ({ children }) => <h1 className="pt-2 text-lg font-semibold tracking-tight">{children}</h1>,
-  h2: ({ children }) => <h2 className="pt-2 text-[15px] font-semibold tracking-tight">{children}</h2>,
+  h2: ({ children }) => (
+    <h2 className="pt-2 text-[15px] font-semibold tracking-tight">{children}</h2>
+  ),
   h3: ({ children }) => <h3 className="text-[14px] font-semibold">{children}</h3>,
   h4: ({ children }) => (
     <h4 className="text-[10.5px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
@@ -55,9 +57,9 @@ export const reportMarkdownComponents: Components = {
     </h4>
   ),
   code: ({ children, className }) => {
-    const isBlock = className?.includes('language-');
+    const isBlock = className?.includes("language-");
     if (isBlock) {
-      return <code className={`${className ?? ''} block`}>{children}</code>;
+      return <code className={`${className ?? ""} block`}>{children}</code>;
     }
     return (
       <code className="bg-muted px-1 py-0.5 font-mono text-[0.88em] text-foreground">

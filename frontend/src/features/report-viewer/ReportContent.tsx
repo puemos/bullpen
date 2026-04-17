@@ -1,36 +1,44 @@
-import { ChartLineUp } from '@phosphor-icons/react';
-import { useMemo } from 'react';
-import {
-  getAnalysisReport,
-  setActiveRun,
-} from '@/shared/api/commands';
-import { setState, useAppStore } from '@/store';
-import type { Entity, Source } from '@/types';
-import { AnalysisSection } from './AnalysisSection';
-import { ArgumentSpine } from './ArgumentSpine';
-import { Eyebrow, SectionHeader } from '@/components/ui/editorial';
-import { MetricList } from './MetricList';
-import { ProjectionView } from './ProjectionView';
-import { ReportHero } from './ReportHero';
-import { SourceList } from './SourceList';
-import { StructuredArtifactView } from './StructuredArtifactView';
+import { ChartLineUp } from "@phosphor-icons/react";
+import { useCallback, useMemo } from "react";
+import { Eyebrow, SectionHeader } from "@/components/ui/editorial";
+import { getAnalysisReport, setActiveRun } from "@/shared/api/commands";
+import { setSelectedReport, useAppStore } from "@/store";
+import type { Entity, Source } from "@/types";
+import { AnalysisSection } from "./AnalysisSection";
+import { ArgumentSpine } from "./ArgumentSpine";
+import { MetricList } from "./MetricList";
+import { ProjectionView } from "./ProjectionView";
+import { ReportHero } from "./ReportHero";
+import { SourceList } from "./SourceList";
+import { StructuredArtifactView } from "./StructuredArtifactView";
 
 export function ReportContent() {
-  const report = useAppStore(state => state.selectedReport);
-  const selectedAnalysisId = useAppStore(state => state.selectedAnalysisId);
+  const report = useAppStore((state) => state.selectedReport);
+  const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
   const sourceMap = useMemo(
     () =>
       report
-        ? new Map<string, Source>(report.sources.map(s => [s.id, s]))
+        ? new Map<string, Source>(report.sources.map((s) => [s.id, s]))
         : new Map<string, Source>(),
-    [report?.sources],
+    [report?.sources, report],
   );
   const entityMap = useMemo(
     () =>
       report
-        ? new Map<string, Entity>(report.entities.map(e => [e.id, e]))
+        ? new Map<string, Entity>(report.entities.map((e) => [e.id, e]))
         : new Map<string, Entity>(),
-    [report?.entities],
+    [report?.entities, report],
+  );
+
+  const analysisId = report?.analysis.id;
+  const switchRun = useCallback(
+    async (runId: string) => {
+      if (!analysisId) return;
+      await setActiveRun(analysisId, runId);
+      const updated = await getAnalysisReport(analysisId, runId);
+      setSelectedReport(updated);
+    },
+    [analysisId],
   );
 
   if (!selectedAnalysisId) {
@@ -43,18 +51,8 @@ export function ReportContent() {
   }
 
   if (!report) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm">
-        Loading report...
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center text-sm">Loading report...</div>;
   }
-
-  const switchRun = async (runId: string) => {
-    await setActiveRun(report.analysis.id, runId);
-    const updated = await getAnalysisReport(report.analysis.id, runId);
-    setState({ selectedReport: updated });
-  };
 
   const plan = report.research_plan;
   const hasProjections = report.projections.length > 0;
@@ -96,10 +94,15 @@ export function ReportContent() {
       {hasProjections && (
         <section className="space-y-8 pb-16">
           <SectionHeader
-            number={sectionNumber(sectionFlags, 'projections')}
+            number={sectionNumber(sectionFlags, "projections")}
             label="Projection"
             title="Forward view"
-            meta={<span className="font-mono tabular-nums">{report.projections.length.toString().padStart(2, '0')} {report.projections.length === 1 ? 'target' : 'targets'}</span>}
+            meta={
+              <span className="font-mono tabular-nums">
+                {report.projections.length.toString().padStart(2, "0")}{" "}
+                {report.projections.length === 1 ? "target" : "targets"}
+              </span>
+            }
             id="projections"
           />
           <ProjectionView
@@ -113,36 +116,36 @@ export function ReportContent() {
       {hasMetrics && (
         <section className="space-y-8 pb-16">
           <SectionHeader
-            number={sectionNumber(sectionFlags, 'metrics')}
+            number={sectionNumber(sectionFlags, "metrics")}
             label="Metrics"
             title="Data points"
-            meta={<span className="font-mono tabular-nums">{report.metrics.length.toString().padStart(2, '0')} tracked</span>}
+            meta={
+              <span className="font-mono tabular-nums">
+                {report.metrics.length.toString().padStart(2, "0")} tracked
+              </span>
+            }
             id="metrics"
           />
-          <MetricList
-            metrics={report.metrics}
-            entityMap={entityMap}
-            sourceMap={sourceMap}
-          />
+          <MetricList metrics={report.metrics} entityMap={entityMap} sourceMap={sourceMap} />
         </section>
       )}
 
       {hasEvidence && (
         <section className="space-y-2 pb-16">
           <SectionHeader
-            number={sectionNumber(sectionFlags, 'evidence')}
+            number={sectionNumber(sectionFlags, "evidence")}
             label="Evidence"
             title="Structured evidence"
-            meta={<span className="font-mono tabular-nums">{report.artifacts.length.toString().padStart(2, '0')} artifacts</span>}
+            meta={
+              <span className="font-mono tabular-nums">
+                {report.artifacts.length.toString().padStart(2, "0")} artifacts
+              </span>
+            }
             id="evidence"
           />
           <div>
             {report.artifacts.map((artifact, index) => (
-              <StructuredArtifactView
-                key={artifact.id}
-                artifact={artifact}
-                isFirst={index === 0}
-              />
+              <StructuredArtifactView key={artifact.id} artifact={artifact} isFirst={index === 0} />
             ))}
           </div>
         </section>
@@ -151,10 +154,14 @@ export function ReportContent() {
       {hasAnalysis && (
         <section className="space-y-8 pb-16">
           <SectionHeader
-            number={sectionNumber(sectionFlags, 'analysis')}
+            number={sectionNumber(sectionFlags, "analysis")}
             label="Analysis"
             title="The deeper read"
-            meta={<span className="font-mono tabular-nums">{report.blocks.length.toString().padStart(2, '0')} blocks</span>}
+            meta={
+              <span className="font-mono tabular-nums">
+                {report.blocks.length.toString().padStart(2, "0")} blocks
+              </span>
+            }
             id="analysis"
           />
           <AnalysisSection blocks={report.blocks} sourceMap={sourceMap} />
@@ -164,10 +171,14 @@ export function ReportContent() {
       {hasSources && (
         <section className="space-y-8 pb-16">
           <SectionHeader
-            number={sectionNumber(sectionFlags, 'sources')}
+            number={sectionNumber(sectionFlags, "sources")}
             label="Sources"
             title="Bibliography"
-            meta={<span className="font-mono tabular-nums">{report.sources.length.toString().padStart(2, '0')} cited</span>}
+            meta={
+              <span className="font-mono tabular-nums">
+                {report.sources.length.toString().padStart(2, "0")} cited
+              </span>
+            }
             id="sources"
           />
           <SourceList sources={report.sources} />
@@ -185,19 +196,19 @@ type SectionFlags = {
   hasSources: boolean;
 };
 
-type SectionKey = 'projections' | 'metrics' | 'evidence' | 'analysis' | 'sources';
+type SectionKey = "projections" | "metrics" | "evidence" | "analysis" | "sources";
 
 function sectionNumber(flags: SectionFlags, which: SectionKey): string {
-  const order: SectionKey[] = ['projections', 'metrics', 'evidence', 'analysis', 'sources'];
+  const order: SectionKey[] = ["projections", "metrics", "evidence", "analysis", "sources"];
   const present = new Set<SectionKey>();
-  if (flags.hasProjections) present.add('projections');
-  if (flags.hasMetrics) present.add('metrics');
-  if (flags.hasEvidence) present.add('evidence');
-  if (flags.hasAnalysis) present.add('analysis');
-  if (flags.hasSources) present.add('sources');
-  const seq = order.filter(key => present.has(key));
+  if (flags.hasProjections) present.add("projections");
+  if (flags.hasMetrics) present.add("metrics");
+  if (flags.hasEvidence) present.add("evidence");
+  if (flags.hasAnalysis) present.add("analysis");
+  if (flags.hasSources) present.add("sources");
+  const seq = order.filter((key) => present.has(key));
   const idx = seq.indexOf(which);
-  return String(idx + 1).padStart(2, '0');
+  return String(idx + 1).padStart(2, "0");
 }
 
 function DecisionCriteria({ criteria }: { criteria: string[] }) {
@@ -206,16 +217,11 @@ function DecisionCriteria({ criteria }: { criteria: string[] }) {
       <Eyebrow>Decision criteria</Eyebrow>
       <ol className="divide-y divide-border/60 text-[13.5px] text-foreground/85">
         {criteria.map((criterion, index) => (
-          <li
-            key={criterion}
-            className="flex items-baseline gap-3 py-2 first:pt-0 last:pb-0"
-          >
+          <li key={criterion} className="flex items-baseline gap-3 py-2 first:pt-0 last:pb-0">
             <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
-              {String(index + 1).padStart(2, '0')}
+              {String(index + 1).padStart(2, "0")}
             </span>
-            <span className="leading-[1.55]">
-              {criterion.replace(/^\s*\d+[.)]\s+/, '')}
-            </span>
+            <span className="leading-[1.55]">{criterion.replace(/^\s*\d+[.)]\s+/, "")}</span>
           </li>
         ))}
       </ol>
@@ -231,18 +237,18 @@ function SectionJumpNav({
   hasSources,
 }: SectionFlags) {
   const items: { href: string; label: string }[] = [];
-  if (hasProjections) items.push({ href: '#projections', label: 'Projection' });
-  if (hasMetrics) items.push({ href: '#metrics', label: 'Metrics' });
-  if (hasEvidence) items.push({ href: '#evidence', label: 'Evidence' });
-  if (hasAnalysis) items.push({ href: '#analysis', label: 'Analysis' });
-  if (hasSources) items.push({ href: '#sources', label: 'Sources' });
+  if (hasProjections) items.push({ href: "#projections", label: "Projection" });
+  if (hasMetrics) items.push({ href: "#metrics", label: "Metrics" });
+  if (hasEvidence) items.push({ href: "#evidence", label: "Evidence" });
+  if (hasAnalysis) items.push({ href: "#analysis", label: "Analysis" });
+  if (hasSources) items.push({ href: "#sources", label: "Sources" });
 
   return (
-    <nav className="sticky top-0 z-20 -mx-8 mb-8 border-y border-border bg-background/90 px-8 py-3 backdrop-blur">
+    <nav className="sticky top-0 z-20 -mx-8 mb-8 flex h-12 items-center border-b border-border bg-background px-8">
       <div className="flex items-center gap-6">
         <Eyebrow>Contents</Eyebrow>
         <div className="flex items-center gap-5 text-[12.5px]">
-          {items.map(item => (
+          {items.map((item) => (
             <a
               key={item.href}
               href={item.href}

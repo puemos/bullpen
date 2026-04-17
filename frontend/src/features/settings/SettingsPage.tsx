@@ -54,9 +54,9 @@ export function SettingsPage({ agents }: SettingsPageProps) {
           }
         />
         <p className="max-w-[60ch] text-[14px] leading-[1.6] text-muted-foreground">
-          Crazylines runs research against ACP-compatible agents on your machine.
-          If an agent is marked unavailable, check your PATH or the documented
-          environment overrides (<code className="font-mono text-[13px]">CODEX_ACP_BIN</code>,{" "}
+          Crazylines runs research against ACP-compatible agents on your machine. If an agent is
+          marked unavailable, check your PATH or the documented environment overrides (
+          <code className="font-mono text-[13px]">CODEX_ACP_BIN</code>,{" "}
           <code className="font-mono text-[13px]">CRAZYLINES_CUSTOM_AGENT</code>).
         </p>
         <AgentStatusList agents={agents} />
@@ -64,9 +64,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
 
       <section className="space-y-6">
         <SectionHeader number="02" label="Preferences" title="Overrides" />
-        {error && (
-          <div className="text-sm text-destructive">{error}</div>
-        )}
+        {error && <div className="text-sm text-destructive">{error}</div>}
         {!settings ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : (
@@ -85,8 +83,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
                 placeholder="e.g. /usr/local/bin/my-agent"
               />
               <p className="max-w-[60ch] text-[12.5px] leading-relaxed text-muted-foreground">
-                Absolute path to a custom ACP agent binary. Leave blank to rely on
-                autodiscovery.
+                Absolute path to a custom ACP agent binary. Leave blank to rely on autodiscovery.
               </p>
             </div>
 

@@ -1,7 +1,8 @@
-import { cn } from '@/lib/utils';
-import type { Entity, Projection, ProjectionScenario, Source } from '@/types';
-import { ConfidenceRail } from './badge-styles';
-import { Eyebrow } from '@/components/ui/editorial';
+import { memo } from "react";
+import { Eyebrow } from "@/components/ui/editorial";
+import { cn } from "@/lib/utils";
+import type { Entity, Projection, ProjectionScenario, Source } from "@/types";
+import { ConfidenceRail } from "./badge-styles";
 
 interface ProjectionViewProps {
   projections: Projection[];
@@ -9,7 +10,11 @@ interface ProjectionViewProps {
   sourceMap: Map<string, Source>;
 }
 
-export function ProjectionView({ projections, entityMap, sourceMap }: ProjectionViewProps) {
+export const ProjectionView = memo(function ProjectionView({
+  projections,
+  entityMap,
+  sourceMap,
+}: ProjectionViewProps) {
   if (projections.length === 0) return null;
 
   return (
@@ -25,7 +30,7 @@ export function ProjectionView({ projections, entityMap, sourceMap }: Projection
       ))}
     </div>
   );
-}
+});
 
 function ProjectionCard({
   projection,
@@ -42,7 +47,7 @@ function ProjectionCard({
   const label = entity?.symbol || entity?.name || projection.entity_id;
 
   return (
-    <article className={cn('space-y-10', !isFirst && 'border-t border-border pt-12')}>
+    <article className={cn("space-y-10", !isFirst && "border-t border-border pt-12")}>
       <header className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_260px] lg:gap-14">
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -65,10 +70,7 @@ function ProjectionCard({
         </div>
         <aside className="space-y-2 lg:border-l lg:border-border lg:pl-6">
           <Eyebrow>Confidence</Eyebrow>
-          <ConfidenceRail
-            confidence={projection.confidence}
-            accentClass="bg-foreground/70"
-          />
+          <ConfidenceRail confidence={projection.confidence} accentClass="bg-foreground/70" />
         </aside>
       </header>
 
@@ -86,7 +88,7 @@ function ProjectionCard({
             key={`${scenario.label}-${i}`}
             scenario={scenario}
             currentValue={projection.current_value}
-            indexLabel={String(i + 1).padStart(2, '0')}
+            indexLabel={String(i + 1).padStart(2, "0")}
           />
         ))}
       </div>
@@ -96,12 +98,9 @@ function ProjectionCard({
           <Eyebrow>Key assumptions</Eyebrow>
           <ol className="space-y-2 text-[14px] leading-[1.6] text-foreground/90">
             {projection.key_assumptions.map((assumption, i) => (
-              <li
-                key={`${i}-${assumption.slice(0, 32)}`}
-                className="flex gap-3"
-              >
+              <li key={`${i}-${assumption.slice(0, 32)}`} className="flex gap-3">
                 <span className="mt-[0.35em] font-mono text-[10.5px] tabular-nums text-muted-foreground">
-                  {String(i + 1).padStart(2, '0')}
+                  {String(i + 1).padStart(2, "0")}
                 </span>
                 <span>{assumption}</span>
               </li>
@@ -135,17 +134,12 @@ type GaugeMarker = {
 };
 
 function assignSlots(markers: GaugeMarker[], minGap: number): number[] {
-  const sorted = markers
-    .map((m, i) => ({ i, x: m.x }))
-    .sort((a, b) => a.x - b.x);
+  const sorted = markers.map((m, i) => ({ i, x: m.x })).sort((a, b) => a.x - b.x);
   const slots = new Array<number>(markers.length).fill(0);
   const lastXPerSlot: number[] = [];
   for (const { i, x } of sorted) {
     let slot = 0;
-    while (
-      slot < lastXPerSlot.length &&
-      x - lastXPerSlot[slot] < minGap
-    ) {
+    while (slot < lastXPerSlot.length && x - lastXPerSlot[slot] < minGap) {
       slot += 1;
     }
     lastXPerSlot[slot] = x;
@@ -163,7 +157,7 @@ function ProjectionGauge({
   currentValue: number;
   currentLabel: string;
 }) {
-  const values = scenarios.map(s => s.target_value).concat([currentValue]);
+  const values = scenarios.map((s) => s.target_value).concat([currentValue]);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || Math.max(1, Math.abs(max) * 0.1);
@@ -172,18 +166,16 @@ function ProjectionGauge({
   const padX = 40;
   const midY = height / 2;
 
-  const project = (value: number) =>
-    padX + ((value - min) / span) * (width - padX * 2);
+  const project = (value: number) => padX + ((value - min) / span) * (width - padX * 2);
 
   const markers: GaugeMarker[] = [
     {
-      key: 'now',
+      key: "now",
       x: project(currentValue),
-      labelTop: 'now',
+      labelTop: "now",
       labelBottom: currentLabel,
-      topClassName:
-        'fill-muted-foreground text-[10px] font-mono uppercase tracking-[0.16em]',
-      bottomClassName: 'fill-foreground text-[11px] font-mono tabular-nums',
+      topClassName: "fill-muted-foreground text-[10px] font-mono uppercase tracking-[0.16em]",
+      bottomClassName: "fill-foreground text-[11px] font-mono tabular-nums",
       dot: null,
       tick: true,
     },
@@ -194,11 +186,8 @@ function ProjectionGauge({
         x: project(scenario.target_value),
         labelTop: scenario.label,
         labelBottom: scenario.target_label,
-        topClassName: cn(
-          'text-[10px] font-mono uppercase tracking-[0.16em]',
-          accent.text,
-        ),
-        bottomClassName: 'fill-foreground text-[11px] font-mono tabular-nums',
+        topClassName: cn("text-[10px] font-mono uppercase tracking-[0.16em]", accent.text),
+        bottomClassName: "fill-foreground text-[11px] font-mono tabular-nums",
         dot: { fillClassName: accent.fill },
         tick: false,
       };
@@ -265,19 +254,9 @@ function ProjectionGauge({
                   </>
                 )}
                 {marker.dot && (
-                  <circle
-                    cx={marker.x}
-                    cy={midY}
-                    r={4.5}
-                    className={marker.dot.fillClassName}
-                  />
+                  <circle cx={marker.x} cy={midY} r={4.5} className={marker.dot.fillClassName} />
                 )}
-                <text
-                  x={marker.x}
-                  y={topY}
-                  textAnchor="middle"
-                  className={marker.topClassName}
-                >
+                <text x={marker.x} y={topY} textAnchor="middle" className={marker.topClassName}>
                   {marker.labelTop}
                 </text>
                 <text
@@ -296,7 +275,8 @@ function ProjectionGauge({
       <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground">
         {scenarios.map((scenario, i) => (
           <span key={`${scenario.label}-${i}`}>
-            {scenario.label} · {scenario.target_label} ({formatUpside(currentValue, scenario.target_value)})
+            {scenario.label} · {scenario.target_label} (
+            {formatUpside(currentValue, scenario.target_value)})
           </span>
         ))}
       </div>
@@ -321,7 +301,7 @@ function ProbabilityBar({ scenarios }: { scenarios: ProjectionScenario[] }) {
           return (
             <div
               key={`${scenario.label}-${i}`}
-              className={cn('h-full', accent.bar)}
+              className={cn("h-full", accent.bar)}
               style={{ width: `${pct}%` }}
             />
           );
@@ -330,7 +310,10 @@ function ProbabilityBar({ scenarios }: { scenarios: ProjectionScenario[] }) {
       <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground">
         {scenarios.map((scenario, i) => (
           <span key={`${scenario.label}-${i}`} className="inline-flex items-center gap-1.5">
-            <span className={cn('h-1.5 w-1.5 rounded-full', scenarioAccent(scenario.label).bar)} aria-hidden />
+            <span
+              className={cn("h-1.5 w-1.5 rounded-full", scenarioAccent(scenario.label).bar)}
+              aria-hidden
+            />
             {scenario.label} {Math.round(scenario.probability * 100)}%
           </span>
         ))}
@@ -360,7 +343,7 @@ function ScenarioColumn({
           <Eyebrow className={accent.text}>{scenario.label}</Eyebrow>
         </div>
         <div className="flex items-baseline gap-3">
-          <span className={cn('text-2xl font-semibold tracking-tight', accent.text)}>
+          <span className={cn("text-2xl font-semibold tracking-tight", accent.text)}>
             {scenario.target_label}
           </span>
           <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
@@ -372,11 +355,9 @@ function ScenarioColumn({
         </div>
       </div>
 
-      <div className={cn('h-[2px] w-10', accent.bar)} aria-hidden />
+      <div className={cn("h-[2px] w-10", accent.bar)} aria-hidden />
 
-      <p className="text-[14px] leading-[1.6] text-foreground/90">
-        {scenario.rationale}
-      </p>
+      <p className="text-[14px] leading-[1.6] text-foreground/90">{scenario.rationale}</p>
 
       {scenario.catalysts.length > 0 && (
         <ScenarioList label="Catalysts" items={scenario.catalysts} markerClass={accent.bar} />
@@ -403,7 +384,10 @@ function ScenarioList({
       <ul className="space-y-1.5 text-[13.5px] leading-[1.55] text-foreground/85">
         {items.map((item, i) => (
           <li key={`${i}-${item.slice(0, 32)}`} className="flex gap-2.5">
-            <span className={cn('mt-[0.65em] h-1 w-1 shrink-0 rounded-full', markerClass)} aria-hidden />
+            <span
+              className={cn("mt-[0.65em] h-1 w-1 shrink-0 rounded-full", markerClass)}
+              aria-hidden
+            />
             <span>{item}</span>
           </li>
         ))}
@@ -412,20 +396,14 @@ function ScenarioList({
   );
 }
 
-function EvidenceRow({
-  ids,
-  sourceMap,
-}: {
-  ids: string[];
-  sourceMap: Map<string, Source>;
-}) {
+function EvidenceRow({ ids, sourceMap }: { ids: string[]; sourceMap: Map<string, Source> }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-t border-border pt-4">
       <Eyebrow className="shrink-0">Evidence</Eyebrow>
       {ids.map((id, index) => {
         const source = sourceMap.get(id);
         const label = source?.title ?? id.slice(0, 8);
-        const href = source?.url ?? '#';
+        const href = source?.url ?? "#";
         return (
           <a
             key={id}
@@ -435,7 +413,7 @@ function EvidenceRow({
             className="inline-flex items-baseline gap-1.5 text-[12.5px] text-foreground/80 underline-offset-4 hover:underline"
           >
             <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-              {String(index + 1).padStart(2, '0')}
+              {String(index + 1).padStart(2, "0")}
             </span>
             <span className="max-w-[24ch] truncate">{label}</span>
           </a>
@@ -460,36 +438,35 @@ function scenarioAccent(label: string): {
   bar: string;
 } {
   switch (label.toLowerCase()) {
-    case 'bull':
+    case "bull":
       return {
-        fill: 'fill-emerald-600 dark:fill-emerald-400',
-        text: 'text-emerald-700 dark:text-emerald-400',
-        bar: 'bg-emerald-600 dark:bg-emerald-400',
+        fill: "fill-emerald-600 dark:fill-emerald-400",
+        text: "text-emerald-700 dark:text-emerald-400",
+        bar: "bg-emerald-600 dark:bg-emerald-400",
       };
-    case 'bear':
+    case "bear":
       return {
-        fill: 'fill-red-600 dark:fill-red-400',
-        text: 'text-red-700 dark:text-red-400',
-        bar: 'bg-red-600 dark:bg-red-400',
+        fill: "fill-red-600 dark:fill-red-400",
+        text: "text-red-700 dark:text-red-400",
+        bar: "bg-red-600 dark:bg-red-400",
       };
-    case 'base':
     default:
       return {
-        fill: 'fill-foreground',
-        text: 'text-foreground',
-        bar: 'bg-foreground/70',
+        fill: "fill-foreground",
+        text: "text-foreground",
+        bar: "bg-foreground/70",
       };
   }
 }
 
 function formatMetric(metric: string) {
-  return metric.replace(/_/g, ' ');
+  return metric.replace(/_/g, " ");
 }
 
 function formatUpside(current: number, target: number): string {
-  if (!Number.isFinite(current) || Math.abs(current) < 1e-9) return '—';
+  if (!Number.isFinite(current) || Math.abs(current) < 1e-9) return "—";
   const pct = ((target - current) / current) * 100;
-  const sign = pct >= 0 ? '+' : '';
+  const sign = pct >= 0 ? "+" : "";
   return `${sign}${pct.toFixed(1)}%`;
 }
 

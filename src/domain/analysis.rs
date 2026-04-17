@@ -105,6 +105,8 @@ pub struct AnalysisRun {
     pub id: AnalysisRunId,
     pub analysis_id: AnalysisId,
     pub agent_id: String,
+    #[serde(default)]
+    pub model_id: Option<String>,
     pub prompt_text: String,
     pub status: AnalysisStatus,
     pub started_at: String,

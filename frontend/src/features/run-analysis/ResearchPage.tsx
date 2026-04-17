@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { Eyebrow } from '@/components/ui/editorial';
-import { useAppStore } from '@/store';
-import type { AgentCandidate } from '@/types';
-import { ResearchComposer } from './ResearchComposer';
-import { useRunAnalysis } from './useRunAnalysis';
+import { useState } from "react";
+import { Eyebrow } from "@/components/ui/editorial";
+import { useAppStore } from "@/store";
+import type { AgentCandidate } from "@/types";
+import { ResearchComposer } from "./ResearchComposer";
+import { useRunAnalysis } from "./useRunAnalysis";
 
 interface ExamplePrompt {
   tag: string;
@@ -12,20 +12,20 @@ interface ExamplePrompt {
 
 const EXAMPLE_PROMPTS: ExamplePrompt[] = [
   {
-    tag: 'Compare',
-    text: 'Compare NVDA to AMD across AI compute margins and supply constraints.',
+    tag: "Compare",
+    text: "Compare NVDA to AMD across AI compute margins and supply constraints.",
   },
   {
-    tag: 'Sector',
+    tag: "Sector",
     text: "Is the energy sector's dividend growth sustainable through 2027?",
   },
   {
-    tag: 'Stress',
-    text: 'Stress-test US regional banks under a 300bps rate-hike shock.',
+    tag: "Stress",
+    text: "Stress-test US regional banks under a 300bps rate-hike shock.",
   },
   {
-    tag: 'Single',
-    text: 'Build the bull and bear case for TSM, focusing on geopolitical risk.',
+    tag: "Single",
+    text: "Build the bull and bear case for TSM, focusing on geopolitical risk.",
   },
 ];
 
@@ -35,10 +35,10 @@ interface ResearchPageProps {
 }
 
 export function ResearchPage({ agents, onDone }: ResearchPageProps) {
-  const [prompt, setPrompt] = useState('');
-  const agentId = useAppStore(state => state.agentId);
+  const [prompt, setPrompt] = useState("");
+  const agentId = useAppStore((state) => state.agentId);
 
-  const selectedAgent = agents.find(agent => agent.id === agentId);
+  const selectedAgent = agents.find((agent) => agent.id === agentId);
   const canRun = prompt.trim().length > 0 && !!selectedAgent?.available;
 
   const { localError, start } = useRunAnalysis({
@@ -76,7 +76,7 @@ export function ResearchPage({ agents, onDone }: ResearchPageProps) {
           <div className="flex items-baseline justify-between">
             <Eyebrow>Start from an example</Eyebrow>
             <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/70">
-              {String(EXAMPLE_PROMPTS.length).padStart(2, '0')}
+              {String(EXAMPLE_PROMPTS.length).padStart(2, "0")}
             </span>
           </div>
 
@@ -89,7 +89,7 @@ export function ResearchPage({ agents, onDone }: ResearchPageProps) {
                   className="group grid w-full grid-cols-[32px_80px_1fr] items-baseline gap-4 px-1 py-4 text-left transition-colors hover:bg-muted/40"
                 >
                   <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                    {String(index + 1).padStart(2, '0')}
+                    {String(index + 1).padStart(2, "0")}
                   </span>
                   <span className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     {example.tag}

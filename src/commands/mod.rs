@@ -208,6 +208,7 @@ pub async fn generate_analysis(
     state: State<'_, AppState>,
     user_prompt: String,
     agent_id: String,
+    model_id: Option<String>,
     analysis_id: String,
     run_id: Option<String>,
     on_progress: Channel<ProgressEventPayload>,
@@ -231,6 +232,7 @@ pub async fn generate_analysis(
         )
     })?;
     let agent_args = candidate.args.clone();
+    let (model_flag, model_env) = candidate.resolve_model(model_id.as_deref());
 
     let now = chrono::Utc::now().to_rfc3339();
     let run_id = run_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -239,6 +241,7 @@ pub async fn generate_analysis(
         id: run_id.clone(),
         analysis_id: analysis_id.clone(),
         agent_id: candidate.id.clone(),
+        model_id: model_id.clone(),
         prompt_text: trimmed_prompt.to_string(),
         status: AnalysisStatus::Running,
         started_at: now.clone(),
@@ -270,10 +273,26 @@ pub async fn generate_analysis(
 
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressEvent>();
     let progress_channel = on_progress.clone();
-    let app_clone = app.clone();
-    let analysis_id_clone = analysis_id.clone();
     let run_id_clone = run_id.clone();
     let db_clone = state.db.clone();
+
+    let (coalesce_tx, mut coalesce_rx) = mpsc::unbounded_channel::<()>();
+    let coalesce_app = app.clone();
+    let coalesce_aid = analysis_id.clone();
+    tauri::async_runtime::spawn(async move {
+        while coalesce_rx.recv().await.is_some() {
+            while coalesce_rx.try_recv().is_ok() {}
+            let _ = coalesce_app.emit(
+                "analysis-data-changed",
+                DataChangedPayload {
+                    analysis_id: coalesce_aid.clone(),
+                    kind: "batch".to_string(),
+                },
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    });
+
     tauri::async_runtime::spawn(async move {
         while let Some(event) = progress_rx.recv().await {
             let payload = match event {
@@ -340,14 +359,8 @@ pub async fn generate_analysis(
             if let Ok(db) = db_clone.lock() {
                 let _ = db.append_progress_event(&run_id_clone, &payload);
             }
-            if let Some(kind) = data_kind {
-                let _ = app_clone.emit(
-                    "analysis-data-changed",
-                    DataChangedPayload {
-                        analysis_id: analysis_id_clone.clone(),
-                        kind: kind.to_string(),
-                    },
-                );
+            if data_kind.is_some() {
+                let _ = coalesce_tx.send(());
             }
             if progress_channel.send(payload).is_err() {
                 break;
@@ -365,6 +378,8 @@ pub async fn generate_analysis(
         run_context: context,
         agent_command: command,
         agent_args,
+        model_flag,
+        model_env,
         progress_tx: Some(progress_tx),
         mcp_server_binary: None,
         db_path,

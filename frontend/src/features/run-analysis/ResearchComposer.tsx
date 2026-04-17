@@ -1,9 +1,23 @@
-import { ArrowRight, WarningCircle } from '@phosphor-icons/react';
-import type { KeyboardEvent } from 'react';
-import AgentSelector from '@/components/Agent/AgentSelector';
-import { Textarea } from '@/components/ui/textarea';
-import { setState } from '@/store';
-import type { AgentCandidate } from '@/types';
+import { ArrowRight, WarningCircle } from "@phosphor-icons/react";
+import type { KeyboardEvent } from "react";
+import AgentSelector from "@/components/Agent/AgentSelector";
+import { Textarea } from "@/components/ui/textarea";
+import { getSettings, updateSettings } from "@/shared/api/commands";
+import { getState, setState, useAppStore } from "@/store";
+import type { AgentCandidate } from "@/types";
+
+async function persistModelByAgent(map: Record<string, string | null>) {
+  try {
+    const settings = await getSettings();
+    const next: Record<string, string> = {};
+    for (const [id, value] of Object.entries(map)) {
+      if (value) next[id] = value;
+    }
+    await updateSettings({ ...settings, model_by_agent: next });
+  } catch {
+    // non-critical
+  }
+}
 
 interface ResearchComposerProps {
   agentId: string;
@@ -26,8 +40,17 @@ export function ResearchComposer({
   onPromptChange,
   onRun,
 }: ResearchComposerProps) {
+  const modelByAgent = useAppStore((state) => state.modelByAgent);
+
+  const handleSelectAgent = (id: string, modelId: string | null) => {
+    const prev = getState().modelByAgent;
+    const nextMap: Record<string, string | null> = { ...prev, [id]: modelId };
+    setState({ agentId: id, modelByAgent: nextMap });
+    void persistModelByAgent(nextMap);
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
       if (canRun) onRun();
     }
@@ -40,7 +63,7 @@ export function ResearchComposer({
           className="min-h-[140px] w-full resize-none border-0 bg-transparent px-0 py-5 text-[22px] leading-[1.35] tracking-[-0.01em] shadow-none outline-none placeholder:text-muted-foreground/40 focus-visible:border-transparent focus-visible:ring-0 md:text-[22px]"
           rows={4}
           value={prompt}
-          onChange={event => onPromptChange(event.target.value)}
+          onChange={(event) => onPromptChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your research question…"
           autoFocus
@@ -51,11 +74,12 @@ export function ResearchComposer({
         <AgentSelector
           agents={agents}
           selectedAgentId={agentId}
-          onSelect={id => setState({ agentId: id })}
+          modelByAgent={modelByAgent}
+          onSelect={handleSelectAgent}
         />
         <div className="flex items-center gap-4">
           <span className="hidden font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/70 sm:inline">
-            {canRun ? '⌘ + ↵ to run' : ''}
+            {canRun ? "⌘ + ↵ to run" : ""}
           </span>
           <button
             type="button"

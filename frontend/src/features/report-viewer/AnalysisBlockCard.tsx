@@ -1,16 +1,11 @@
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
-import type { AnalysisBlock, Source } from '@/types';
-import { ConfidenceBadge } from './badge-styles';
-import { Eyebrow } from '@/components/ui/editorial';
-import { reportMarkdownComponents } from './markdown-components';
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Eyebrow } from "@/components/ui/editorial";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import type { AnalysisBlock, Source } from "@/types";
+import { ConfidenceBadge } from "./badge-styles";
+import { reportMarkdownComponents } from "./markdown-components";
 
 interface AnalysisBlockCardProps {
   block: AnalysisBlock;
@@ -22,8 +17,8 @@ export function AnalysisBlockCard({ block, sourceMap, isFirstInGroup }: Analysis
   return (
     <article
       className={cn(
-        'grid gap-6 py-8 md:grid-cols-[180px_minmax(0,1fr)] md:gap-10',
-        !isFirstInGroup && 'border-t border-border',
+        "grid gap-6 py-8 md:grid-cols-[180px_minmax(0,1fr)] md:gap-10",
+        !isFirstInGroup && "border-t border-border",
       )}
     >
       <header className="flex flex-col gap-2 md:sticky md:top-28 md:self-start">
@@ -53,21 +48,15 @@ export function AnalysisBlockCard({ block, sourceMap, isFirstInGroup }: Analysis
 
 function ImportanceGlyph({ importance }: { importance: string }) {
   const cls =
-    importance === 'high'
-      ? 'bg-foreground'
-      : importance === 'medium'
-        ? 'bg-foreground/50'
-        : 'bg-foreground/20';
-  return <span className={cn('h-2 w-2 shrink-0 rounded-full', cls)} aria-hidden />;
+    importance === "high"
+      ? "bg-foreground"
+      : importance === "medium"
+        ? "bg-foreground/50"
+        : "bg-foreground/20";
+  return <span className={cn("h-2 w-2 shrink-0 rounded-full", cls)} aria-hidden />;
 }
 
-function EvidenceRow({
-  ids,
-  sourceMap,
-}: {
-  ids: string[];
-  sourceMap?: Map<string, Source>;
-}) {
+function EvidenceRow({ ids, sourceMap }: { ids: string[]; sourceMap?: Map<string, Source> }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-t border-border pt-4">
       <Eyebrow className="shrink-0">Cited</Eyebrow>
@@ -79,13 +68,13 @@ function EvidenceRow({
             <Tooltip key={id}>
               <TooltipTrigger asChild>
                 <a
-                  href={source?.url || '#'}
+                  href={source?.url || "#"}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-baseline gap-1.5 text-[12.5px] text-foreground/80 underline-offset-4 hover:underline"
                 >
                   <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-                    {String(index + 1).padStart(2, '0')}
+                    {String(index + 1).padStart(2, "0")}
                   </span>
                   <span className="max-w-[24ch] truncate">{label}</span>
                 </a>
@@ -103,9 +92,7 @@ function EvidenceRow({
                     {source.title}
                   </p>
                   {source.publisher && (
-                    <p className="text-[12px] text-foreground/70">
-                      {source.publisher}
-                    </p>
+                    <p className="text-[12px] text-foreground/70">{source.publisher}</p>
                   )}
                   <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
                     {source.reliability} reliability

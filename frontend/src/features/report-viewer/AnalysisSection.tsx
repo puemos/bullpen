@@ -1,6 +1,7 @@
-import type { AnalysisBlock, BlockKind, Source } from '@/types';
-import { AnalysisBlockCard } from './AnalysisBlockCard';
-import { Eyebrow } from '@/components/ui/editorial';
+import { memo } from "react";
+import { Eyebrow } from "@/components/ui/editorial";
+import type { AnalysisBlock, BlockKind, Source } from "@/types";
+import { AnalysisBlockCard } from "./AnalysisBlockCard";
 
 interface AnalysisSectionProps {
   blocks: AnalysisBlock[];
@@ -14,31 +15,38 @@ interface BlockGroup {
 }
 
 const GROUPS: BlockGroup[] = [
-  { id: 'thesis', label: 'Thesis & Business Quality', kinds: ['thesis', 'business_quality'] },
-  { id: 'financials', label: 'Financial Case', kinds: ['financials', 'valuation', 'peer_comparison'] },
-  { id: 'context', label: 'Context', kinds: ['sector_context', 'technical_context'] },
-  { id: 'path', label: 'Path Ahead', kinds: ['catalysts', 'risks'] },
-  { id: 'open', label: 'Open Questions', kinds: ['open_questions', 'other'] },
+  { id: "thesis", label: "Thesis & Business Quality", kinds: ["thesis", "business_quality"] },
+  {
+    id: "financials",
+    label: "Financial Case",
+    kinds: ["financials", "valuation", "peer_comparison"],
+  },
+  { id: "context", label: "Context", kinds: ["sector_context", "technical_context"] },
+  { id: "path", label: "Path Ahead", kinds: ["catalysts", "risks"] },
+  { id: "open", label: "Open Questions", kinds: ["open_questions", "other"] },
 ];
 
-export function AnalysisSection({ blocks, sourceMap }: AnalysisSectionProps) {
+export const AnalysisSection = memo(function AnalysisSection({
+  blocks,
+  sourceMap,
+}: AnalysisSectionProps) {
   if (blocks.length === 0) return null;
 
   const sorted = [...blocks].sort((a, b) => a.display_order - b.display_order);
-  const grouped = GROUPS.map(group => ({
+  const grouped = GROUPS.map((group) => ({
     ...group,
-    blocks: sorted.filter(b => group.kinds.includes(b.kind as BlockKind)),
-  })).filter(group => group.blocks.length > 0);
+    blocks: sorted.filter((b) => group.kinds.includes(b.kind as BlockKind)),
+  })).filter((group) => group.blocks.length > 0);
 
   return (
     <div className="space-y-14">
-      {grouped.map(group => (
+      {grouped.map((group) => (
         <div key={group.id} className="space-y-2">
-          <div className="sticky top-12 z-10 -mx-8 border-b border-border bg-background/95 px-8 py-3 backdrop-blur">
-            <div className="flex items-baseline justify-between gap-4">
+          <div className="sticky top-12 z-10 -mx-8 flex h-11 items-center border-b border-border bg-background px-8">
+            <div className="flex flex-1 items-baseline justify-between gap-4">
               <Eyebrow>{group.label}</Eyebrow>
               <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-                {String(group.blocks.length).padStart(2, '0')}
+                {String(group.blocks.length).padStart(2, "0")}
               </span>
             </div>
           </div>
@@ -56,4 +64,4 @@ export function AnalysisSection({ blocks, sourceMap }: AnalysisSectionProps) {
       ))}
     </div>
   );
-}
+});

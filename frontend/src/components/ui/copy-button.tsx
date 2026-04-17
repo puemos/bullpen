@@ -1,15 +1,9 @@
-import { Copy, Check } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Check, Copy } from "@phosphor-icons/react";
+import type { VariantProps } from "class-variance-authority";
+import { Button, type buttonVariants } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/lib/utils";
-import type { VariantProps } from "class-variance-authority";
-import { buttonVariants } from "@/components/ui/button";
 
 interface CopyButtonProps {
   text: string;

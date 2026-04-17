@@ -1,5 +1,5 @@
-import { createElement, type ComponentType } from "react";
 import * as PhosphorIcons from "@phosphor-icons/react";
+import { type ComponentType, createElement } from "react";
 
 type IconProps = { size?: number | string; weight?: string; className?: string };
 type PhosphorIcon = ComponentType<IconProps>;

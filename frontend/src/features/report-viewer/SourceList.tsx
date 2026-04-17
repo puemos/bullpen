@@ -1,16 +1,19 @@
-import { ArrowUpRight } from '@phosphor-icons/react';
-import { cn } from '@/lib/utils';
-import type { Source } from '@/types';
-import { Eyebrow } from '@/components/ui/editorial';
+import { ArrowUpRight } from "@phosphor-icons/react";
+import { memo } from "react";
+import { Eyebrow } from "@/components/ui/editorial";
+import { cn } from "@/lib/utils";
+import type { Source } from "@/types";
 
 interface SourceListProps {
   sources: Source[];
 }
 
-export function SourceList({ sources }: SourceListProps) {
+export const SourceList = memo(function SourceList({ sources }: SourceListProps) {
   if (sources.length === 0) return null;
 
-  const sorted = [...sources].sort((a, b) => reliabilityRank(b.reliability) - reliabilityRank(a.reliability));
+  const sorted = [...sources].sort(
+    (a, b) => reliabilityRank(b.reliability) - reliabilityRank(a.reliability),
+  );
 
   return (
     <div className="divide-y divide-border border-y border-border">
@@ -19,24 +22,22 @@ export function SourceList({ sources }: SourceListProps) {
       ))}
     </div>
   );
-}
+});
 
 function SourceRow({ source, index }: { source: Source; index: number }) {
   const content = (
     <>
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-        {String(index + 1).padStart(2, '0')}
+        {String(index + 1).padStart(2, "0")}
       </span>
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <ReliabilityPill reliability={source.reliability} />
           <Eyebrow className="text-muted-foreground/80">
-            {source.source_type.replace(/_/g, ' ')}
+            {source.source_type.replace(/_/g, " ")}
           </Eyebrow>
           {source.publisher && (
-            <span className="text-[12px] text-muted-foreground">
-              {source.publisher}
-            </span>
+            <span className="text-[12px] text-muted-foreground">{source.publisher}</span>
           )}
           <span className="font-mono text-[11px] tabular-nums text-muted-foreground/80">
             {formatDate(source.retrieved_at)}
@@ -60,8 +61,7 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
     </>
   );
 
-  const baseClass =
-    'group flex items-start gap-4 px-1 py-4 transition-colors';
+  const baseClass = "group flex items-start gap-4 px-1 py-4 transition-colors";
 
   if (source.url) {
     return (
@@ -69,7 +69,7 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
         href={source.url}
         target="_blank"
         rel="noreferrer"
-        className={cn(baseClass, 'hover:bg-muted/40')}
+        className={cn(baseClass, "hover:bg-muted/40")}
       >
         {content}
       </a>
@@ -78,11 +78,11 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
   return <div className={baseClass}>{content}</div>;
 }
 
-function ReliabilityPill({ reliability }: { reliability: Source['reliability'] }) {
+function ReliabilityPill({ reliability }: { reliability: Source["reliability"] }) {
   const accent = reliabilityAccent(reliability);
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={cn('h-1.5 w-1.5 rounded-full', accent.dot)} aria-hidden />
+      <span className={cn("h-1.5 w-1.5 rounded-full", accent.dot)} aria-hidden />
       <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-foreground">
         {reliability}
       </span>
@@ -90,39 +90,39 @@ function ReliabilityPill({ reliability }: { reliability: Source['reliability'] }
   );
 }
 
-function reliabilityRank(reliability: Source['reliability']) {
+function reliabilityRank(reliability: Source["reliability"]) {
   switch (reliability) {
-    case 'primary':
+    case "primary":
       return 3;
-    case 'high':
+    case "high":
       return 2;
-    case 'medium':
+    case "medium":
       return 1;
     default:
       return 0;
   }
 }
 
-function reliabilityAccent(reliability: Source['reliability']) {
+function reliabilityAccent(reliability: Source["reliability"]) {
   switch (reliability) {
-    case 'primary':
-      return { dot: 'bg-foreground' };
-    case 'high':
-      return { dot: 'bg-foreground/70' };
-    case 'medium':
-      return { dot: 'bg-foreground/40' };
+    case "primary":
+      return { dot: "bg-foreground" };
+    case "high":
+      return { dot: "bg-foreground/70" };
+    case "medium":
+      return { dot: "bg-foreground/40" };
     default:
-      return { dot: 'bg-foreground/20' };
+      return { dot: "bg-foreground/20" };
   }
 }
 
 function formatDate(value: string): string {
-  if (!value) return '—';
+  if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   }).format(date);
 }

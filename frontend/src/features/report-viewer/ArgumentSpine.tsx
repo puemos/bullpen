@@ -1,15 +1,15 @@
-import type { FinalStance } from '@/types';
-import { getStanceAccent } from './badge-styles';
-import { Eyebrow } from '@/components/ui/editorial';
+import { memo } from "react";
+import { Eyebrow } from "@/components/ui/editorial";
+import type { FinalStance } from "@/types";
+import { getStanceAccent } from "./badge-styles";
 
 interface ArgumentSpineProps {
   stance: FinalStance;
 }
 
-export function ArgumentSpine({ stance }: ArgumentSpineProps) {
+export const ArgumentSpine = memo(function ArgumentSpine({ stance }: ArgumentSpineProps) {
   const accent = getStanceAccent(stance.stance);
-  const hasAny =
-    stance.key_reasons.length + stance.what_would_change.length > 0;
+  const hasAny = stance.key_reasons.length + stance.what_would_change.length > 0;
   if (!hasAny) return null;
 
   return (
@@ -30,7 +30,7 @@ export function ArgumentSpine({ stance }: ArgumentSpineProps) {
       />
     </section>
   );
-}
+});
 
 function SpineColumn({
   number,
@@ -43,7 +43,7 @@ function SpineColumn({
   label: string;
   items: string[];
   markerClass: string;
-  markerStyle: 'tick' | 'dot';
+  markerStyle: "tick" | "dot";
 }) {
   return (
     <div className="flex flex-col gap-5">
@@ -59,7 +59,7 @@ function SpineColumn({
         <ol className="space-y-4 text-[15px] leading-[1.55] text-foreground">
           {items.map((item, index) => (
             <li key={`${index}-${item.slice(0, 32)}`} className="flex gap-3">
-              {markerStyle === 'tick' ? (
+              {markerStyle === "tick" ? (
                 <span className={`mt-[0.55em] h-[2px] w-3 shrink-0 ${markerClass}`} aria-hidden />
               ) : (
                 <span

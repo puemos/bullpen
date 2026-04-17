@@ -1,9 +1,9 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
+import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
+import type { AppView } from "@/app/navigation";
 import { Button } from "@/components/ui/button";
 import { Eyebrow } from "@/components/ui/editorial";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -14,7 +14,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import type { AppView } from "@/app/navigation";
+import { cn } from "@/lib/utils";
 import type { AnalysisSummary } from "@/types";
 
 interface AppSidebarProps {
@@ -56,7 +56,9 @@ export function AppSidebar({
                   className="h-8 text-[13px] font-normal"
                 >
                   <span className="flex items-center gap-2">
-                    <span aria-hidden className="font-mono text-muted-foreground">+</span>
+                    <span aria-hidden className="font-mono text-muted-foreground">
+                      +
+                    </span>
                     <span>New analysis</span>
                   </span>
                 </SidebarMenuButton>
@@ -70,10 +72,7 @@ export function AppSidebar({
                     <SidebarMenuItem key={analysis.id} className="sidebar-report-row">
                       <SidebarMenuButton
                         asChild
-                        isActive={
-                          currentView === "analysis" &&
-                          selectedAnalysisId === analysis.id
-                        }
+                        isActive={currentView === "analysis" && selectedAnalysisId === analysis.id}
                         className="h-auto items-start px-2 py-2 text-[13px] font-normal data-[active=true]:font-normal data-[active=true]:bg-sidebar-accent/70"
                       >
                         <Button
@@ -118,8 +117,7 @@ export function AppSidebar({
 
 function AnalysisMeta({ analysis }: { analysis: AnalysisSummary }) {
   const running =
-    analysis.active_run_status === "running" ||
-    analysis.active_run_status === "queued";
+    analysis.active_run_status === "running" || analysis.active_run_status === "queued";
 
   return (
     <span className="flex items-center gap-1.5 pl-0 font-mono text-[10px] uppercase tracking-[0.14em] text-sidebar-foreground/45">
@@ -131,14 +129,14 @@ function AnalysisMeta({ analysis }: { analysis: AnalysisSummary }) {
       ) : (
         <>
           <span>{statusLabel(analysis)}</span>
-          <span aria-hidden className="text-sidebar-foreground/25">·</span>
-          <span className="tabular-nums">
-            {String(analysis.block_count).padStart(2, "0")}b
+          <span aria-hidden className="text-sidebar-foreground/25">
+            ·
           </span>
-          <span aria-hidden className="text-sidebar-foreground/25">·</span>
-          <span className="tabular-nums">
-            {String(analysis.source_count).padStart(2, "0")}s
+          <span className="tabular-nums">{String(analysis.block_count).padStart(2, "0")}b</span>
+          <span aria-hidden className="text-sidebar-foreground/25">
+            ·
           </span>
+          <span className="tabular-nums">{String(analysis.source_count).padStart(2, "0")}s</span>
         </>
       )}
     </span>

@@ -1,6 +1,6 @@
-import { useSyncExternalStore } from 'react';
-import { DEFAULT_APP_VIEW } from '@/app/navigation';
-import type { AppView } from '@/app/navigation';
+import { useSyncExternalStore } from "react";
+import type { AppView } from "@/app/navigation";
+import { DEFAULT_APP_VIEW } from "@/app/navigation";
 import type {
   AnalysisReport,
   AnalysisSummary,
@@ -8,7 +8,7 @@ import type {
   ProgressItem,
   ProgressItemType,
   RunState,
-} from '../types';
+} from "../types";
 
 interface State {
   view: AppView;
@@ -17,12 +17,13 @@ interface State {
   selectedReport: AnalysisReport | null;
   // Single agent selection
   agentId: string;
+  modelByAgent: Record<string, string | null>;
   // Per-run state — supports multiple concurrent analyses
   activeRuns: Record<string, RunState>;
   activeAnalysisId: string | null;
   selectedRunTab: string | null;
   // Sub-tab within analysis detail view
-  analysisSubTab: 'report' | 'agent';
+  analysisSubTab: "report" | "agent";
 }
 
 const state: State = {
@@ -30,11 +31,12 @@ const state: State = {
   analyses: [],
   selectedAnalysisId: null,
   selectedReport: null,
-  agentId: '',
+  agentId: "",
+  modelByAgent: {},
   activeRuns: {},
   activeAnalysisId: null,
   selectedRunTab: null,
-  analysisSubTab: 'agent',
+  analysisSubTab: "agent",
 };
 
 const listeners = new Set<() => void>();
@@ -46,6 +48,46 @@ function emit() {
 export function setState(partial: Partial<State>) {
   Object.assign(state, partial);
   emit();
+}
+
+export function setSelectedReport(next: AnalysisReport | null) {
+  state.selectedReport = stableMerge(state.selectedReport, next);
+  emit();
+}
+
+function stableMerge<T>(prev: T, next: T): T {
+  if (prev === next) return prev;
+  if (prev === null || next === null || typeof prev !== "object" || typeof next !== "object") {
+    return next;
+  }
+  const prevIsArr = Array.isArray(prev);
+  const nextIsArr = Array.isArray(next);
+  if (prevIsArr !== nextIsArr) return next;
+  if (prevIsArr && nextIsArr) {
+    const a = prev as unknown as unknown[];
+    const b = next as unknown as unknown[];
+    if (a.length !== b.length) return next;
+    const merged = new Array(b.length);
+    let allSame = true;
+    for (let i = 0; i < b.length; i++) {
+      merged[i] = stableMerge(a[i], b[i]);
+      if (merged[i] !== a[i]) allSame = false;
+    }
+    return allSame ? prev : (merged as unknown as T);
+  }
+  const a = prev as Record<string, unknown>;
+  const b = next as Record<string, unknown>;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return next;
+  const merged: Record<string, unknown> = {};
+  let allSame = true;
+  for (const key of bKeys) {
+    if (!(key in a)) return next;
+    merged[key] = stableMerge(a[key], b[key]);
+    if (merged[key] !== a[key]) allSame = false;
+  }
+  return allSame ? prev : (merged as unknown as T);
 }
 
 export function getState(): State {
@@ -60,7 +102,7 @@ export function addRun(runState: RunState) {
   emit();
 }
 
-export function updateRunStatus(runId: string, status: RunState['status']) {
+export function updateRunStatus(runId: string, status: RunState["status"]) {
   const run = state.activeRuns[runId];
   if (!run) return;
   state.activeRuns = {
@@ -74,7 +116,7 @@ export function addRunProgress(
   runId: string,
   type: ProgressItemType,
   message: string,
-  data?: unknown
+  data?: unknown,
 ) {
   const run = state.activeRuns[runId];
   if (!run) return;
@@ -97,11 +139,7 @@ export function addRunProgress(
   emit();
 }
 
-export function appendRunProgress(
-  runId: string,
-  type: ProgressItemType,
-  delta: string
-) {
+export function appendRunProgress(runId: string, type: ProgressItemType, delta: string) {
   const run = state.activeRuns[runId];
   if (!run) return;
   const copy = [...run.progress];
@@ -151,16 +189,16 @@ export function clearRuns() {
 }
 
 export function isAnyRunActive(s: State): boolean {
-  return Object.values(s.activeRuns).some(r => r.status === 'running');
+  return Object.values(s.activeRuns).some((r) => r.status === "running");
 }
 
 export function useAppStore<T>(selector: (state: State) => T): T {
   return useSyncExternalStore(
-    callback => {
+    (callback) => {
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
     () => selector(state),
-    () => selector(state)
+    () => selector(state),
   );
 }

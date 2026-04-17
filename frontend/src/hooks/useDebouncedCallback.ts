@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from "react";
 
 export function useDebouncedCallback<T extends unknown[]>(
   callback: (...args: T) => void,
-  delay: number
+  delay: number,
 ): (...args: T) => void {
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
@@ -21,6 +21,6 @@ export function useDebouncedCallback<T extends unknown[]>(
         callbackRef.current(...args);
       }, delay);
     },
-    [delay]
+    [delay],
   );
 }

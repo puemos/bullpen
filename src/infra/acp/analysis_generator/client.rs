@@ -126,6 +126,70 @@ impl CrazylinesClient {
         }
     }
 
+    fn emit_tool_completion(
+        &self,
+        tool_id: &str,
+        status: &str,
+        title: String,
+        raw_input: Option<serde_json::Value>,
+        raw_output: Option<serde_json::Value>,
+        tool_name: Option<&str>,
+    ) {
+        if let Some(tx) = &self.progress {
+            let _ = tx.send(ProgressEvent::ToolCallComplete {
+                tool_call_id: tool_id.to_string(),
+                status: status.to_string(),
+                title,
+                raw_input,
+                raw_output,
+            });
+        }
+
+        if status == "completed" {
+            match tool_name {
+                Some("submit_research_plan") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::PlanSubmitted);
+                    }
+                }
+                Some("submit_source") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::SourceSubmitted);
+                    }
+                }
+                Some("submit_metric_snapshot") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::MetricSubmitted);
+                    }
+                }
+                Some("submit_structured_artifact") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::ArtifactSubmitted);
+                    }
+                }
+                Some("submit_analysis_block") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::BlockSubmitted);
+                    }
+                }
+                Some("submit_final_stance") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::StanceSubmitted);
+                    }
+                }
+                Some("submit_projection") => {
+                    if let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::ProjectionSubmitted);
+                    }
+                }
+                Some("finalize_analysis") => self.mark_finalization_received(),
+                _ => {}
+            }
+        }
+
+        self.tool_call_names.lock().unwrap().remove(tool_id);
+    }
+
     fn handle_extension_payload(&self, method: &str) -> bool {
         if matches!(method, "crazylines/finalize_analysis" | "finalize_analysis") {
             self.mark_finalization_received();
@@ -241,17 +305,57 @@ impl agent_client_protocol::Client for CrazylinesClient {
                 }
 
                 let kind = format!("{:?}", call.kind).to_lowercase();
-                if let Some(tx) = &self.progress {
-                    let _ = tx.send(ProgressEvent::ToolCallStarted {
-                        tool_call_id: tool_id.clone(),
-                        title: call.title.clone(),
-                        kind: kind.clone(),
-                    });
+                let is_completed = matches!(
+                    call.status,
+                    agent_client_protocol::ToolCallStatus::Completed
+                );
+                let is_failed =
+                    matches!(call.status, agent_client_protocol::ToolCallStatus::Failed);
+
+                if is_completed || is_failed {
+                    // The agent sent a terminal ToolCall without a separate
+                    // ToolCallUpdate — merge with anything we've already stored
+                    // and emit completion directly (no duplicate Started).
+                    let stored = self.pending_tool_calls.lock().unwrap().remove(&tool_id);
+                    let (stored_title, _stored_kind, stored_input) =
+                        stored.unwrap_or_else(|| (String::new(), String::new(), None));
+                    let final_title = if call.title.is_empty() {
+                        stored_title
+                    } else {
+                        call.title
+                    };
+                    let final_input = call.raw_input.or(stored_input);
+                    let final_output = call.raw_output;
+                    let status = if is_completed { "completed" } else { "failed" };
+                    self.emit_tool_completion(
+                        &tool_id,
+                        status,
+                        final_title,
+                        final_input,
+                        final_output,
+                        tool_name.as_deref(),
+                    );
+                } else {
+                    // Non-terminal ToolCall: emit Started once per id, and keep
+                    // the stored state fresh for any re-emissions or later
+                    // ToolCallUpdates.
+                    let already_pending = self
+                        .pending_tool_calls
+                        .lock()
+                        .unwrap()
+                        .contains_key(&tool_id);
+                    if !already_pending && let Some(tx) = &self.progress {
+                        let _ = tx.send(ProgressEvent::ToolCallStarted {
+                            tool_call_id: tool_id.clone(),
+                            title: call.title.clone(),
+                            kind: kind.clone(),
+                        });
+                    }
+                    self.pending_tool_calls
+                        .lock()
+                        .unwrap()
+                        .insert(tool_id, (call.title, kind, call.raw_input));
                 }
-                self.pending_tool_calls
-                    .lock()
-                    .unwrap()
-                    .insert(tool_id, (call.title, kind, call.raw_input.clone()));
             }
             SessionUpdate::ToolCallUpdate(update) => {
                 let tool_id: &str = &update.tool_call_id.0;
@@ -269,6 +373,12 @@ impl agent_client_protocol::Client for CrazylinesClient {
                             .and_then(Self::tool_name_from_payload)
                     })
                     .or_else(|| self.tool_call_names.lock().unwrap().get(tool_id).cloned());
+                if let Some(name) = &tool_name {
+                    self.tool_call_names
+                        .lock()
+                        .unwrap()
+                        .insert(tool_id.to_string(), name.clone());
+                }
 
                 let is_completed = matches!(
                     update.fields.status,
@@ -281,64 +391,37 @@ impl agent_client_protocol::Client for CrazylinesClient {
 
                 if is_completed || is_failed {
                     let pending = self.pending_tool_calls.lock().unwrap().remove(tool_id);
-                    let (title, _kind, stored_input) =
+                    let (stored_title, _stored_kind, stored_input) =
                         pending.unwrap_or_else(|| (String::new(), String::new(), None));
-                    let final_title = update.fields.title.clone().unwrap_or(title);
+                    let final_title = update.fields.title.clone().unwrap_or(stored_title);
                     let final_input = update.fields.raw_input.clone().or(stored_input);
                     let final_output = update.fields.raw_output.clone();
-                    let status = if is_completed { "completed" } else { "failed" }.to_string();
-                    if let Some(tx) = &self.progress {
-                        let _ = tx.send(ProgressEvent::ToolCallComplete {
-                            tool_call_id: tool_id.to_string(),
-                            status,
-                            title: final_title,
-                            raw_input: final_input,
-                            raw_output: final_output,
-                        });
+                    let status = if is_completed { "completed" } else { "failed" };
+                    self.emit_tool_completion(
+                        tool_id,
+                        status,
+                        final_title,
+                        final_input,
+                        final_output,
+                        tool_name.as_deref(),
+                    );
+                } else {
+                    // Intermediate update — merge into stored state so the
+                    // eventual completion carries the latest title/input even
+                    // when the terminal event omits them.
+                    let mut pending = self.pending_tool_calls.lock().unwrap();
+                    let entry = pending
+                        .entry(tool_id.to_string())
+                        .or_insert_with(|| (String::new(), String::new(), None));
+                    if let Some(title) = update.fields.title.clone() {
+                        entry.0 = title;
                     }
-
-                    if is_completed {
-                        match tool_name.as_deref() {
-                            Some("submit_research_plan") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::PlanSubmitted);
-                                }
-                            }
-                            Some("submit_source") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::SourceSubmitted);
-                                }
-                            }
-                            Some("submit_metric_snapshot") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::MetricSubmitted);
-                                }
-                            }
-                            Some("submit_structured_artifact") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::ArtifactSubmitted);
-                                }
-                            }
-                            Some("submit_analysis_block") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::BlockSubmitted);
-                                }
-                            }
-                            Some("submit_final_stance") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::StanceSubmitted);
-                                }
-                            }
-                            Some("submit_projection") => {
-                                if let Some(tx) = &self.progress {
-                                    let _ = tx.send(ProgressEvent::ProjectionSubmitted);
-                                }
-                            }
-                            Some("finalize_analysis") => self.mark_finalization_received(),
-                            _ => {}
-                        }
+                    if let Some(kind) = update.fields.kind {
+                        entry.1 = format!("{:?}", kind).to_lowercase();
                     }
-                    self.tool_call_names.lock().unwrap().remove(tool_id);
+                    if let Some(raw_input) = update.fields.raw_input.clone() {
+                        entry.2 = Some(raw_input);
+                    }
                 }
             }
             SessionUpdate::Plan(plan) => {
@@ -367,5 +450,398 @@ impl agent_client_protocol::Client for CrazylinesClient {
     async fn ext_notification(&self, args: ExtNotification) -> agent_client_protocol::Result<()> {
         self.handle_extension_payload(&args.method);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::{
+        Client, SessionId, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    };
+    use std::matches;
+    use tokio::sync::mpsc;
+
+    fn make_client() -> (CrazylinesClient, mpsc::UnboundedReceiver<ProgressEvent>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (CrazylinesClient::new(Some(tx)), rx)
+    }
+
+    fn notify(update: SessionUpdate) -> SessionNotification {
+        SessionNotification::new(SessionId::new("session-1"), update)
+    }
+
+    fn pending_call(id: &str, title: &str) -> SessionUpdate {
+        SessionUpdate::ToolCall(
+            ToolCall::new(id.to_string(), title)
+                .kind(ToolKind::Fetch)
+                .status(ToolCallStatus::Pending),
+        )
+    }
+
+    fn completed_update_with(id: &str, fields: ToolCallUpdateFields) -> SessionUpdate {
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            id.to_string(),
+            fields.status(ToolCallStatus::Completed),
+        ))
+    }
+
+    fn drain(rx: &mut mpsc::UnboundedReceiver<ProgressEvent>) -> Vec<ProgressEvent> {
+        let mut out = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            out.push(event);
+        }
+        out
+    }
+
+    /// Baseline: a single pending → completed lifecycle must emit exactly
+    /// one Started and one Complete for the same tool_call_id.
+    #[tokio::test]
+    async fn normal_lifecycle_emits_one_started_then_one_complete() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(pending_call("call-1", "fetch")))
+            .await
+            .unwrap();
+        client
+            .session_notification(notify(completed_update_with(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .title("fetch \"QBTS\"".to_string())
+                    .raw_output(serde_json::json!({"ok": true})),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        assert_eq!(
+            events.len(),
+            2,
+            "expected Started + Complete, got {events:?}"
+        );
+
+        match &events[0] {
+            ProgressEvent::ToolCallStarted {
+                tool_call_id,
+                title,
+                kind,
+            } => {
+                assert_eq!(tool_call_id, "call-1");
+                assert_eq!(title, "fetch");
+                assert_eq!(kind, "fetch");
+            }
+            other => panic!("expected ToolCallStarted, got {other:?}"),
+        }
+        match &events[1] {
+            ProgressEvent::ToolCallComplete {
+                tool_call_id,
+                status,
+                title,
+                raw_output,
+                ..
+            } => {
+                assert_eq!(tool_call_id, "call-1");
+                assert_eq!(status, "completed");
+                assert_eq!(title, "fetch \"QBTS\"");
+                assert_eq!(
+                    raw_output.as_ref().unwrap(),
+                    &serde_json::json!({"ok": true})
+                );
+            }
+            other => panic!("expected ToolCallComplete, got {other:?}"),
+        }
+    }
+
+    /// Bug #1 regression: the agent re-emits `SessionUpdate::ToolCall` for the
+    /// same id (e.g. pending → in-progress via full re-send). The client used
+    /// to fire Started every time, which orphaned every earlier block in the
+    /// UI. After the fix, Started is only emitted on the first arrival for
+    /// that id.
+    #[tokio::test]
+    async fn duplicate_toolcall_events_only_emit_one_started() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(pending_call("call-7", "fetch")))
+            .await
+            .unwrap();
+        // Agent re-sends the same ToolCall with status=InProgress — this used
+        // to generate another Started and orphan the first block.
+        client
+            .session_notification(notify(SessionUpdate::ToolCall(
+                ToolCall::new("call-7".to_string(), "fetch \"ionq\"")
+                    .kind(ToolKind::Fetch)
+                    .status(ToolCallStatus::InProgress),
+            )))
+            .await
+            .unwrap();
+        client
+            .session_notification(notify(completed_update_with(
+                "call-7",
+                ToolCallUpdateFields::new(),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        let started_count = events
+            .iter()
+            .filter(|e| matches!(e, ProgressEvent::ToolCallStarted { .. }))
+            .count();
+        let complete_count = events
+            .iter()
+            .filter(|e| matches!(e, ProgressEvent::ToolCallComplete { .. }))
+            .count();
+        assert_eq!(started_count, 1, "started should dedupe, got {events:?}");
+        assert_eq!(complete_count, 1, "one completion expected, got {events:?}");
+    }
+
+    /// Bug #2 regression: some agents send a single `ToolCall` with status
+    /// already Completed instead of a pending → update sequence. The client
+    /// used to emit Started and never Complete, leaving the UI stuck on
+    /// "running...". The fix routes terminal ToolCall events straight to
+    /// completion with no Started.
+    #[tokio::test]
+    async fn terminal_toolcall_skips_started_and_emits_complete() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(SessionUpdate::ToolCall(
+                ToolCall::new("call-inline".to_string(), "fetch \"dwave\"")
+                    .kind(ToolKind::Fetch)
+                    .status(ToolCallStatus::Completed)
+                    .raw_input(serde_json::json!({"query": "dwave"}))
+                    .raw_output(serde_json::json!({"results": []})),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1, "expected only Complete, got {events:?}");
+        match &events[0] {
+            ProgressEvent::ToolCallComplete {
+                tool_call_id,
+                status,
+                title,
+                raw_input,
+                raw_output,
+            } => {
+                assert_eq!(tool_call_id, "call-inline");
+                assert_eq!(status, "completed");
+                assert_eq!(title, "fetch \"dwave\"");
+                assert_eq!(
+                    raw_input.as_ref().unwrap(),
+                    &serde_json::json!({"query": "dwave"}),
+                );
+                assert_eq!(
+                    raw_output.as_ref().unwrap(),
+                    &serde_json::json!({"results": []}),
+                );
+            }
+            other => panic!("expected ToolCallComplete, got {other:?}"),
+        }
+    }
+
+    /// A terminal `ToolCall` with status=Failed should emit a single Complete
+    /// with status="failed" and no Started.
+    #[tokio::test]
+    async fn terminal_failed_toolcall_emits_failed_complete() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(SessionUpdate::ToolCall(
+                ToolCall::new("call-bad".to_string(), "fetch")
+                    .kind(ToolKind::Fetch)
+                    .status(ToolCallStatus::Failed),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProgressEvent::ToolCallComplete { status, .. } => assert_eq!(status, "failed"),
+            other => panic!("expected failed ToolCallComplete, got {other:?}"),
+        }
+    }
+
+    /// Bug #3 regression: title and raw_input delivered in an intermediate
+    /// ToolCallUpdate were dropped, so the final Complete fell back to the
+    /// stale pending title. The fix merges intermediate updates into stored
+    /// state.
+    #[tokio::test]
+    async fn intermediate_update_title_and_input_survive_to_completion() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(pending_call("call-42", "fetch")))
+            .await
+            .unwrap();
+        // Intermediate update with title + raw_input, still InProgress.
+        client
+            .session_notification(notify(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "call-42".to_string(),
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::InProgress)
+                    .title("fetch \"quantum outlook\"".to_string())
+                    .raw_input(serde_json::json!({"query": "quantum outlook"})),
+            ))))
+            .await
+            .unwrap();
+        // Terminal update carries only the status and raw_output; the
+        // fix must surface the intermediate title/input.
+        client
+            .session_notification(notify(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "call-42".to_string(),
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .raw_output(serde_json::json!({"results": ["a", "b"]})),
+            ))))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        // Only Started and Complete — the intermediate update must not leak
+        // its own Started event.
+        assert_eq!(events.len(), 2, "unexpected events: {events:?}");
+        match &events[1] {
+            ProgressEvent::ToolCallComplete {
+                title, raw_input, ..
+            } => {
+                assert_eq!(title, "fetch \"quantum outlook\"");
+                assert_eq!(
+                    raw_input.as_ref().unwrap(),
+                    &serde_json::json!({"query": "quantum outlook"}),
+                );
+            }
+            other => panic!("expected ToolCallComplete, got {other:?}"),
+        }
+    }
+
+    /// When the agent skips the initial `ToolCall` entirely and only ever
+    /// sends `ToolCallUpdate`s (some agents do this for fast tools), no
+    /// Started is expected, but the terminal update must still produce a
+    /// well-formed Complete.
+    #[tokio::test]
+    async fn update_only_lifecycle_without_started_still_completes() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "call-update-only".to_string(),
+                ToolCallUpdateFields::new()
+                    .title("fetch \"late\"".to_string())
+                    .raw_input(serde_json::json!({"query": "late"})),
+            ))))
+            .await
+            .unwrap();
+        client
+            .session_notification(notify(completed_update_with(
+                "call-update-only",
+                ToolCallUpdateFields::new(),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1, "expected only Complete, got {events:?}");
+        match &events[0] {
+            ProgressEvent::ToolCallComplete {
+                title, raw_input, ..
+            } => {
+                assert_eq!(title, "fetch \"late\"");
+                assert_eq!(
+                    raw_input.as_ref().unwrap(),
+                    &serde_json::json!({"query": "late"}),
+                );
+            }
+            other => panic!("expected ToolCallComplete, got {other:?}"),
+        }
+    }
+
+    /// Regression-guard for the MCP submission side-effects: tool name
+    /// recognition must still fire the matching `*Submitted` event on the
+    /// terminal-ToolCall path (previously only reachable through
+    /// ToolCallUpdate completion).
+    #[tokio::test]
+    async fn terminal_toolcall_for_submit_source_fires_source_submitted() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(SessionUpdate::ToolCall(
+                ToolCall::new(
+                    "call-submit".to_string(),
+                    "mcp: crazylines submit_source(...)",
+                )
+                .kind(ToolKind::Other)
+                .status(ToolCallStatus::Completed),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProgressEvent::ToolCallComplete { .. })),
+            "missing ToolCallComplete in {events:?}",
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProgressEvent::SourceSubmitted)),
+            "missing SourceSubmitted in {events:?}",
+        );
+    }
+
+    /// Each tool_call_id must complete independently — a completion on one id
+    /// must not disturb another pending call.
+    #[tokio::test]
+    async fn concurrent_tool_calls_do_not_interfere() {
+        let (client, mut rx) = make_client();
+
+        client
+            .session_notification(notify(pending_call("call-a", "fetch")))
+            .await
+            .unwrap();
+        client
+            .session_notification(notify(pending_call("call-b", "fetch")))
+            .await
+            .unwrap();
+        client
+            .session_notification(notify(completed_update_with(
+                "call-a",
+                ToolCallUpdateFields::new().title("fetch \"a\"".to_string()),
+            )))
+            .await
+            .unwrap();
+        client
+            .session_notification(notify(completed_update_with(
+                "call-b",
+                ToolCallUpdateFields::new().title("fetch \"b\"".to_string()),
+            )))
+            .await
+            .unwrap();
+
+        let events = drain(&mut rx);
+        let completions: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ProgressEvent::ToolCallComplete {
+                    tool_call_id,
+                    title,
+                    ..
+                } => Some((tool_call_id.clone(), title.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            completions,
+            vec![
+                ("call-a".to_string(), "fetch \"a\"".to_string()),
+                ("call-b".to_string(), "fetch \"b\"".to_string()),
+            ],
+        );
     }
 }

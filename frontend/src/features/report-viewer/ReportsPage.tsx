@@ -1,4 +1,4 @@
-import { ReportContent } from './ReportContent';
+import { ReportContent } from "./ReportContent";
 
 interface ReportsPageProps {
   onRefresh: () => Promise<void>;

@@ -1,3 +1,5 @@
+import { memo } from "react";
+import { Eyebrow } from "@/components/ui/editorial";
 import {
   Table,
   TableBody,
@@ -5,32 +7,28 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { cn } from '@/lib/utils';
-import type { ArtifactPoint, StructuredArtifact } from '@/types';
-import { Eyebrow } from '@/components/ui/editorial';
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import type { ArtifactPoint, StructuredArtifact } from "@/types";
 
 interface StructuredArtifactViewProps {
   artifact: StructuredArtifact;
   isFirst?: boolean;
 }
 
-export function StructuredArtifactView({ artifact, isFirst }: StructuredArtifactViewProps) {
-  const chartPoints = artifact.series.flatMap(series =>
-    series.points.map(point => ({ ...point, series: series.label })),
+export const StructuredArtifactView = memo(function StructuredArtifactView({
+  artifact,
+  isFirst,
+}: StructuredArtifactViewProps) {
+  const chartPoints = artifact.series.flatMap((series) =>
+    series.points.map((point) => ({ ...point, series: series.label })),
   );
-  const showBarChart = artifact.kind === 'bar_chart' && chartPoints.length > 0;
-  const showLineChart = artifact.kind === 'line_chart' && chartPoints.length > 1;
-  const showAreaChart = artifact.kind === 'area_chart' && chartPoints.length > 1;
+  const showBarChart = artifact.kind === "bar_chart" && chartPoints.length > 0;
+  const showLineChart = artifact.kind === "line_chart" && chartPoints.length > 1;
+  const showAreaChart = artifact.kind === "area_chart" && chartPoints.length > 1;
 
   return (
-    <article
-      className={
-        isFirst
-          ? 'space-y-6 py-8'
-          : 'space-y-6 border-t border-border py-8'
-      }
-    >
+    <article className={isFirst ? "space-y-6 py-8" : "space-y-6 border-t border-border py-8"}>
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="space-y-2">
           <Eyebrow>{formatKind(artifact.kind)}</Eyebrow>
@@ -45,7 +43,7 @@ export function StructuredArtifactView({ artifact, isFirst }: StructuredArtifact
         </div>
         {artifact.evidence_ids.length > 0 && (
           <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-            {String(artifact.evidence_ids.length).padStart(2, '0')} sources
+            {String(artifact.evidence_ids.length).padStart(2, "0")} sources
           </span>
         )}
       </header>
@@ -57,13 +55,13 @@ export function StructuredArtifactView({ artifact, isFirst }: StructuredArtifact
       )}
     </article>
   );
-}
+});
 
 function ArtifactTable({ artifact }: { artifact: StructuredArtifact }) {
-  const columnIsNumeric = artifact.columns.map(column =>
-    artifact.rows.every(row => {
+  const columnIsNumeric = artifact.columns.map((column) =>
+    artifact.rows.every((row) => {
       const value = row[column.key];
-      return value === null || value === undefined || typeof value === 'number';
+      return value === null || value === undefined || typeof value === "number";
     }),
   );
 
@@ -76,17 +74,15 @@ function ArtifactTable({ artifact }: { artifact: StructuredArtifact }) {
               <TableHead
                 key={column.key}
                 className={cn(
-                  'px-3 align-top text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground',
+                  "px-3 align-top text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground",
                   columnIsNumeric[colIndex]
-                    ? 'min-w-[96px] whitespace-nowrap text-right'
-                    : 'min-w-[180px] max-w-[420px]',
+                    ? "min-w-[96px] whitespace-nowrap text-right"
+                    : "min-w-[180px] max-w-[420px]",
                 )}
               >
                 {column.label}
                 {column.unit && (
-                  <span className="ml-1 normal-case tracking-normal">
-                    ({column.unit})
-                  </span>
+                  <span className="ml-1 normal-case tracking-normal">({column.unit})</span>
                 )}
               </TableHead>
             ))}
@@ -102,10 +98,10 @@ function ArtifactTable({ artifact }: { artifact: StructuredArtifact }) {
                   <TableCell
                     key={column.key}
                     className={cn(
-                      'px-3 align-top',
+                      "px-3 align-top",
                       numeric
-                        ? 'min-w-[96px] whitespace-nowrap text-right font-mono tabular-nums'
-                        : 'min-w-[180px] max-w-[420px] whitespace-normal leading-[1.55]',
+                        ? "min-w-[96px] whitespace-nowrap text-right font-mono tabular-nums"
+                        : "min-w-[180px] max-w-[420px] whitespace-normal leading-[1.55]",
                     )}
                   >
                     {formatValue(value)}
@@ -121,7 +117,7 @@ function ArtifactTable({ artifact }: { artifact: StructuredArtifact }) {
 }
 
 function BarChart({ points }: { points: Array<ArtifactPoint & { series: string }> }) {
-  const max = Math.max(...points.map(point => Math.abs(point.value)), 1);
+  const max = Math.max(...points.map((point) => Math.abs(point.value)), 1);
 
   return (
     <div className="space-y-2">
@@ -150,7 +146,7 @@ function LineChart({ points }: { points: Array<ArtifactPoint & { series: string 
   const width = 640;
   const height = 180;
   const padding = 20;
-  const values = points.map(point => point.value);
+  const values = points.map((point) => point.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -171,11 +167,11 @@ function LineChart({ points }: { points: Array<ArtifactPoint & { series: string 
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            points={coords.join(' ')}
+            points={coords.join(" ")}
             className="text-foreground"
           />
           {coords.map((coord, index) => {
-            const [cx, cy] = coord.split(',').map(Number);
+            const [cx, cy] = coord.split(",").map(Number);
             return (
               <circle
                 key={`${points[index].label}-${index}`}
@@ -210,7 +206,7 @@ function AreaChart({
   const width = 640;
   const height = 180;
   const padding = 20;
-  const values = points.map(point => point.value);
+  const values = points.map((point) => point.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -223,13 +219,13 @@ function AreaChart({
     return { x, y };
   });
   const baselineY = height - padding;
-  const linePoints = coords.map(c => `${c.x},${c.y}`).join(' ');
+  const linePoints = coords.map((c) => `${c.x},${c.y}`).join(" ");
   const areaPath = [
     `M${coords[0].x},${baselineY}`,
-    ...coords.map(c => `L${c.x},${c.y}`),
+    ...coords.map((c) => `L${c.x},${c.y}`),
     `L${coords[coords.length - 1].x},${baselineY}`,
-    'Z',
-  ].join(' ');
+    "Z",
+  ].join(" ");
   const gradientId = `area-gradient-${artifactId}`;
 
   return (
@@ -274,15 +270,15 @@ function AreaChart({
 }
 
 function formatKind(kind: string) {
-  return kind.replace(/_/g, ' ');
+  return kind.replace(/_/g, " ");
 }
 
 function formatValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'number') return formatNumber(value);
-  if (typeof value === 'string') return value;
-  if (typeof value === 'boolean') return value ? 'yes' : 'no';
-  if (Array.isArray(value)) return value.map(formatValue).join(', ');
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "number") return formatNumber(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (Array.isArray(value)) return value.map(formatValue).join(", ");
   return JSON.stringify(value);
 }
 

@@ -1,17 +1,18 @@
-import type { AnalysisReport, FinalStance } from '@/types';
-import { ConfidenceRail, getStanceAccent } from './badge-styles';
-import { Dot, Eyebrow } from '@/components/ui/editorial';
+import { memo } from "react";
+import { Dot, Eyebrow } from "@/components/ui/editorial";
+import type { AnalysisReport, FinalStance } from "@/types";
+import { ConfidenceRail, getStanceAccent } from "./badge-styles";
 
 interface ReportHeroProps {
   report: AnalysisReport;
   onSwitchRun: (runId: string) => void;
 }
 
-export function ReportHero({ report, onSwitchRun }: ReportHeroProps) {
+export const ReportHero = memo(function ReportHero({ report, onSwitchRun }: ReportHeroProps) {
   const stance = report.final_stance;
-  const accent = getStanceAccent(stance?.stance ?? '');
+  const accent = getStanceAccent(stance?.stance ?? "");
   const asOf = formatDate(stance?.created_at ?? report.analysis.updated_at);
-  const horizon = stance?.horizon || '—';
+  const horizon = stance?.horizon || "—";
   const activeRunId = report.analysis.active_run_id;
 
   return (
@@ -38,20 +39,13 @@ export function ReportHero({ report, onSwitchRun }: ReportHeroProps) {
         <aside className="space-y-6 lg:border-l lg:border-border lg:pl-8">
           <div className="space-y-2">
             <Eyebrow>Confidence</Eyebrow>
-            <ConfidenceRail
-              confidence={stance?.confidence ?? 0}
-              accentClass={accent.rule}
-            />
+            <ConfidenceRail confidence={stance?.confidence ?? 0} accentClass={accent.rule} />
           </div>
 
           {report.runs.length > 1 && activeRunId && (
             <div className="space-y-2">
               <Eyebrow>Run</Eyebrow>
-              <RunSwitcher
-                runs={report.runs}
-                activeRunId={activeRunId}
-                onSwitch={onSwitchRun}
-              />
+              <RunSwitcher runs={report.runs} activeRunId={activeRunId} onSwitch={onSwitchRun} />
             </div>
           )}
 
@@ -73,7 +67,7 @@ export function ReportHero({ report, onSwitchRun }: ReportHeroProps) {
       />
     </header>
   );
-}
+});
 
 function StanceHeadline({
   accent,
@@ -84,14 +78,13 @@ function StanceHeadline({
 }) {
   return (
     <div className="relative pl-6 sm:pl-8">
-      <span
-        className={`absolute left-0 top-1 bottom-1 w-[3px] ${accent.tick}`}
-        aria-hidden
-      />
-      <div className={`text-[64px] font-semibold uppercase leading-[0.95] tracking-[-0.035em] sm:text-[84px] ${accent.text}`}>
-        {(stance?.stance || 'unknown').replace(/_/g, ' ')}
+      <span className={`absolute left-0 top-1 bottom-1 w-[3px] ${accent.tick}`} aria-hidden />
+      <div
+        className={`text-[64px] font-semibold uppercase leading-[0.95] tracking-[-0.035em] sm:text-[84px] ${accent.text}`}
+      >
+        {(stance?.stance || "unknown").replace(/_/g, " ")}
       </div>
-      {stance?.stance === 'insufficient_data' && (
+      {stance?.stance === "insufficient_data" && (
         <p className="mt-3 text-sm text-muted-foreground">
           Not enough reliable evidence to take a position.
         </p>
@@ -135,9 +128,7 @@ function Stat({ label, value }: { label: string; value: number }) {
       <dt>
         <Eyebrow>{label}</Eyebrow>
       </dt>
-      <dd className="font-mono text-2xl font-medium tabular-nums text-foreground">
-        {value}
-      </dd>
+      <dd className="font-mono text-2xl font-medium tabular-nums text-foreground">{value}</dd>
     </div>
   );
 }
@@ -147,13 +138,13 @@ function RunSwitcher({
   activeRunId,
   onSwitch,
 }: {
-  runs: AnalysisReport['runs'];
+  runs: AnalysisReport["runs"];
   activeRunId: string;
   onSwitch: (runId: string) => void;
 }) {
   return (
     <div className="flex flex-wrap gap-1">
-      {runs.map(run => {
+      {runs.map((run) => {
         const active = run.id === activeRunId;
         return (
           <button
@@ -162,11 +153,12 @@ function RunSwitcher({
             onClick={() => onSwitch(run.id)}
             className={
               active
-                ? 'border border-foreground bg-foreground px-2.5 py-1 text-[11px] font-medium text-background'
-                : 'border border-border bg-transparent px-2.5 py-1 text-[11px] text-muted-foreground hover:border-foreground/40 hover:text-foreground'
+                ? "border border-foreground bg-foreground px-2.5 py-1 text-[11px] font-medium text-background"
+                : "border border-border bg-transparent px-2.5 py-1 text-[11px] text-muted-foreground hover:border-foreground/40 hover:text-foreground"
             }
           >
             {run.agent_id}
+            {run.model_id ? ` · ${run.model_id}` : ""}
           </button>
         );
       })}
@@ -175,12 +167,12 @@ function RunSwitcher({
 }
 
 function formatDate(value: string): string {
-  if (!value) return '—';
+  if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   }).format(date);
 }

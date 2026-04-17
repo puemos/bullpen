@@ -1,7 +1,7 @@
-import * as React from "react"
-import { Tooltip as TooltipPrimitive } from "radix-ui"
+import { Tooltip as TooltipPrimitive } from "radix-ui";
+import type * as React from "react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 function TooltipProvider({
   delayDuration = 0,
@@ -13,22 +13,18 @@ function TooltipProvider({
       delayDuration={delayDuration}
       {...props}
     />
-  )
+  );
 }
 
-function Tooltip({
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
 }
 
-function TooltipTrigger({
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
-type TooltipVariant = "default" | "editorial"
+type TooltipVariant = "default" | "editorial";
 
 function TooltipContent({
   className,
@@ -37,9 +33,9 @@ function TooltipContent({
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content> & {
-  variant?: TooltipVariant
+  variant?: TooltipVariant;
 }) {
-  const isEditorial = variant === "editorial"
+  const isEditorial = variant === "editorial";
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
@@ -50,7 +46,7 @@ function TooltipContent({
           isEditorial
             ? "rounded-none border border-border bg-background px-3 py-2.5 text-[13px] text-foreground"
             : "rounded-md bg-foreground px-3 py-1.5 text-xs text-balance text-background",
-          className
+          className,
         )}
         {...props}
       >
@@ -60,13 +56,13 @@ function TooltipContent({
             "z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45",
             isEditorial
               ? "border-r border-b border-border bg-background fill-background"
-              : "rounded-[2px] bg-foreground fill-foreground"
+              : "rounded-[2px] bg-foreground fill-foreground",
           )}
         />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
-  )
+  );
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
-export type { TooltipVariant }
+export type { TooltipVariant };
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };

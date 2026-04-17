@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { CaretRight, Lightning } from "@phosphor-icons/react";
-import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "@/lib/utils";
-import PythonCode from "./PythonCode";
+import { AnimatePresence, motion } from "framer-motion";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { cn } from "@/lib/utils";
+import PythonCode from "./PythonCode";
 
 interface ToolCallCardProps {
   title: string;
@@ -14,8 +14,6 @@ interface ToolCallCardProps {
   result: string | null;
   status: "running" | "completed" | "failed";
 }
-
-
 
 // --- Helpers ---
 
@@ -30,7 +28,10 @@ function primaryLabel(
 ): string {
   if (toolName) return toolName.replace(/_/g, " ");
   if (toolKind) return toolKind;
-  return cleanTitle(title).replace(/\(.*\)$/, "").replace(/_/g, " ").trim();
+  return cleanTitle(title)
+    .replace(/\(.*\)$/, "")
+    .replace(/_/g, " ")
+    .trim();
 }
 
 function secondaryLabel(title: string, primary: string): string | null {

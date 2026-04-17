@@ -4,16 +4,16 @@ import {
   MagnifyingGlass,
   WarningCircle,
   XCircle,
-} from '@phosphor-icons/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import MarkdownMessage from '@/components/Agent/MarkdownMessage';
-import ToolCallCard from '@/components/Agent/ToolCallCard';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getRunProgress } from '@/shared/api/commands';
-import { setRunProgress } from '@/store';
-import type { ProgressItem, RunState } from '@/types';
-import { getTimelineBlocks, handleProgressEvent } from './progress';
+} from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import MarkdownMessage from "@/components/Agent/MarkdownMessage";
+import ToolCallCard from "@/components/Agent/ToolCallCard";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getRunProgress } from "@/shared/api/commands";
+import { setRunProgress } from "@/store";
+import type { ProgressItem, RunState } from "@/types";
+import { getTimelineBlocks } from "./progress";
 
 interface ProgressTimelineProps {
   activeRuns: Record<string, RunState>;
@@ -23,9 +23,9 @@ interface ProgressTimelineProps {
 }
 
 const EXAMPLE_PROMPTS = [
-  'Compare NVDA to AMD',
-  'Analyze the energy sector',
-  'Review US regional banks',
+  "Compare NVDA to AMD",
+  "Analyze the energy sector",
+  "Review US regional banks",
 ];
 
 export function ProgressTimeline({
@@ -39,24 +39,27 @@ export function ProgressTimeline({
   const hasRuns = runEntries.length > 0;
   const currentRun = selectedRunTab ? activeRuns[selectedRunTab] : null;
   const progress = currentRun?.progress ?? [];
-  const isRunning = currentRun?.status === 'running';
+  const isRunning = currentRun?.status === "running";
   const timelineBlocks = useMemo(() => getTimelineBlocks(progress), [progress]);
 
-  const hydrateTab = useCallback(async (runId: string) => {
-    const run = activeRuns[runId];
-    if (!run || run.progress.length > 0) return;
-    try {
-      const events = await getRunProgress(runId);
-      // Build progress items by replaying events into a temporary array
-      const items: ProgressItem[] = [];
-      for (const event of events) {
-        replayEvent(event, items);
+  const hydrateTab = useCallback(
+    async (runId: string) => {
+      const run = activeRuns[runId];
+      if (!run || run.progress.length > 0) return;
+      try {
+        const events = await getRunProgress(runId);
+        // Build progress items by replaying events into a temporary array
+        const items: ProgressItem[] = [];
+        for (const event of events) {
+          replayEvent(event, items);
+        }
+        setRunProgress(runId, items);
+      } catch {
+        // non-critical — live stream will fill in
       }
-      setRunProgress(runId, items);
-    } catch {
-      // non-critical — live stream will fill in
-    }
-  }, [activeRuns]);
+    },
+    [activeRuns],
+  );
 
   useEffect(() => {
     if (selectedRunTab) {
@@ -68,24 +71,16 @@ export function ProgressTimeline({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [timelineBlocks, isRunning]);
+  }, []);
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 pb-32" ref={scrollRef}>
       <div className="mx-auto max-w-3xl space-y-8">
         {hasRuns && runEntries.length > 1 && (
-          <Tabs
-            value={selectedRunTab ?? undefined}
-            onValueChange={onSelectTab}
-            className="gap-0"
-          >
+          <Tabs value={selectedRunTab ?? undefined} onValueChange={onSelectTab} className="gap-0">
             <TabsList>
-              {runEntries.map(run => (
-                <TabsTrigger
-                  key={run.runId}
-                  value={run.runId}
-                  className="flex-none px-3 text-xs"
-                >
+              {runEntries.map((run) => (
+                <TabsTrigger key={run.runId} value={run.runId} className="flex-none px-3 text-xs">
                   <RunStatusIcon status={run.status} />
                   {run.agentLabel}
                 </TabsTrigger>
@@ -99,7 +94,7 @@ export function ProgressTimeline({
             <MagnifyingGlass size={32} className="mb-4 opacity-20" />
             <p className="text-sm">Enter a research prompt below to begin analysis.</p>
             <div className="mt-8 flex max-w-md flex-wrap justify-center gap-2">
-              {EXAMPLE_PROMPTS.map(example => (
+              {EXAMPLE_PROMPTS.map((example) => (
                 <Button
                   key={example}
                   variant="outline"
@@ -114,8 +109,8 @@ export function ProgressTimeline({
           </div>
         )}
 
-        {timelineBlocks.map(block => {
-          if (block.type === 'message') {
+        {timelineBlocks.map((block) => {
+          if (block.type === "message") {
             return (
               <div key={block.id}>
                 <MarkdownMessage text={block.content} />
@@ -123,7 +118,7 @@ export function ProgressTimeline({
             );
           }
 
-          if (block.type === 'tool') {
+          if (block.type === "tool") {
             return (
               <div key={block.id}>
                 <ToolCallCard
@@ -138,7 +133,7 @@ export function ProgressTimeline({
             );
           }
 
-          if (block.type === 'error') {
+          if (block.type === "error") {
             return (
               <div key={block.id} className="flex items-center gap-2 text-xs text-destructive">
                 <WarningCircle size={14} /> {block.content}
@@ -160,15 +155,15 @@ export function ProgressTimeline({
   );
 }
 
-function RunStatusIcon({ status }: { status: RunState['status'] }) {
+function RunStatusIcon({ status }: { status: RunState["status"] }) {
   switch (status) {
-    case 'running':
+    case "running":
       return <CircleNotch size={12} className="animate-spin text-primary" />;
-    case 'completed':
+    case "completed":
       return <CheckCircle size={12} className="text-green-500" />;
-    case 'error':
+    case "error":
       return <XCircle size={12} className="text-destructive" />;
-    case 'cancelled':
+    case "cancelled":
       return <XCircle size={12} className="text-muted-foreground" />;
   }
 }
@@ -177,11 +172,11 @@ function RunStatusIcon({ status }: { status: RunState['status'] }) {
  * Replay a single persisted event into a progress items array.
  * Used for hydrating tab state from DB.
  */
-function replayEvent(payload: import('@/types').ProgressEventPayload, items: ProgressItem[]) {
-  const push = (type: ProgressItem['type'], message: string, data?: unknown) => {
+function replayEvent(payload: import("@/types").ProgressEventPayload, items: ProgressItem[]) {
+  const push = (type: ProgressItem["type"], message: string, data?: unknown) => {
     items.push({ id: crypto.randomUUID(), type, message, timestamp: Date.now(), data });
   };
-  const appendLast = (type: ProgressItem['type'], delta: string) => {
+  const appendLast = (type: ProgressItem["type"], delta: string) => {
     const last = items[items.length - 1];
     if (last && last.type === type) {
       items[items.length - 1] = { ...last, message: last.message + delta };
@@ -191,47 +186,47 @@ function replayEvent(payload: import('@/types').ProgressEventPayload, items: Pro
   };
 
   switch (payload.event) {
-    case 'MessageDelta':
-      appendLast('agent_message', payload.data.delta);
+    case "MessageDelta":
+      appendLast("agent_message", payload.data.delta);
       break;
-    case 'ThoughtDelta':
-      appendLast('agent_thought', payload.data.delta);
+    case "ThoughtDelta":
+      appendLast("agent_thought", payload.data.delta);
       break;
-    case 'ToolCallStarted':
-      push('tool_call', payload.data.title, payload.data);
+    case "ToolCallStarted":
+      push("tool_call", payload.data.title, payload.data);
       break;
-    case 'ToolCallComplete':
-      push('tool_result', `${payload.data.title || 'tool'} ${payload.data.status}`, payload.data);
+    case "ToolCallComplete":
+      push("tool_result", `${payload.data.title || "tool"} ${payload.data.status}`, payload.data);
       break;
-    case 'Plan':
-      push('plan', 'Plan updated', payload.data);
+    case "Plan":
+      push("plan", "Plan updated", payload.data);
       break;
-    case 'PlanSubmitted':
-      push('submitted', 'Research plan submitted');
+    case "PlanSubmitted":
+      push("submitted", "Research plan submitted");
       break;
-    case 'SourceSubmitted':
-      push('submitted', 'Source submitted');
+    case "SourceSubmitted":
+      push("submitted", "Source submitted");
       break;
-    case 'MetricSubmitted':
-      push('submitted', 'Metric submitted');
+    case "MetricSubmitted":
+      push("submitted", "Metric submitted");
       break;
-    case 'ArtifactSubmitted':
-      push('submitted', 'Structured artifact submitted');
+    case "ArtifactSubmitted":
+      push("submitted", "Structured artifact submitted");
       break;
-    case 'BlockSubmitted':
-      push('submitted', 'Analysis block submitted');
+    case "BlockSubmitted":
+      push("submitted", "Analysis block submitted");
       break;
-    case 'StanceSubmitted':
-      push('submitted', 'Final stance submitted');
+    case "StanceSubmitted":
+      push("submitted", "Final stance submitted");
       break;
-    case 'Completed':
-      push('completed', 'Analysis complete');
+    case "Completed":
+      push("completed", "Analysis complete");
       break;
-    case 'Error':
-      push('error', payload.data.message);
+    case "Error":
+      push("error", payload.data.message);
       break;
-    case 'Log':
-      push('log', payload.data);
+    case "Log":
+      push("log", payload.data);
       break;
   }
 }

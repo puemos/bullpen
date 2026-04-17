@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -10,6 +11,8 @@ pub struct AppConfig {
     pub timeout_secs: u64,
     pub source_freshness_days: u32,
     pub disclaimer: String,
+    #[serde(default)]
+    pub model_by_agent: BTreeMap<String, String>,
 }
 
 impl Default for AppConfig {
@@ -20,6 +23,7 @@ impl Default for AppConfig {
             timeout_secs: 1800,
             source_freshness_days: 7,
             disclaimer: "Research only. Not investment advice.".to_string(),
+            model_by_agent: BTreeMap::new(),
         }
     }
 }

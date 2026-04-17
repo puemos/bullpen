@@ -57,6 +57,8 @@ pub struct GenerateAnalysisInput {
     pub run_context: RunContext,
     pub agent_command: String,
     pub agent_args: Vec<String>,
+    pub model_flag: Option<(String, String)>,
+    pub model_env: Option<(String, String)>,
     pub progress_tx: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
     pub mcp_server_binary: Option<PathBuf>,
     pub db_path: PathBuf,
@@ -110,13 +112,20 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
     let GenerateAnalysisInput {
         run_context,
         agent_command,
-        agent_args,
+        mut agent_args,
+        model_flag,
+        model_env,
         progress_tx,
         mcp_server_binary,
         db_path,
         timeout_secs: _,
         cancel_token,
     } = input;
+
+    if let Some((flag, value)) = &model_flag {
+        agent_args.push(flag.clone());
+        agent_args.push(value.clone());
+    }
 
     let logs = Arc::new(Mutex::new(Vec::new()));
     let log_fn = |msg: String| {
@@ -136,6 +145,10 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+
+    if let Some((key, value)) = &model_env {
+        cmd.env(key, value);
+    }
 
     #[cfg(unix)]
     {

@@ -1,9 +1,9 @@
+import { memo, type ReactNode, useMemo } from "react";
+import type { Components } from "react-markdown";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { cn } from "@/lib/utils";
-import { memo, useMemo, type ReactNode } from "react";
-import type { Components } from "react-markdown";
 import { CopyButton } from "@/components/ui/copy-button";
+import { cn } from "@/lib/utils";
 
 function extractTextFromChildren(children: ReactNode): string {
   if (typeof children === "string") return children;
@@ -108,7 +108,7 @@ function MarkdownMessage({ text, workspaceId }: MarkdownMessageProps) {
         );
       },
     };
-  }, [workspaceId]);
+  }, []);
 
   return (
     <div className="w-full max-w-none text-sm leading-relaxed text-foreground">

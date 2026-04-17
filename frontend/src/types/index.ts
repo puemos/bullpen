@@ -1,12 +1,17 @@
-export type AnalysisStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AnalysisStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export type AnalysisIntent =
-  | 'single_equity'
-  | 'compare_equities'
-  | 'sector_analysis'
-  | 'macro_theme'
-  | 'watchlist'
-  | 'general_research';
+  | "single_equity"
+  | "compare_equities"
+  | "sector_analysis"
+  | "macro_theme"
+  | "watchlist"
+  | "general_research";
+
+export interface AgentModel {
+  id: string;
+  name: string;
+}
 
 export interface AgentCandidate {
   id: string;
@@ -14,6 +19,10 @@ export interface AgentCandidate {
   command: string | null;
   args: string[];
   available: boolean;
+  models: AgentModel[];
+  model_flag: string | null;
+  model_value_prefix: string | null;
+  model_env: string | null;
 }
 
 export interface AppSettings {
@@ -22,6 +31,7 @@ export interface AppSettings {
   timeout_secs: number;
   source_freshness_days: number;
   disclaimer: string;
+  model_by_agent: Record<string, string>;
 }
 
 export interface AnalysisSummary {
@@ -53,6 +63,7 @@ export interface AnalysisRun {
   id: string;
   analysis_id: string;
   agent_id: string;
+  model_id: string | null;
   prompt_text: string;
   status: AnalysisStatus;
   started_at: string;
@@ -91,7 +102,7 @@ export interface Source {
   publisher: string | null;
   source_type: string;
   retrieved_at: string;
-  reliability: 'primary' | 'high' | 'medium' | 'low';
+  reliability: "primary" | "high" | "medium" | "low";
   summary: string;
 }
 
@@ -110,13 +121,13 @@ export interface MetricSnapshot {
 }
 
 export type ArtifactKind =
-  | 'metric_table'
-  | 'comparison_matrix'
-  | 'scenario_matrix'
-  | 'bar_chart'
-  | 'line_chart'
-  | 'area_chart'
-  | 'other';
+  | "metric_table"
+  | "comparison_matrix"
+  | "scenario_matrix"
+  | "bar_chart"
+  | "line_chart"
+  | "area_chart"
+  | "other";
 
 export interface ArtifactColumn {
   key: string;
@@ -152,19 +163,19 @@ export interface StructuredArtifact {
 }
 
 export type BlockKind =
-  | 'thesis'
-  | 'business_quality'
-  | 'financials'
-  | 'valuation'
-  | 'peer_comparison'
-  | 'sector_context'
-  | 'catalysts'
-  | 'risks'
-  | 'technical_context'
-  | 'open_questions'
-  | 'other';
+  | "thesis"
+  | "business_quality"
+  | "financials"
+  | "valuation"
+  | "peer_comparison"
+  | "sector_context"
+  | "catalysts"
+  | "risks"
+  | "technical_context"
+  | "open_questions"
+  | "other";
 
-export type Importance = 'high' | 'medium' | 'low';
+export type Importance = "high" | "medium" | "low";
 
 export interface AnalysisBlock {
   id: string;
@@ -179,7 +190,7 @@ export interface AnalysisBlock {
   created_at: string;
 }
 
-export type StanceKind = 'bullish' | 'neutral' | 'bearish' | 'mixed' | 'insufficient_data';
+export type StanceKind = "bullish" | "neutral" | "bearish" | "mixed" | "insufficient_data";
 
 export interface FinalStance {
   id: string;
@@ -194,7 +205,7 @@ export interface FinalStance {
   created_at: string;
 }
 
-export type ScenarioLabel = 'bull' | 'base' | 'bear';
+export type ScenarioLabel = "bull" | "base" | "bear";
 
 export interface ProjectionScenario {
   label: ScenarioLabel;
@@ -257,11 +268,7 @@ export interface MethodologyNote {
   created_at: string;
 }
 
-export type CriterionVerdict =
-  | 'confirmed'
-  | 'refuted'
-  | 'partially_confirmed'
-  | 'unresolved';
+export type CriterionVerdict = "confirmed" | "refuted" | "partially_confirmed" | "unresolved";
 
 export interface DecisionCriterionAnswer {
   id: string;
@@ -312,32 +319,32 @@ export interface ToolCallCompleteData {
 }
 
 export type ProgressEventPayload =
-  | { event: 'Log'; data: string }
-  | { event: 'MessageDelta'; data: { id: string; delta: string } }
-  | { event: 'ThoughtDelta'; data: { id: string; delta: string } }
-  | { event: 'ToolCallStarted'; data: ToolCallStartedData }
-  | { event: 'ToolCallComplete'; data: ToolCallCompleteData }
-  | { event: 'Plan'; data: { entries: PlanEntry[] } }
-  | { event: 'PlanSubmitted' }
-  | { event: 'SourceSubmitted' }
-  | { event: 'MetricSubmitted' }
-  | { event: 'ArtifactSubmitted' }
-  | { event: 'BlockSubmitted' }
-  | { event: 'StanceSubmitted' }
-  | { event: 'ProjectionSubmitted' }
-  | { event: 'Completed' }
-  | { event: 'Error'; data: { message: string } };
+  | { event: "Log"; data: string }
+  | { event: "MessageDelta"; data: { id: string; delta: string } }
+  | { event: "ThoughtDelta"; data: { id: string; delta: string } }
+  | { event: "ToolCallStarted"; data: ToolCallStartedData }
+  | { event: "ToolCallComplete"; data: ToolCallCompleteData }
+  | { event: "Plan"; data: { entries: PlanEntry[] } }
+  | { event: "PlanSubmitted" }
+  | { event: "SourceSubmitted" }
+  | { event: "MetricSubmitted" }
+  | { event: "ArtifactSubmitted" }
+  | { event: "BlockSubmitted" }
+  | { event: "StanceSubmitted" }
+  | { event: "ProjectionSubmitted" }
+  | { event: "Completed" }
+  | { event: "Error"; data: { message: string } };
 
 export type ProgressItemType =
-  | 'agent_message'
-  | 'agent_thought'
-  | 'tool_call'
-  | 'tool_result'
-  | 'plan'
-  | 'submitted'
-  | 'completed'
-  | 'error'
-  | 'log';
+  | "agent_message"
+  | "agent_thought"
+  | "tool_call"
+  | "tool_result"
+  | "plan"
+  | "submitted"
+  | "completed"
+  | "error"
+  | "log";
 
 export interface ProgressItem {
   id: string;
@@ -347,7 +354,7 @@ export interface ProgressItem {
   data?: unknown;
 }
 
-export type RunStatus = 'running' | 'completed' | 'error' | 'cancelled';
+export type RunStatus = "running" | "completed" | "error" | "cancelled";
 
 export interface RunState {
   runId: string;

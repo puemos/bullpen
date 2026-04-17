@@ -1,31 +1,18 @@
 import { WarningCircle } from "@phosphor-icons/react";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { AppSidebar } from "@/app/AppSidebar";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AnalysisPage } from "@/features/analysis/AnalysisPage";
 import { ResearchPage } from "@/features/run-analysis/ResearchPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { useBackendEvent } from "@/hooks/useBackendEvent";
-import {
-  getAgents,
-  getAllAnalyses,
-  getAnalysisReport,
-} from "@/shared/api/commands";
-import { getState, setState, useAppStore } from "@/store";
+import { getAgents, getAllAnalyses, getAnalysisReport, getSettings } from "@/shared/api/commands";
+import { getState, setSelectedReport, setState, useAppStore } from "@/store";
 import type { AgentCandidate, DataChangedPayload } from "@/types";
 import type { AppView } from "./navigation";
 
-const DATA_CHANGED_DEBOUNCE_MS = 150;
+const DATA_CHANGED_DEBOUNCE_MS = 400;
+const DATA_CHANGED_MAX_WAIT_MS = 1200;
 
 export function App() {
   const view = useAppStore((state) => state.view);
@@ -37,9 +24,10 @@ export function App() {
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [nextAgents, nextAnalyses] = await Promise.all([
+      const [nextAgents, nextAnalyses, settings] = await Promise.all([
         getAgents(),
         getAllAnalyses(),
+        getSettings(),
       ]);
       const selected = getState().selectedAnalysisId;
       const selectedStillExists = selected
@@ -57,11 +45,12 @@ export function App() {
           nextAgents.find((agent) => agent.available)?.id ||
           nextAgents[0]?.id ||
           "",
+        modelByAgent: { ...(settings.model_by_agent ?? {}) },
       });
 
       if (selected && selectedStillExists) {
         const report = await getAnalysisReport(selected);
-        setState({ selectedReport: report });
+        setSelectedReport(report);
       }
     } catch (err) {
       setError(String(err));
@@ -73,15 +62,21 @@ export function App() {
   }, [refresh]);
 
   const debounceRef = useRef<number | null>(null);
+  const maxWaitRef = useRef<number | null>(null);
   const pendingAnalysisIdsRef = useRef<Set<string>>(new Set());
 
   useBackendEvent<DataChangedPayload>("analysis-data-changed", (payload) => {
     pendingAnalysisIdsRef.current.add(payload.analysis_id);
-    if (debounceRef.current !== null) {
-      window.clearTimeout(debounceRef.current);
-    }
-    debounceRef.current = window.setTimeout(async () => {
-      debounceRef.current = null;
+
+    const flush = async () => {
+      if (debounceRef.current !== null) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      if (maxWaitRef.current !== null) {
+        window.clearTimeout(maxWaitRef.current);
+        maxWaitRef.current = null;
+      }
       const changedIds = pendingAnalysisIdsRef.current;
       pendingAnalysisIdsRef.current = new Set();
       try {
@@ -98,26 +93,33 @@ export function App() {
             : {}),
         });
 
-        if (
-          selected &&
-          selectedStillExists &&
-          changedIds.has(selected)
-        ) {
+        if (selected && selectedStillExists && changedIds.has(selected)) {
           const report = await getAnalysisReport(selected);
           if (getState().selectedAnalysisId === selected) {
-            setState({ selectedReport: report });
+            setSelectedReport(report);
           }
         }
       } catch (err) {
         setError(String(err));
       }
-    }, DATA_CHANGED_DEBOUNCE_MS);
+    };
+
+    if (debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = window.setTimeout(flush, DATA_CHANGED_DEBOUNCE_MS);
+    if (maxWaitRef.current === null) {
+      maxWaitRef.current = window.setTimeout(flush, DATA_CHANGED_MAX_WAIT_MS);
+    }
   });
 
   useEffect(
     () => () => {
       if (debounceRef.current !== null) {
         window.clearTimeout(debounceRef.current);
+      }
+      if (maxWaitRef.current !== null) {
+        window.clearTimeout(maxWaitRef.current);
       }
     },
     [],
@@ -129,7 +131,7 @@ export function App() {
     // Check if this analysis has an active in-memory run
     const runs = getState().activeRuns;
     const isRunning = Object.values(runs).some(
-      r => r.status === 'running' && getState().activeAnalysisId === analysisId
+      (r) => r.status === "running" && getState().activeAnalysisId === analysisId,
     );
 
     setState({
@@ -145,12 +147,12 @@ export function App() {
       const runIsActive =
         report?.analysis.active_run_id &&
         Object.values(getState().activeRuns).some(
-          r => r.runId === report.analysis.active_run_id && r.status === 'running'
+          (r) => r.runId === report.analysis.active_run_id && r.status === "running",
         );
-      setState({
-        selectedReport: report,
-        ...(runIsActive ? { analysisSubTab: 'agent' } : {}),
-      });
+      setSelectedReport(report);
+      if (runIsActive) {
+        setState({ analysisSubTab: "agent" });
+      }
     } catch (err) {
       setError(String(err));
     }
@@ -174,10 +176,7 @@ export function App() {
         onSelectAnalysis={selectAnalysis}
       />
       <SidebarInset className="h-screen min-w-0 overflow-hidden">
-        <div
-          data-tauri-drag-region
-          className="absolute left-0 right-0 top-0 z-10 h-3"
-        />
+        <div data-tauri-drag-region className="absolute left-0 right-0 top-0 z-10 h-3" />
         <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 md:hidden">
           <SidebarTrigger />
         </header>
@@ -188,9 +187,7 @@ export function App() {
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-hidden">
-          {view === "new-analysis" && (
-            <ResearchPage agents={agents} onDone={refresh} />
-          )}
+          {view === "new-analysis" && <ResearchPage agents={agents} onDone={refresh} />}
           {view === "analysis" && <AnalysisPage onRefresh={refresh} />}
           {view === "settings" && <SettingsPage agents={agents} />}
         </div>

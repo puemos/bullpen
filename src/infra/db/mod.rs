@@ -104,6 +104,7 @@ impl Database {
                 id TEXT PRIMARY KEY,
                 analysis_id TEXT NOT NULL,
                 agent_id TEXT NOT NULL,
+                model_id TEXT,
                 prompt_text TEXT NOT NULL,
                 status TEXT NOT NULL,
                 started_at TEXT NOT NULL,
@@ -312,6 +313,9 @@ impl Database {
         ] {
             let _ = conn.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), []);
         }
+        // Add new columns to pre-existing databases. ADD COLUMN errors on a
+        // duplicate column name, which we silently swallow to stay idempotent.
+        let _ = conn.execute("ALTER TABLE analysis_runs ADD COLUMN model_id TEXT", []);
         let _ = conn.execute(
             "UPDATE analysis_blocks SET kind = 'other' WHERE kind = 'scenario_matrix'",
             [],
@@ -344,12 +348,13 @@ impl Database {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(
             "INSERT OR REPLACE INTO analysis_runs
-            (id, analysis_id, agent_id, prompt_text, status, started_at, completed_at, error)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 run.id,
                 run.analysis_id,
                 run.agent_id,
+                run.model_id,
                 run.prompt_text,
                 run.status.to_string(),
                 run.started_at,
@@ -545,7 +550,7 @@ impl Database {
     pub fn get_runs(&self, analysis_id: &str) -> Result<Vec<AnalysisRun>> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, analysis_id, agent_id, prompt_text, status, started_at, completed_at, error
+            "SELECT id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error
              FROM analysis_runs WHERE analysis_id = ?1 ORDER BY started_at DESC",
         )?;
         let rows = stmt.query_map([analysis_id], |row| {
@@ -553,11 +558,12 @@ impl Database {
                 id: row.get(0)?,
                 analysis_id: row.get(1)?,
                 agent_id: row.get(2)?,
-                prompt_text: row.get(3)?,
-                status: AnalysisStatus::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
-                started_at: row.get(5)?,
-                completed_at: row.get(6)?,
-                error: row.get(7)?,
+                model_id: row.get(3)?,
+                prompt_text: row.get(4)?,
+                status: AnalysisStatus::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+                started_at: row.get(6)?,
+                completed_at: row.get(7)?,
+                error: row.get(8)?,
             })
         })?;
         let mut runs = Vec::new();
@@ -1586,6 +1592,7 @@ mod tests {
             id: run_id.clone(),
             analysis_id: "a".into(),
             agent_id: "fake".into(),
+            model_id: None,
             prompt_text: prompt.into(),
             status: AnalysisStatus::Running,
             started_at: now,

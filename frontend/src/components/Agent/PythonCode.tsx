@@ -1,10 +1,10 @@
-import { useMemo } from "react";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/core";
 import python from "highlight.js/lib/languages/python";
+import { useMemo } from "react";
 import "highlight.js/styles/atom-one-dark.min.css"; // Global style, but acceptable for code blocks
-import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
+import { cn } from "@/lib/utils";
 
 // Register language once (outside component)
 if (!hljs.getLanguage("python")) {
