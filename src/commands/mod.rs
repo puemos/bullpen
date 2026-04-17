@@ -12,6 +12,12 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// Standalone viewer HTML, built by `pnpm build:viewer` and embedded at compile time.
+/// A sentinel string inside the template is replaced at export time with the
+/// report JSON for the analysis being exported.
+const STANDALONE_VIEWER_HTML: &str = include_str!("../../frontend/dist-viewer/viewer.html");
+const REPORT_PLACEHOLDER: &str = "\"__BULLPEN_REPORT_JSON__\"";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data")]
 pub enum ProgressEventPayload {
@@ -127,6 +133,95 @@ pub async fn stop_analysis(state: State<'_, AppState>, run_id: String) -> Result
         token.cancel();
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportedHtml {
+    pub path: String,
+    pub size_bytes: usize,
+}
+
+fn build_standalone_html(report: &AnalysisReport) -> Result<String, String> {
+    if !STANDALONE_VIEWER_HTML.contains(REPORT_PLACEHOLDER) {
+        return Err(
+            "viewer template is missing the report placeholder; run `pnpm build:viewer`"
+                .to_string(),
+        );
+    }
+    let json = serde_json::to_string(report).map_err(|err| err.to_string())?;
+    // Escape sequences that would close the host <script> tag when the JSON
+    // is embedded inline. Standard precaution for JSON-in-HTML.
+    let safe = json.replace("</", "<\\/").replace("<!--", "<\\!--");
+    Ok(STANDALONE_VIEWER_HTML.replace(REPORT_PLACEHOLDER, &safe))
+}
+
+fn safe_filename(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else if c.is_whitespace() {
+                '-'
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(|c: char| c == '-' || c == '_');
+    let base = if trimmed.is_empty() {
+        "bullpen-report"
+    } else {
+        trimmed
+    };
+    let base: String = base.chars().take(80).collect();
+    format!("{base}.html")
+}
+
+#[tauri::command]
+pub async fn export_analysis_html(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    analysis_id: String,
+) -> Result<Option<ExportedHtml>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let report = {
+        let db = state.db.lock().map_err(|err| err.to_string())?;
+        db.get_report(&analysis_id, None)
+            .map_err(|err| err.to_string())?
+    };
+    let Some(report) = report else {
+        return Err("analysis not found".to_string());
+    };
+
+    let html = build_standalone_html(&report)?;
+    let default_name = safe_filename(&report.analysis.title);
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Export report as HTML")
+        .set_file_name(&default_name)
+        .add_filter("HTML", &["html"])
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+
+    let Some(path) = rx.await.map_err(|err| err.to_string())? else {
+        return Ok(None);
+    };
+    let path_buf = path
+        .into_path()
+        .map_err(|err| format!("invalid save path: {err}"))?;
+
+    let size_bytes = html.len();
+    std::fs::write(&path_buf, html.as_bytes()).map_err(|err| format!("write failed: {err}"))?;
+
+    Ok(Some(ExportedHtml {
+        path: path_buf.display().to_string(),
+        size_bytes,
+    }))
 }
 
 #[tauri::command]
@@ -527,4 +622,55 @@ fn render_markdown(report: &AnalysisReport) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_report(title: &str) -> AnalysisReport {
+        AnalysisReport {
+            analysis: Analysis {
+                id: "analysis-1".to_string(),
+                title: title.to_string(),
+                user_prompt: "Is AAPL a buy?".to_string(),
+                intent: AnalysisIntent::SingleEquity,
+                status: AnalysisStatus::Completed,
+                active_run_id: Some("run-1".to_string()),
+                created_at: "2026-04-17T00:00:00Z".to_string(),
+                updated_at: "2026-04-17T00:00:00Z".to_string(),
+            },
+            runs: vec![],
+            research_plan: None,
+            entities: vec![],
+            sources: vec![],
+            metrics: vec![],
+            artifacts: vec![],
+            blocks: vec![],
+            final_stance: None,
+            projections: vec![],
+            counter_theses: vec![],
+            uncertainty_entries: vec![],
+            methodology_note: None,
+            decision_criterion_answers: vec![],
+        }
+    }
+
+    #[test]
+    fn standalone_html_substitutes_report() {
+        let report = sample_report("Sample");
+        let html = build_standalone_html(&report).expect("build");
+        assert!(!html.contains(REPORT_PLACEHOLDER));
+        assert!(html.contains("\"analysis-1\""));
+    }
+
+    #[test]
+    fn safe_filename_sanitises_title() {
+        assert_eq!(
+            safe_filename("NVDA vs AMD: margins"),
+            "NVDA-vs-AMD_-margins.html"
+        );
+        assert_eq!(safe_filename(""), "bullpen-report.html");
+        assert_eq!(safe_filename("  "), "bullpen-report.html");
+    }
 }

@@ -43,6 +43,15 @@ export async function exportAnalysisMarkdown(analysisId: string): Promise<string
   return invoke("export_analysis_markdown", { analysisId });
 }
 
+export interface ExportedHtml {
+  path: string;
+  size_bytes: number;
+}
+
+export async function exportAnalysisHtml(analysisId: string): Promise<ExportedHtml | null> {
+  return invoke("export_analysis_html", { analysisId });
+}
+
 export async function createAnalysis(userPrompt: string): Promise<string> {
   return invoke("create_analysis", { userPrompt });
 }

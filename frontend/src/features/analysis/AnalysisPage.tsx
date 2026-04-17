@@ -1,4 +1,5 @@
-import { Copy, Stop, Trash, WarningCircle } from "@phosphor-icons/react";
+import { Copy, DownloadSimple, Stop, Trash, WarningCircle } from "@phosphor-icons/react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MarkdownMessage from "@/components/Agent/MarkdownMessage";
 import ToolCallCard from "@/components/Agent/ToolCallCard";
@@ -8,6 +9,7 @@ import { ReportContent } from "@/features/report-viewer/ReportContent";
 import { getTimelineBlocks } from "@/features/run-analysis/progress";
 import {
   deleteAnalysis,
+  exportAnalysisHtml,
   exportAnalysisMarkdown,
   getRunProgress,
   stopAnalysis,
@@ -26,6 +28,7 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
   const activeRuns = useAppStore((state) => state.activeRuns);
   const subTab = useAppStore((state) => state.analysisSubTab);
   const [copyState, setCopyState] = useState<string | null>(null);
+  const [exportState, setExportState] = useState<string | null>(null);
 
   const selectedAnalysis = useMemo(
     () => analyses.find((analysis) => analysis.id === selectedAnalysisId) ?? null,
@@ -58,9 +61,27 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
     if (!report) return;
 
     const markdown = await exportAnalysisMarkdown(report.analysis.id);
-    await navigator.clipboard.writeText(markdown);
+    await writeText(markdown);
     setCopyState("Copied!");
     setTimeout(() => setCopyState(null), 1500);
+  }, [report]);
+
+  const exportHtml = useCallback(async () => {
+    if (!report) return;
+    setExportState("Exporting…");
+    try {
+      const result = await exportAnalysisHtml(report.analysis.id);
+      if (result) {
+        setExportState("Saved");
+      } else {
+        setExportState(null);
+        return;
+      }
+    } catch (err) {
+      console.error("export html failed:", err);
+      setExportState("Failed");
+    }
+    setTimeout(() => setExportState(null), 1800);
   }, [report]);
 
   if (!selectedAnalysisId) {
@@ -116,6 +137,15 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
                 >
                   <Copy size={13} />
                   <span>{copyState || "Copy as markdown"}</span>
+                </button>
+                <span aria-hidden className="h-3 w-px bg-border" />
+                <button
+                  type="button"
+                  onClick={exportHtml}
+                  className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <DownloadSimple size={13} />
+                  <span>{exportState || "Export HTML"}</span>
                 </button>
                 <span aria-hidden className="h-3 w-px bg-border" />
                 <button

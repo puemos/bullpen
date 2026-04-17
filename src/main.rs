@@ -17,6 +17,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
@@ -32,6 +33,7 @@ fn main() {
             commands::set_active_run,
             commands::get_run_progress,
             commands::export_analysis_markdown,
+            commands::export_analysis_html,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bullpen");

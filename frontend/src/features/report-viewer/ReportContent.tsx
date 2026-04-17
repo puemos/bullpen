@@ -69,6 +69,22 @@ export function ReportContent() {
     hasSources,
   };
 
+  // The section directly following the sticky jump nav drops its own top
+  // hairline, so the nav's border-b is the only rule between them.
+  const firstSectionKey: SectionKey | null = hasProjections
+    ? "projections"
+    : hasMetrics
+      ? "metrics"
+      : hasEvidence
+        ? "evidence"
+        : hasAnalysis
+          ? "analysis"
+          : hasSources
+            ? "sources"
+            : null;
+  const firstHeaderClass = (key: SectionKey) =>
+    key === firstSectionKey ? "border-t-0 pt-8" : undefined;
+
   return (
     <article className="mx-auto max-w-5xl px-8 pb-32">
       <div className="pt-10 pb-14">
@@ -104,6 +120,7 @@ export function ReportContent() {
               </span>
             }
             id="projections"
+            className={firstHeaderClass("projections")}
           />
           <ProjectionView
             projections={report.projections}
@@ -125,6 +142,7 @@ export function ReportContent() {
               </span>
             }
             id="metrics"
+            className={firstHeaderClass("metrics")}
           />
           <MetricList metrics={report.metrics} entityMap={entityMap} sourceMap={sourceMap} />
         </section>
@@ -142,6 +160,7 @@ export function ReportContent() {
               </span>
             }
             id="evidence"
+            className={firstHeaderClass("evidence")}
           />
           <div>
             {report.artifacts.map((artifact, index) => (
@@ -163,6 +182,7 @@ export function ReportContent() {
               </span>
             }
             id="analysis"
+            className={firstHeaderClass("analysis")}
           />
           <AnalysisSection blocks={report.blocks} sourceMap={sourceMap} />
         </section>
@@ -180,6 +200,7 @@ export function ReportContent() {
               </span>
             }
             id="sources"
+            className={firstHeaderClass("sources")}
           />
           <SourceList sources={report.sources} />
         </section>

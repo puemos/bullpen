@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default permissions for Bullpen",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": ["core:default", "dialog:default", "clipboard-manager:allow-write-text"]
 }
