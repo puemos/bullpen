@@ -5,6 +5,7 @@ edition = "2024"
 default-run = "crazylines"
 license = "MIT OR Apache-2.0"
 description = "Crazylines is an ACP-powered local stock market analysis workbench."
+repository = "https://github.com/puemos/crazylines"
 keywords = ["stocks", "analysis", "ai", "acp", "tauri"]
 categories = ["finance", "gui"]
 
