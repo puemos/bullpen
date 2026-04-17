@@ -1,5 +1,6 @@
 import { WarningCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { Toaster } from "sonner";
 import { AppSidebar } from "@/app/AppSidebar";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AnalysisPage } from "@/features/analysis/AnalysisPage";
@@ -192,6 +193,16 @@ export function App() {
           {view === "settings" && <SettingsPage agents={agents} />}
         </div>
       </SidebarInset>
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          classNames: {
+            toast:
+              "!rounded-none !border !border-border !bg-background !text-foreground !shadow-none",
+            description: "!text-muted-foreground",
+          },
+        }}
+      />
     </SidebarProvider>
   );
 }

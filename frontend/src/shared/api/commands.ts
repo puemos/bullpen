@@ -52,6 +52,17 @@ export async function exportAnalysisHtml(analysisId: string): Promise<ExportedHt
   return invoke("export_analysis_html", { analysisId });
 }
 
+export interface PublishedReport {
+  url: string;
+  delete_token: string;
+  site_id: string;
+  provider: string;
+}
+
+export async function publishAnalysisHtml(analysisId: string): Promise<PublishedReport> {
+  return invoke("publish_analysis_html", { analysisId });
+}
+
 export async function createAnalysis(userPrompt: string): Promise<string> {
   return invoke("create_analysis", { userPrompt });
 }

@@ -24,6 +24,19 @@ export function ViewerPage({ report }: ViewerPageProps) {
 
   return (
     <div className="flex h-screen flex-col bg-background">
+      <div className="shrink-0 border-b border-border bg-background">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-8 py-3">
+          <Eyebrow>Shared from Bullpen</Eyebrow>
+          <a
+            href="https://puemos.github.io/bullpen/"
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-[11px] tracking-[0.14em] text-muted-foreground hover:text-foreground"
+          >
+            puemos.github.io/bullpen →
+          </a>
+        </div>
+      </div>
       <header className="shrink-0 border-b border-border bg-background">
         <div className="mx-auto flex max-w-5xl flex-col gap-6 px-8 pt-10 pb-8">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

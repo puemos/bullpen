@@ -1,8 +1,23 @@
-import { Copy, DownloadSimple, Stop, Trash, WarningCircle } from "@phosphor-icons/react";
+import {
+  CaretDown,
+  Copy,
+  DownloadSimple,
+  Stop,
+  Trash,
+  UploadSimple,
+  WarningCircle,
+} from "@phosphor-icons/react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import MarkdownMessage from "@/components/Agent/MarkdownMessage";
 import ToolCallCard from "@/components/Agent/ToolCallCard";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Dot, Eyebrow } from "@/components/ui/editorial";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportContent } from "@/features/report-viewer/ReportContent";
@@ -12,6 +27,7 @@ import {
   exportAnalysisHtml,
   exportAnalysisMarkdown,
   getRunProgress,
+  publishAnalysisHtml,
   stopAnalysis,
 } from "@/shared/api/commands";
 import { addRun, addRunProgress, setRunProgress, setState, useAppStore } from "@/store";
@@ -72,16 +88,36 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
     try {
       const result = await exportAnalysisHtml(report.analysis.id);
       if (result) {
-        setExportState("Saved");
+        setExportState(null);
+        toast.success("Report saved", { description: result.path });
       } else {
         setExportState(null);
-        return;
       }
     } catch (err) {
       console.error("export html failed:", err);
-      setExportState("Failed");
+      setExportState(null);
+      toast.error("Export failed", { description: String(err) });
     }
-    setTimeout(() => setExportState(null), 1800);
+  }, [report]);
+
+  const publishHtml = useCallback(async () => {
+    if (!report) return;
+    setExportState("Publishing…");
+    const toastId = toast.loading("Publishing to PageDrop.io…");
+    try {
+      const published = await publishAnalysisHtml(report.analysis.id);
+      await writeText(published.url);
+      console.info("published report:", published);
+      toast.success("Link copied to clipboard", {
+        id: toastId,
+        description: published.url,
+      });
+    } catch (err) {
+      console.error("publish html failed:", err);
+      toast.error("Publish failed", { id: toastId, description: String(err) });
+    } finally {
+      setExportState(null);
+    }
   }, [report]);
 
   if (!selectedAnalysisId) {
@@ -139,14 +175,58 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
                   <span>{copyState || "Copy as markdown"}</span>
                 </button>
                 <span aria-hidden className="h-3 w-px bg-border" />
-                <button
-                  type="button"
-                  onClick={exportHtml}
-                  className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <DownloadSimple size={13} />
-                  <span>{exportState || "Export HTML"}</span>
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors outline-none hover:text-foreground data-[state=open]:text-foreground"
+                  >
+                    <DownloadSimple size={13} />
+                    <span>{exportState || "Export"}</span>
+                    <CaretDown size={11} />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={8}
+                    className="w-[320px] min-w-[320px] rounded-none border border-border bg-background p-0 shadow-none"
+                  >
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        void exportHtml();
+                      }}
+                      className="flex items-start gap-3 rounded-none border-b border-border px-3 py-3 focus:bg-muted/60"
+                    >
+                      <DownloadSimple size={15} className="mt-[3px] shrink-0 text-foreground" />
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-[13px] font-medium text-foreground">
+                          Save as file…
+                        </span>
+                        <span className="text-[11px] leading-[1.45] text-muted-foreground">
+                          Local HTML — stays on your machine.
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        void publishHtml();
+                      }}
+                      className="flex items-start gap-3 rounded-none px-3 py-3 focus:bg-muted/60"
+                    >
+                      <UploadSimple size={15} className="mt-[3px] shrink-0 text-foreground" />
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-[13px] font-medium text-foreground">
+                          Publish via PageDrop.io
+                        </span>
+                        <span className="text-[11px] leading-[1.45] text-muted-foreground">
+                          Third-party host — anyone with the link can read.
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                    <p className="border-t border-border bg-muted/30 px-3 py-2.5 text-[10.5px] leading-[1.45] text-muted-foreground">
+                      Publish uploads your report HTML to PageDrop.io, a third-party service not
+                      operated by Bullpen. The host can read the contents. Use Save if that's not
+                      acceptable.
+                    </p>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <span aria-hidden className="h-3 w-px bg-border" />
                 <button
                   type="button"

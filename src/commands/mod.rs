@@ -224,6 +224,92 @@ pub async fn export_analysis_html(
     }))
 }
 
+const DEFAULT_PUBLISH_URL: &str = "https://pagedrop.dev/api/v1/sites";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PublishedReport {
+    pub url: String,
+    pub delete_token: String,
+    pub site_id: String,
+    pub provider: String,
+}
+
+#[tauri::command]
+pub async fn publish_analysis_html(
+    state: State<'_, AppState>,
+    analysis_id: String,
+) -> Result<PublishedReport, String> {
+    let report = {
+        let db = state.db.lock().map_err(|err| err.to_string())?;
+        db.get_report(&analysis_id, None)
+            .map_err(|err| err.to_string())?
+    };
+    let Some(report) = report else {
+        return Err("analysis not found".to_string());
+    };
+
+    let html = build_standalone_html(&report)?;
+    let title = report.analysis.title.clone();
+
+    let endpoint =
+        std::env::var("BULLPEN_PUBLISH_URL").unwrap_or_else(|_| DEFAULT_PUBLISH_URL.to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|err| format!("http client: {err}"))?;
+
+    let body = serde_json::json!({
+        "html": html,
+        "title": title,
+    });
+
+    let response = client
+        .post(&endpoint)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|err| format!("publish failed: {err}"))?;
+
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|err| format!("publish failed: read body: {err}"))?;
+
+    if !status.is_success() {
+        return Err(format!("publish failed: {status}: {text}"));
+    }
+
+    let envelope: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|err| format!("publish failed: parse: {err}: {text}"))?;
+
+    let data = envelope.get("data").unwrap_or(&envelope);
+    let url = data
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("publish failed: missing url in response: {text}"))?
+        .to_string();
+    let site_id = data
+        .get("siteId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let delete_token = data
+        .get("deleteToken")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    Ok(PublishedReport {
+        url,
+        delete_token,
+        site_id,
+        provider: "PageDrop.io".to_string(),
+    })
+}
+
 #[tauri::command]
 pub async fn export_analysis_markdown(
     state: State<'_, AppState>,
