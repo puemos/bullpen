@@ -14,7 +14,7 @@
 
         <meta
             name="description"
-            content="Ask about any ticker or sector. Get a clear take and see the evidence behind every claim. Runs on your computer, with the AI you already use."
+            content="Desktop app for stock research through your own ACP agent — Claude Code, Codex, Gemini. Structured reports with sources. Local SQLite, your agent's auth."
         />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://bullpen.sh/" />
@@ -26,7 +26,7 @@
         />
         <meta
             property="og:description"
-            content="Ask about any stock or sector. See the evidence behind every claim. Runs on your computer."
+            content="Stock research through your own ACP agent. Structured reports, sources you can click. Local SQLite, your agent's auth."
         />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://bullpen.sh/" />
@@ -41,7 +41,7 @@
         />
         <meta
             name="twitter:description"
-            content="Ask about any stock or sector. See the evidence behind every claim. Runs on your computer."
+            content="Stock research through your own ACP agent. Structured reports, sources you can click. Local SQLite, your agent's auth."
         />
 
         <script type="application/ld+json">
@@ -56,7 +56,7 @@
                     "price": "0",
                     "priceCurrency": "USD"
                 },
-                "description": "Desktop app for AI-assisted stock research. Ask about a ticker or sector, get a clear take with checkable sources. Local-first.",
+                "description": "Desktop app for stock research through your own ACP agent. Structured reports, click-through sources, local SQLite. Uses your agent's auth.",
                 "author": {
                     "@type": "Person",
                     "name": "puemos",
@@ -151,28 +151,34 @@
                                 class="block w-2 h-2 bg-violet"
                                 aria-hidden="true"
                             ></span>
-                            Stock research · Local AI
+                            Stock research · ACP agent · Local
                         </div>
                         <h1
                             id="hero-heading"
                             class="font-display font-semibold text-ink tracking-[-0.035em] leading-[0.98] mb-7 max-w-[15ch]"
                             style="font-size: clamp(44px, 7.6vw, 88px);"
                         >
-                            Stock research with sources you can check.
+                            Stock research through your own agent.
                         </h1>
                         <p
-                            class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-ink/85 max-w-[46ch] mb-9"
+                            class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-ink/85 max-w-[48ch] mb-5"
                         >
-                            Ask about any ticker or sector. Get a clear take
-                            and see the evidence behind every claim. Runs on
-                            your computer, with the AI you already use.
+                            Ask about a ticker or a sector. Your ACP agent
+                            does the work &mdash; Claude Code, Codex, Gemini,
+                            whatever you already run. The report is
+                            structured, sourced, and stays on your machine.
+                        </p>
+                        <p
+                            class="font-mono text-[11.5px] uppercase tracking-[0.18em] text-muted mb-9"
+                        >
+                            Your agent&rsquo;s auth. Your tokens. Your subscription.
                         </p>
                         <div class="flex flex-wrap items-center gap-3">
                             <a
                                 href="#download"
                                 class="inline-flex items-center gap-2 border border-ink bg-ink text-paper px-5 py-3 text-[13px] font-medium tracking-[0.01em] hover:bg-paper hover:text-ink transition-colors"
                             >
-                                Download for free
+                                Download
                             </a>
                             <a
                                 href="#how"
@@ -208,7 +214,7 @@
                     class="px-5 md:px-8 py-6 flex flex-col md:flex-row md:items-center gap-5 md:gap-10 max-w-7xl mx-auto"
                 >
                     <p class="text-[13px] text-muted md:shrink-0">
-                        Works with the AI you already use
+                        Works with any ACP agent you already run
                     </p>
                     <div
                         class="flex items-center gap-6 md:gap-7 overflow-x-auto scrollbar-hide -mx-5 md:mx-0 px-5 md:px-0"
@@ -216,19 +222,19 @@
                     >
                         <span class="flex items-center gap-2 shrink-0" role="listitem">
                             <img src="./assets/agents/claude.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
-                            <span class="text-[12.5px] text-muted">Claude</span>
+                            <span class="text-[12.5px] text-muted">Claude Code</span>
                         </span>
                         <span class="flex items-center gap-2 shrink-0" role="listitem">
                             <img src="./assets/agents/codex.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
-                            <span class="text-[12.5px] text-muted">ChatGPT</span>
+                            <span class="text-[12.5px] text-muted">Codex</span>
                         </span>
                         <span class="flex items-center gap-2 shrink-0" role="listitem">
                             <img src="./assets/agents/gemini.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
-                            <span class="text-[12.5px] text-muted">Gemini</span>
+                            <span class="text-[12.5px] text-muted">Gemini CLI</span>
                         </span>
                         <span class="flex items-center gap-2 shrink-0" role="listitem">
-                            <img src="./assets/agents/grok.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
-                            <span class="text-[12.5px] text-muted">Grok</span>
+                            <img src="./assets/agents/qwen.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
+                            <span class="text-[12.5px] text-muted">Qwen</span>
                         </span>
                         <span class="flex items-center gap-2 shrink-0" role="listitem">
                             <img src="./assets/agents/mistral.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
@@ -239,18 +245,59 @@
                             <span class="text-[12.5px] text-muted">Kimi</span>
                         </span>
                         <span class="flex items-center gap-2 shrink-0" role="listitem">
-                            <img src="./assets/agents/qwen.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
-                            <span class="text-[12.5px] text-muted">Qwen</span>
-                        </span>
-                        <span class="flex items-center gap-2 shrink-0" role="listitem">
-                            <img src="./assets/agents/copilot.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
-                            <span class="text-[12.5px] text-muted">Copilot</span>
-                        </span>
-                        <span class="flex items-center gap-2 shrink-0" role="listitem">
                             <img src="./assets/agents/opencode.svg" alt="" class="h-4 w-auto opacity-70" loading="lazy" decoding="async" />
                             <span class="text-[12.5px] text-muted">OpenCode</span>
                         </span>
-                        <span class="text-[12px] text-muted/60 shrink-0">+ 4 more</span>
+                        <span class="text-[12px] text-muted/60 shrink-0">or a custom binary</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ WHAT IT IS ============ -->
+            <section
+                aria-label="What Bullpen is"
+                class="border-b border-rule"
+            >
+                <div
+                    class="px-5 md:px-8 pt-14 md:pt-24 pb-14 md:pb-24 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16"
+                >
+                    <div class="lg:col-span-4">
+                        <p
+                            class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted mb-4 flex items-center gap-2.5"
+                        >
+                            <span
+                                class="block w-2 h-2 bg-violet"
+                                aria-hidden="true"
+                            ></span>
+                            What it actually is
+                        </p>
+                        <h2
+                            class="font-display font-semibold text-ink tracking-[-0.025em] leading-[1.02]"
+                            style="font-size: clamp(30px, 4.4vw, 52px);"
+                        >
+                            A workbench, not a wrapper.
+                        </h2>
+                    </div>
+                    <div class="lg:col-span-8 flex flex-col gap-5 font-serif text-[17px] leading-[1.6] text-ink/85 max-w-[58ch]">
+                        <p>
+                            Bullpen starts your ACP agent and hands it a
+                            <code class="font-mono text-[14px] text-ink">bullpen-analysis</code>
+                            MCP server with typed submission tools. The agent
+                            can research however it wants &mdash; but it has
+                            to file its findings through those tools.
+                        </p>
+                        <p>
+                            A run can&rsquo;t finalize without a thesis, a
+                            risks block, at least one source, and a stance.
+                            No wall of markdown. No hand-waving. If the agent
+                            won&rsquo;t commit, the report doesn&rsquo;t
+                            close.
+                        </p>
+                        <p>
+                            Reports live in local SQLite. No account. No
+                            cloud sync. The only network call is your
+                            agent&rsquo;s own.
+                        </p>
                     </div>
                 </div>
             </section>
@@ -267,11 +314,10 @@
                         class="font-display font-semibold text-ink tracking-[-0.025em] leading-[1.02] max-w-[22ch]"
                         style="font-size: clamp(30px, 4.4vw, 52px);"
                     >
-                        Research you can actually trust.
+                        Why not just paste it into a chat.
                     </h2>
                     <p class="mt-5 font-serif text-[17px] md:text-[18px] leading-[1.5] text-muted max-w-[50ch]">
-                        A few things that make Bullpen different from
-                        pasting a prompt into a chat window.
+                        Four things you don&rsquo;t get from a chat window.
                     </p>
                 </div>
 
@@ -300,9 +346,9 @@
                         <p
                             class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
                         >
-                            When the AI quotes a number or makes a call, you
-                            see exactly where it came from. Click through to
-                            read the source yourself.
+                            Every number, quote, and call goes through a
+                            typed MCP tool with a source attached. Click to
+                            see the original.
                         </p>
                     </article>
 
@@ -317,20 +363,20 @@
                             ></span>
                             <span
                                 class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
-                                >02 &middot; Position</span
+                                >02 &middot; Stance</span
                             >
                         </div>
                         <h3
                             class="font-display font-semibold text-[24px] md:text-[28px] leading-[1.15] tracking-[-0.015em] text-ink"
                         >
-                            A clear take, not a dodge
+                            The agent has to commit
                         </h3>
                         <p
                             class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
                         >
-                            Every report gives you a call &mdash; bullish,
-                            bearish, mixed, or neutral &mdash; and how
-                            confident it is. No "on one hand, on the other."
+                            Bullish, bearish, mixed, or neutral &mdash; with
+                            confidence. The run won&rsquo;t finalize without
+                            one. No &ldquo;on one hand, on the other.&rdquo;
                         </p>
                     </article>
 
@@ -356,8 +402,8 @@
                         <p
                             class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
                         >
-                            Every report shows a base case, an upside, and a
-                            downside. You see the range, not just one
+                            Base, upside, downside. The agent has to write
+                            all three. You see the range, not one
                             confident-sounding guess.
                         </p>
                     </article>
@@ -384,8 +430,9 @@
                         <p
                             class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
                         >
-                            Your prompts, reports, and notes never leave your
-                            machine. No account, no cloud sync, no tracking.
+                            Local SQLite. No account, no telemetry, no cloud
+                            sync. Your agent&rsquo;s auth is the only network
+                            call.
                         </p>
                     </article>
                 </div>
@@ -492,9 +539,9 @@
                                 class="font-serif text-[15.5px] leading-[1.6] text-plum/80 max-w-[38ch]"
                             >
                                 Plain English. &ldquo;Compare NVDA to
-                                AMD,&rdquo; or &ldquo;Is the energy sector
-                                overbought?&rdquo; Whatever you&rsquo;d ask a
-                                friend who reads filings.
+                                AMD.&rdquo; &ldquo;Is the energy sector
+                                overbought?&rdquo; Whatever you&rsquo;d ask
+                                someone who actually reads filings.
                             </p>
                         </div>
 
@@ -507,14 +554,16 @@
                             <h3
                                 class="font-display font-semibold text-[22px] md:text-[24px] leading-[1.15] tracking-[-0.015em] text-plum"
                             >
-                                Pick your AI
+                                Pick your agent
                             </h3>
                             <p
                                 class="font-serif text-[15.5px] leading-[1.6] text-plum/80 max-w-[38ch]"
                             >
-                                Claude, ChatGPT, Gemini, or anything else you
-                                already have set up. Bullpen finds it and
-                                hands it the research tools.
+                                Bullpen detects the ACP agents on your
+                                machine &mdash; Claude Code, Codex, Gemini,
+                                OpenCode, or your own via
+                                <code class="font-mono text-[13px] text-plum">BULLPEN_CUSTOM_AGENT</code>.
+                                It uses their auth, not ours.
                             </p>
                         </div>
 
@@ -532,9 +581,9 @@
                             <p
                                 class="font-serif text-[15.5px] leading-[1.6] text-plum/80 max-w-[38ch]"
                             >
-                                A thesis, the key numbers, the risks, three
-                                scenarios, and a clear call. Saved locally,
-                                so you can come back to it later.
+                                Thesis, key numbers, risks, three scenarios,
+                                a stance. Saved to local SQLite. Come back to
+                                it whenever.
                             </p>
                         </div>
                     </div>
@@ -564,9 +613,14 @@
                         Get Bullpen
                     </h2>
                     <p
-                        class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-muted max-w-[38ch] mx-auto mb-12"
+                        class="font-serif text-[18px] md:text-[20px] leading-[1.45] text-muted max-w-[38ch] mx-auto mb-4"
                     >
                         Free. Open source. Yours.
+                    </p>
+                    <p
+                        class="font-mono text-[11px] uppercase tracking-[0.18em] text-muted/80 mb-12"
+                    >
+                        macOS (Apple Silicon &amp; Intel) &middot; Linux x86_64 &middot; Windows not yet
                     </p>
 
                     <div
@@ -620,8 +674,8 @@
                     <p
                         class="text-[13px] text-muted"
                     >
-                        Or build from source &mdash;
-                        <code class="font-mono text-ink ml-1">cargo run</code>
+                        Or from source &mdash;
+                        <code class="font-mono text-ink ml-1">git clone &amp;&amp; cargo run</code>
                     </p>
                 </div>
             </section>
@@ -670,7 +724,7 @@
                     >
                 </nav>
                 <p class="text-[12px] text-muted">
-                    MIT &middot; Not investment advice
+                    MIT &middot; Research tool. Not a broker. Not real-time. Not advice.
                 </p>
             </footer>
         </main>
