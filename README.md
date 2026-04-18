@@ -32,11 +32,57 @@ You ask a question or load a portfolio. Pick an agent. Read the report.
 
 **Final stance** — bullish, bearish, mixed, or neutral, with confidence and what would change the view.
 
-**Portfolio reviews** — position-by-position holdings, allocation breakdown, risk factors, rebalancing scenarios. No orders, no position sizing.
+**Export** — save any report as a standalone HTML file or Markdown. Share it, archive it, read it offline.
 
-**12 data providers** — SEC EDGAR, Alpha Vantage, Polygon, Finnhub, Yahoo Finance, NewsAPI, and more. Add API keys once in Settings; they're stored in your OS keychain, never written to disk.
+---
 
-**Local only** — no account, no telemetry, no sync. Data stays on your machine.
+## Portfolios
+
+Create a portfolio, pick a base currency, paste or upload a CSV of your holdings. Bullpen normalizes positions into a local SQLite workspace — holdings, allocation weights, cost basis, 30-day sparklines.
+
+Run a portfolio analysis and the report adds:
+
+- **Holding reviews** — position-by-position research with stance and evidence
+- **Allocation breakdown** — by sector, geography, asset class
+- **Risk factors** — concentration, correlation, macro sensitivity
+- **Rebalancing scenarios** — optional, non-prescriptive, no orders placed
+
+Portfolio data stays local. Bullpen does not connect to brokerages.
+
+<p align="center">
+  <img src="assets/screenshots/portfolio-risk.png" alt="Portfolio risk section showing factor exposures" width="720" />
+  <br/>
+  <em>Portfolio risk: factor exposures and macro sensitivities.</em>
+</p>
+
+---
+
+## Data sources
+
+12 providers built in. Add an API key per provider in Settings — keys are stored in your OS keychain, never written to disk. Pick which sources to use per run.
+
+| Provider                | Category     |
+|-------------------------|--------------|
+| Tavily                  | Web search   |
+| Brave Search            | Web search   |
+| SEC EDGAR               | Filings      |
+| Alpha Vantage           | Fundamentals |
+| Financial Modeling Prep | Fundamentals |
+| Finnhub                 | Fundamentals |
+| Polygon                 | Market data  |
+| Yahoo Finance           | Market data  |
+| NewsAPI                 | News         |
+| Finviz                  | Screener     |
+| StockTwits              | Forums       |
+| Hacker News             | Forums       |
+
+Providers without a configured key are excluded from the agent's tool list.
+
+---
+
+## Local only
+
+No account, no telemetry, no cloud sync. Network calls are your agent's own requests and any data providers you enable. Data stays on your machine.
 
 ---
 
