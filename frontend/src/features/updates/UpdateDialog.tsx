@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import MarkdownMessage from "@/components/Agent/MarkdownMessage";
 import { Eyebrow, HairlineDivider } from "@/components/ui/editorial";
 import { useBackendEvent } from "@/hooks/useBackendEvent";
-import type { UpdateInfo } from "@/hooks/useUpdateCheck";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import type { UpdateInfo } from "@/hooks/useUpdateCheck";
 import { runSelfUpdate } from "@/shared/api/commands";
 
 const UPDATE_COMMAND = "brew upgrade --cask bullpen";

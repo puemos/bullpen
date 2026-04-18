@@ -68,7 +68,7 @@ fn yahoo_symbol(symbol: &str, market: Option<&str>) -> String {
     };
     let code = market.to_ascii_uppercase();
     let suffix = match code.as_str() {
-"XETRA" | "ETR" | "FRA" | "BER" | "DE" => ".DE",
+        "XETRA" | "ETR" | "FRA" | "BER" | "DE" => ".DE",
         "LSE" | "LON" | "UK" => ".L",
         "TSX" | "TOR" => ".TO",
         "TSXV" | "VEN" => ".V",

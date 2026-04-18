@@ -119,7 +119,6 @@ export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: Portfolio
     }
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Intentionally omitted selectPortfolio - it changes every render
   useEffect(() => {
     // If an id is selected but the detail wasn't loaded yet, fetch it.
     // Don't auto-select "first portfolio" here — leaving both null is how the

@@ -51,7 +51,6 @@ export function DataSourcesSection() {
 
   useEffect(() => {
     void load();
-    // biome-ignore lint/correctness/useExhaustiveDependencies: load is stable due to useCallback or similar
   }, []);
 
   const grouped = useMemo(() => {

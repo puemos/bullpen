@@ -135,7 +135,7 @@ pub async fn import_portfolio_csv(
     state: State<'_, AppState>,
     mut input: PortfolioCsvImportInput,
 ) -> Result<PortfolioImportResult, CommandError> {
-    for row in input.rows.iter_mut() {
+    for row in &mut input.rows {
         if row.name.is_none() {
             if let Some(ref symbol) = row.symbol.clone() {
                 if let Ok(Some(name)) =

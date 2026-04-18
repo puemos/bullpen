@@ -92,17 +92,18 @@ export function ageDaysFrom(iso: string, now: Date = new Date()): number | null 
 
 /**
  * Colour-graded freshness label for a source retrieval or metric `as_of`
- * stamp. `role="source"` and `role="metric"` both render the same way today;
- * the prop is kept so downstream styling can diverge without changing callers.
+ * stamp. `variant="source"` and `variant="metric"` both render the same way
+ * today; the prop is kept so downstream styling can diverge without changing
+ * callers.
  */
 export function FreshnessChip({
   iso,
-  role,
+  variant,
   now,
   className,
 }: {
   iso: string;
-  role: "source" | "metric";
+  variant: "source" | "metric";
   now?: Date;
   className?: string;
 }) {
@@ -123,7 +124,7 @@ export function FreshnessChip({
   const bucket = freshnessBucket(age);
   const tone = bucketTone(bucket);
   const label = formatAgeLabel(iso, age);
-  const prefix = role === "source" ? "RETR" : "AS OF";
+  const prefix = variant === "source" ? "RETR" : "AS OF";
   return (
     <span
       className={cn(

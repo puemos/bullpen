@@ -2324,7 +2324,7 @@ mod tests {
         json!({
             "horizon": "12 months",
             "base_currency": "USD",
-            "current_value": 100000.0,
+            "current_value": 100_000.0,
             "methodology": "Holding-weighted scenario model.",
             "key_assumptions": ["Equity beta remains the main driver."],
             "evidence_ids": [source_id],

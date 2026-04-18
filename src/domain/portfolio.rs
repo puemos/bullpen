@@ -206,6 +206,7 @@ pub struct PortfolioHolding {
     pub accounts: Vec<PortfolioHoldingAccount>,
 }
 
+#[must_use]
 pub fn portfolio_holding_entity_id(symbol: &str, market: Option<&str>) -> String {
     let mut id = String::from("holding:");
     id.push_str(&normalize_holding_id_part(symbol));

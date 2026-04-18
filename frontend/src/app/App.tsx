@@ -1,6 +1,6 @@
 import { WarningCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
-import { toast, Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import { AppSidebar } from "@/app/AppSidebar";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AnalysisPage } from "@/features/analysis/AnalysisPage";
