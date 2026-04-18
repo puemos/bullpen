@@ -61,6 +61,8 @@ fn source_fixture(id: &str, run_id: &str, reliability: SourceReliability) -> Sou
         retrieved_at: now(),
         reliability,
         summary: "Primary source".into(),
+        last_verified_at: None,
+        last_verification_status: None,
     }
 }
 

@@ -3,7 +3,7 @@ use crate::domain::{
     AnalysisSummary, ArtifactKind, BlockKind, CounterThesis, CriterionVerdict,
     DecisionCriterionAnswer, Entity, FinalStance, Importance, MethodologyNote, MetricSnapshot,
     Projection, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
-    StructuredArtifact, UncertaintyEntry,
+    StructuredArtifact, UncertaintyEntry, VerificationStatus, age_days, stance_max_metric_age_days,
 };
 use crate::infra::progress::ProgressEventPayload;
 
@@ -185,6 +185,8 @@ impl Database {
                 retrieved_at TEXT NOT NULL,
                 reliability TEXT NOT NULL,
                 summary TEXT NOT NULL,
+                last_verified_at TEXT,
+                last_verification_status TEXT,
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
 
@@ -353,6 +355,11 @@ impl Database {
         // Add new columns to pre-existing databases. ADD COLUMN errors on a
         // duplicate column name, which we silently swallow to stay idempotent.
         let _ = conn.execute("ALTER TABLE analysis_runs ADD COLUMN model_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE sources ADD COLUMN last_verified_at TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE sources ADD COLUMN last_verification_status TEXT",
+            [],
+        );
         let _ = conn.execute(
             "UPDATE analysis_blocks SET kind = 'other' WHERE kind = 'scenario_matrix'",
             [],
@@ -660,8 +667,8 @@ impl Database {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO sources
-            (id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            (id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary, last_verified_at, last_verification_status)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 source.id,
                 source.run_id,
@@ -671,10 +678,41 @@ impl Database {
                 source.source_type,
                 source.retrieved_at,
                 source.reliability.to_string(),
-                source.summary
+                source.summary,
+                source.last_verified_at,
+                source.last_verification_status.map(|s| s.to_string()),
             ],
         )?;
         Ok(())
+    }
+
+    /// Record the outcome of a `verify_source_accessibility` call. Returns
+    /// `false` if the source id is not present so the caller can surface a
+    /// validation error.
+    pub(crate) fn save_source_verification(
+        &self,
+        source_id: &str,
+        verified_at: &str,
+        status: VerificationStatus,
+    ) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        let updated = conn.execute(
+            "UPDATE sources SET last_verified_at = ?1, last_verification_status = ?2 WHERE id = ?3",
+            params![verified_at, status.to_string(), source_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    pub(crate) fn get_source(&self, source_id: &str) -> Result<Option<Source>> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary, last_verified_at, last_verification_status
+             FROM sources WHERE id = ?1",
+            [source_id],
+            source_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
     }
 
     pub(crate) fn save_metric(&self, metric: &MetricSnapshot) -> Result<()> {
@@ -1129,6 +1167,21 @@ impl Database {
             }
         }
 
+        if let Some(stance) = &final_stance {
+            let metrics = self.get_metrics(run_id)?;
+            let mut freshness_errors = validate_stance_metric_freshness(&StanceFreshnessCheck {
+                stance,
+                blocks: &blocks,
+                projections: &projections,
+                artifacts: &artifacts,
+                counter_theses: &counter_theses,
+                criterion_answers: &criterion_answers,
+                metrics: &metrics,
+                now: chrono::Utc::now(),
+            });
+            errors.append(&mut freshness_errors);
+        }
+
         for projection in &projections {
             if projection.methodology.trim().is_empty() {
                 errors.push(format!(
@@ -1240,23 +1293,10 @@ impl Database {
     fn get_sources(&self, run_id: &str) -> Result<Vec<Source>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary
+            "SELECT id, run_id, title, url, publisher, source_type, retrieved_at, reliability, summary, last_verified_at, last_verification_status
              FROM sources WHERE run_id = ?1 ORDER BY retrieved_at DESC",
         )?;
-        let rows = stmt.query_map([run_id], |row| {
-            Ok(Source {
-                id: row.get(0)?,
-                run_id: row.get(1)?,
-                title: row.get(2)?,
-                url: row.get(3)?,
-                publisher: row.get(4)?,
-                source_type: row.get(5)?,
-                retrieved_at: row.get(6)?,
-                reliability: SourceReliability::from_str(&row.get::<_, String>(7)?)
-                    .unwrap_or_default(),
-                summary: row.get(8)?,
-            })
-        })?;
+        let rows = stmt.query_map([run_id], source_from_row)?;
         collect_rows(rows)
     }
 
@@ -1643,6 +1683,96 @@ fn required_artifacts_for(intent: AnalysisIntent) -> Vec<ArtifactKind> {
     }
 }
 
+/// Inputs to the stance-metric-freshness finalize gate. Groups the evidence
+/// graph the validator walks so the function signature stays readable as we
+/// add more sources of citation (v2 will likely include research-plan-level
+/// assertions, etc.).
+pub(crate) struct StanceFreshnessCheck<'a> {
+    pub stance: &'a FinalStance,
+    pub blocks: &'a [AnalysisBlock],
+    pub projections: &'a [Projection],
+    pub artifacts: &'a [StructuredArtifact],
+    pub counter_theses: &'a [CounterThesis],
+    pub criterion_answers: &'a [DecisionCriterionAnswer],
+    pub metrics: &'a [MetricSnapshot],
+    pub now: chrono::DateTime<chrono::Utc>,
+}
+
+/// Reject finalization when any metric whose source is cited by the final
+/// stance's evidence graph is older than the configured threshold. Scoped to
+/// directional stances (`Bullish` / `Bearish` / `Mixed`) — neutral and
+/// insufficient-data reports can stand on stale data because they are not
+/// making a call.
+///
+/// The stance itself does not carry `evidence_ids`; it's derived from the
+/// other typed blocks and projections. We approximate the "stance-cited"
+/// evidence set as the union of evidence referenced by any block,
+/// projection, artifact, counter-thesis, or criterion answer in the run.
+/// Widening the set is the safe direction: a stale primary-source metric
+/// that underpins any part of the report is worth flagging.
+pub(crate) fn validate_stance_metric_freshness(check: &StanceFreshnessCheck<'_>) -> Vec<String> {
+    if matches!(
+        check.stance.stance,
+        StanceKind::Neutral | StanceKind::InsufficientData
+    ) {
+        return Vec::new();
+    }
+
+    let mut cited: HashSet<&str> = HashSet::new();
+    for block in check.blocks {
+        cited.extend(block.evidence_ids.iter().map(String::as_str));
+    }
+    for projection in check.projections {
+        cited.extend(projection.evidence_ids.iter().map(String::as_str));
+    }
+    for artifact in check.artifacts {
+        cited.extend(artifact.evidence_ids.iter().map(String::as_str));
+    }
+    for counter in check.counter_theses {
+        cited.extend(counter.supporting_evidence_ids.iter().map(String::as_str));
+    }
+    for answer in check.criterion_answers {
+        cited.extend(answer.supporting_evidence_ids.iter().map(String::as_str));
+    }
+
+    let max_days = stance_max_metric_age_days();
+    let mut errors = Vec::new();
+    for metric in check.metrics {
+        if !cited.contains(metric.source_id.as_str()) {
+            continue;
+        }
+        let Some(age) = age_days(&metric.as_of, check.now) else {
+            continue;
+        };
+        if age > max_days {
+            errors.push(format!(
+                "stance-cited metric '{}' from source '{}' is {}d old (max {}d). Re-fetch or downgrade stance to Neutral.",
+                metric.metric, metric.source_id, age, max_days
+            ));
+        }
+    }
+    errors
+}
+
+fn source_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Source> {
+    Ok(Source {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        title: row.get(2)?,
+        url: row.get(3)?,
+        publisher: row.get(4)?,
+        source_type: row.get(5)?,
+        retrieved_at: row.get(6)?,
+        reliability: SourceReliability::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+        summary: row.get(8)?,
+        last_verified_at: row.get(9)?,
+        last_verification_status: row
+            .get::<_, Option<String>>(10)?
+            .as_deref()
+            .and_then(|s| VerificationStatus::from_str(s).ok()),
+    })
+}
+
 fn collect_rows<T>(
     rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>,
 ) -> Result<Vec<T>> {
@@ -1719,6 +1849,8 @@ pub(crate) mod tests {
             retrieved_at: chrono::Utc::now().to_rfc3339(),
             reliability,
             summary: "Primary source.".into(),
+            last_verified_at: None,
+            last_verification_status: None,
         })
         .unwrap();
         id.to_string()
@@ -2124,6 +2256,103 @@ pub(crate) mod tests {
             errors.iter().any(|e| e.contains("blocking uncertainty")),
             "expected blocking-uncertainty error, got {errors:?}"
         );
+    }
+
+    #[test]
+    fn finalize_rejects_stale_metric_under_directional_stance() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, source_id) = seed_full_single_equity(&db);
+        save_stance_with(&db, &run_id, StanceKind::Bullish, 0.5);
+        db.save_counter_thesis(&CounterThesis {
+            id: "counter-1".into(),
+            run_id: run_id.clone(),
+            stance_against: StanceKind::Bearish,
+            summary: "Steelman opposing view.".into(),
+            supporting_evidence_ids: vec![source_id.clone()],
+            why_we_reject_or_partially_accept: "Evidence is thin.".into(),
+            residual_probability: 0.2,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        // Save a cited metric dated well past the 365d gate.
+        let stale_as_of = (chrono::Utc::now() - chrono::Duration::days(400)).to_rfc3339();
+        db.save_metric(&MetricSnapshot {
+            id: "m-stale".into(),
+            run_id: run_id.clone(),
+            entity_id: Some("AAPL".into()),
+            metric: "revenue_ttm".into(),
+            numeric_value: 100.0,
+            unit: Some("USD".into()),
+            period: Some("FY23".into()),
+            as_of: stale_as_of,
+            source_id: source_id.clone(),
+            prior_value: None,
+            change_pct: None,
+        })
+        .unwrap();
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("stance-cited metric 'revenue_ttm'") && e.contains("old")),
+            "expected stale-metric error, got {errors:?}",
+        );
+    }
+
+    #[test]
+    fn finalize_allows_stale_metric_under_neutral_stance() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (run_id, source_id) = seed_full_single_equity(&db);
+        // Stance already defaulted to Neutral via save_stance.
+        let stale_as_of = (chrono::Utc::now() - chrono::Duration::days(400)).to_rfc3339();
+        db.save_metric(&MetricSnapshot {
+            id: "m-stale".into(),
+            run_id: run_id.clone(),
+            entity_id: Some("AAPL".into()),
+            metric: "revenue_ttm".into(),
+            numeric_value: 100.0,
+            unit: Some("USD".into()),
+            period: Some("FY23".into()),
+            as_of: stale_as_of,
+            source_id,
+            prior_value: None,
+            change_pct: None,
+        })
+        .unwrap();
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            !errors.iter().any(|e| e.contains("stance-cited metric")),
+            "neutral stance should not gate on staleness, got {errors:?}",
+        );
+    }
+
+    #[test]
+    fn source_verification_round_trips() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let run_id = seed_run(&db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let source_id = save_source(&db, &run_id);
+
+        let updated = db
+            .save_source_verification(&source_id, "2026-04-18T12:00:00Z", VerificationStatus::Dead)
+            .unwrap();
+        assert!(updated);
+
+        let loaded = db.get_source(&source_id).unwrap().unwrap();
+        assert_eq!(
+            loaded.last_verified_at.as_deref(),
+            Some("2026-04-18T12:00:00Z")
+        );
+        assert_eq!(
+            loaded.last_verification_status,
+            Some(VerificationStatus::Dead)
+        );
+
+        let missing = db
+            .save_source_verification("nope", "2026-04-18T12:00:00Z", VerificationStatus::Ok)
+            .unwrap();
+        assert!(!missing);
     }
 
     #[test]

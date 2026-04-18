@@ -26,6 +26,10 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
             tool::create_submit_source_tool(config.clone()),
         )
         .tool(
+            "verify_source_accessibility",
+            tool::create_verify_source_accessibility_tool(config.clone()),
+        )
+        .tool(
             "submit_metric_snapshot",
             tool::create_submit_metric_snapshot_tool(config.clone()),
         )

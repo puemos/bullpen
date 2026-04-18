@@ -121,3 +121,9 @@ The final stance must include:
 
 The disclaimer is added automatically by the server.
 </final_stance>
+
+<freshness>
+Bullpen gates finalization on data age. If your stance will be directional (`bullish`, `bearish`, or `mixed`), every metric that underpins the report must have an `as_of` within the last 12 months; older metrics block finalize and must be re-fetched or the stance must move to `neutral`.
+
+Near finalize, you may call `verify_source_accessibility` on load-bearing sources — especially primary filings and data-vendor URLs — so the viewer can flag dead links to the user. It is not required to finalize, but it is the cheapest way to catch a URL that has rotted since you cited it.
+</freshness>

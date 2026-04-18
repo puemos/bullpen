@@ -1,3 +1,4 @@
+use crate::domain::freshness::VerificationStatus;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -201,6 +202,10 @@ pub struct Source {
     pub retrieved_at: String,
     pub reliability: SourceReliability,
     pub summary: String,
+    #[serde(default)]
+    pub last_verified_at: Option<String>,
+    #[serde(default)]
+    pub last_verification_status: Option<VerificationStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

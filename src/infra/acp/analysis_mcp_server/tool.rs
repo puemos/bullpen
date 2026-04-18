@@ -4,7 +4,7 @@ use crate::domain::{
     BlockKind, CounterThesis, CriterionVerdict, DecisionCriterionAnswer, Entity, FinalStance,
     Importance, MethodologyNote, MetricSnapshot, Projection, ProjectionScenario,
     RESEARCH_DISCLAIMER, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
-    StructuredArtifact, UncertaintyEntry,
+    StructuredArtifact, UncertaintyEntry, VerificationStatus, age_days,
 };
 use crate::infra::db::Database;
 use pmcp::{SimpleTool, ToolHandler};
@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 fn now() -> String {
     chrono::Utc::now().to_rfc3339()
@@ -257,6 +258,8 @@ pub fn create_submit_source_tool(config: Arc<ServerConfig>) -> impl ToolHandler 
                     .and_then(|v| SourceReliability::from_str(v).ok())
                     .unwrap_or_default(),
                 summary: input.summary,
+                last_verified_at: None,
+                last_verification_status: None,
             };
             db(&config)
                 .map_err(|err| pmcp::Error::Internal(err.to_string()))?
@@ -280,6 +283,102 @@ pub fn create_submit_source_tool(config: Arc<ServerConfig>) -> impl ToolHandler 
             "summary": { "type": "string" }
         }
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct VerifySourceAccessibilityArgs {
+    source_id: String,
+}
+
+/// Issue a bounded HEAD (falling back to a 1-KB GET) against a previously
+/// submitted source URL. Outbound HTTP happens on the user's machine only —
+/// there is no Bullpen-hosted proxy. Persists the outcome on the source row
+/// so the UI can flag dead links without re-hitting the network.
+pub fn create_verify_source_accessibility_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("verify_source_accessibility", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: VerifySourceAccessibilityArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            let source = database
+                .get_source(&input.source_id)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?
+                .ok_or_else(|| {
+                    pmcp::Error::Validation(format!(
+                        "source_id: unknown source '{}' — submit_source it first",
+                        input.source_id
+                    ))
+                })?;
+            let Some(url) = source.url.clone() else {
+                return Err(pmcp::Error::Validation(
+                    "source has no url to verify".to_string(),
+                ));
+            };
+
+            let (status, final_url) = probe_url(&url).await;
+            let verified_at = now();
+            database
+                .save_source_verification(&source.id, &verified_at, status)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+
+            let age = age_days(&source.retrieved_at, chrono::Utc::now());
+            Ok(json!({
+                "status": status.to_string(),
+                "final_url": final_url,
+                "age_days_since_retrieved": age,
+            }))
+        })
+    })
+    .with_description("Verify that a previously submitted source URL is still reachable. Runs HEAD (fallback 1-KB GET) from the user's machine and records the outcome so the UI can flag dead links.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["source_id"],
+        "properties": {
+            "source_id": { "type": "string" }
+        }
+    }))
+}
+
+async fn probe_url(url: &str) -> (VerificationStatus, Option<String>) {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+    else {
+        return (VerificationStatus::Dead, None);
+    };
+    let classify = |resp: reqwest::Response| {
+        let final_url = resp.url().to_string();
+        let code = resp.status();
+        let status = if code.is_success() {
+            if final_url == url {
+                VerificationStatus::Ok
+            } else {
+                VerificationStatus::Redirect
+            }
+        } else if code.as_u16() == 403 || code.as_u16() == 401 {
+            VerificationStatus::Forbidden
+        } else {
+            VerificationStatus::Dead
+        };
+        (status, Some(final_url))
+    };
+    match client.head(url).send().await {
+        Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+            return classify(resp);
+        }
+        Ok(resp) if matches!(resp.status().as_u16(), 403 | 401) => {
+            return classify(resp);
+        }
+        // Fall through — some servers reject HEAD; try a ranged GET.
+        _ => {}
+    }
+    match client.get(url).header("Range", "bytes=0-1023").send().await {
+        Ok(resp) => classify(resp),
+        Err(err) if err.is_timeout() => (VerificationStatus::Timeout, None),
+        Err(_) => (VerificationStatus::Dead, None),
+    }
 }
 
 #[derive(Debug, Deserialize)]
