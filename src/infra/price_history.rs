@@ -105,7 +105,16 @@ struct Chart {
 }
 
 #[derive(Debug, Deserialize)]
+struct ChartMeta {
+    #[serde(rename = "shortName")]
+    short_name: Option<String>,
+    #[serde(rename = "longName")]
+    long_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChartResult {
+    meta: ChartMeta,
     indicators: Indicators,
 }
 
@@ -119,6 +128,84 @@ struct Indicators {
 struct Quote {
     #[serde(default)]
     close: Vec<Option<f64>>,
+}
+
+struct NameCacheEntry {
+    name: Option<String>,
+    inserted_at: Instant,
+}
+
+type NameCache = std::collections::HashMap<String, NameCacheEntry>;
+
+fn name_cache() -> &'static Mutex<NameCache> {
+    static CACHE: OnceLock<Mutex<NameCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(NameCache::new()))
+}
+
+fn name_cache_get(key: &str) -> Option<Option<String>> {
+    let guard = name_cache().lock().ok()?;
+    let entry = guard.get(key)?;
+    if entry.inserted_at.elapsed() > CACHE_TTL {
+        return None;
+    }
+    Some(entry.name.clone())
+}
+
+fn name_cache_put(key: String, name: Option<String>) {
+    if let Ok(mut guard) = name_cache().lock() {
+        guard.insert(
+            key,
+            NameCacheEntry {
+                name,
+                inserted_at: Instant::now(),
+            },
+        );
+    }
+}
+
+/// Fetch a human-readable company/fund name for a symbol.
+/// Uses the same Yahoo Finance chart endpoint as sparklines, extracting `meta.shortName`.
+/// Returns `None` on any network or parse failure.
+pub async fn fetch_symbol_name(symbol: &str, market: Option<&str>) -> Result<Option<String>> {
+    let trimmed = symbol.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let key = cache_key(trimmed, market);
+    if let Some(cached) = name_cache_get(&key) {
+        return Ok(cached);
+    }
+
+    let ticker = yahoo_symbol(trimmed, market);
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+        urlencode(&ticker)
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .user_agent(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+        )
+        .build()?;
+
+    let response = client.get(&url).send().await?;
+    if !response.status().is_success() {
+        name_cache_put(key, None);
+        return Ok(None);
+    }
+
+    let body: ChartResponse = response.json().await?;
+    let name = body
+        .chart
+        .result
+        .and_then(|r| r.into_iter().next())
+        .and_then(|res| res.meta.short_name.or(res.meta.long_name));
+
+    name_cache_put(key, name.clone());
+    Ok(name)
 }
 
 pub async fn fetch_price_history(symbol: &str, market: Option<&str>) -> Result<Vec<f64>> {
@@ -154,10 +241,15 @@ pub async fn fetch_price_history(symbol: &str, market: Option<&str>) -> Result<V
     }
 
     let body: ChartResponse = response.json().await?;
-    let closes: Vec<f64> = body
-        .chart
-        .result
-        .and_then(|results| results.into_iter().next())
+    let result = body.chart.result.and_then(|r| r.into_iter().next());
+
+    // Populate the name cache for free while we have the response.
+    if let Some(ref res) = result {
+        let name = res.meta.short_name.clone().or(res.meta.long_name.clone());
+        name_cache_put(key.clone(), name);
+    }
+
+    let closes: Vec<f64> = result
         .and_then(|res| res.indicators.quote.into_iter().next())
         .map(|quote| quote.close.into_iter().flatten().collect())
         .unwrap_or_default();

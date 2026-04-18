@@ -4292,4 +4292,193 @@ pub(crate) mod tests {
             "expected missing allocation review error, got {errors:?}"
         );
     }
+
+    #[test]
+    fn portfolio_import_stores_enriched_name() {
+        // Simulate what the command handler does: import once without a name
+        // (raw CSV has no name column), then re-import with the name filled in
+        // by fetch_symbol_name. Verifies the upsert persists the enriched name.
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+
+        let base_row = PortfolioCsvRow {
+            row_index: 2,
+            raw: HashMap::from([("Symbol".to_string(), "AAPL".to_string())]),
+            symbol: Some("AAPL".into()),
+            market: Some("NASDAQ".into()),
+            name: None,
+            asset_type: None,
+            quantity: Some(10.0),
+            price: Some(213.0),
+            market_value: None,
+            cost_basis: None,
+            gross_amount: None,
+            fees: None,
+            taxes: None,
+            currency: Some("USD".into()),
+            trade_date: None,
+            action: None,
+            notes: None,
+        };
+
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("Test".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "import.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![base_row.clone()],
+        };
+
+        // First import — no name.
+        let first = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(first.imported_count, 1);
+        assert_eq!(first.holdings[0].name, None);
+
+        // Second import — name enriched by metadata fetch.
+        let enriched = PortfolioCsvImportInput {
+            rows: vec![PortfolioCsvRow {
+                name: Some("Apple Inc.".into()),
+                ..base_row
+            }],
+            ..input
+        };
+        let second = db.import_portfolio_csv(&enriched).unwrap();
+        assert_eq!(second.imported_count, 1);
+        assert_eq!(second.holdings[0].name.as_deref(), Some("Apple Inc."));
+    }
+
+    #[test]
+    fn portfolio_import_multi_market_multi_currency_all_imported() {
+        // Represents the international CSV use-case: VOD on LSE (GBP),
+        // SAP on XETRA (EUR), SHOP on TSX (CAD). All rows must import cleanly
+        // with correct market and currency normalisation.
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+
+        fn row(
+            idx: usize,
+            symbol: &str,
+            market: &str,
+            qty: f64,
+            price: f64,
+            currency: &str,
+            name: &str,
+        ) -> PortfolioCsvRow {
+            PortfolioCsvRow {
+                row_index: idx,
+                raw: HashMap::new(),
+                symbol: Some(symbol.into()),
+                market: Some(market.into()),
+                name: Some(name.into()),
+                asset_type: None,
+                quantity: Some(qty),
+                price: Some(price),
+                market_value: None,
+                cost_basis: None,
+                gross_amount: None,
+                fees: None,
+                taxes: None,
+                currency: Some(currency.into()),
+                trade_date: None,
+                action: None,
+                notes: None,
+            }
+        }
+
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("International".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "international.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![
+                row(2, "VOD", "LSE", 500.0, 65.50, "GBP", "Vodafone Group Plc"),
+                row(3, "SAP", "XETRA", 10.0, 215.30, "EUR", "SAP SE"),
+                row(4, "SHOP", "TSX", 25.0, 108.40, "CAD", "Shopify Inc."),
+            ],
+        };
+
+        let result = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(result.imported_count, 3, "all rows should import");
+        assert_eq!(result.review_count, 0);
+
+        let detail = db
+            .get_portfolio_detail(&result.portfolio_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.holdings.len(), 3);
+
+        let vod = detail.holdings.iter().find(|h| h.symbol == "VOD").unwrap();
+        assert_eq!(vod.market.as_deref(), Some("LSE"));
+        assert_eq!(vod.name.as_deref(), Some("Vodafone Group Plc"));
+
+        let sap = detail.holdings.iter().find(|h| h.symbol == "SAP").unwrap();
+        assert_eq!(sap.market.as_deref(), Some("XETRA"));
+        assert_eq!(sap.name.as_deref(), Some("SAP SE"));
+    }
+
+    #[test]
+    fn portfolio_import_name_upsert_overwrites_null() {
+        // A row initially imported with name=None (raw broker CSV) then
+        // re-imported with a name from the metadata fetch must overwrite.
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+
+        let base = PortfolioCsvRow {
+            row_index: 2,
+            raw: HashMap::new(),
+            symbol: Some("VOD".into()),
+            market: Some("LSE".into()),
+            name: None,
+            asset_type: None,
+            quantity: Some(500.0),
+            price: Some(65.50),
+            market_value: None,
+            cost_basis: None,
+            gross_amount: None,
+            fees: None,
+            taxes: None,
+            currency: Some("GBP".into()),
+            trade_date: None,
+            action: None,
+            notes: None,
+        };
+
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("P".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "import.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![base.clone()],
+        };
+
+        let first = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(first.imported_count, 1);
+        assert_eq!(first.holdings[0].name, None);
+
+        let with_name = PortfolioCsvImportInput {
+            rows: vec![PortfolioCsvRow {
+                name: Some("Vodafone Group Plc".into()),
+                ..base
+            }],
+            ..input
+        };
+        let second = db.import_portfolio_csv(&with_name).unwrap();
+        assert_eq!(second.imported_count, 1);
+        assert_eq!(
+            second.holdings[0].name.as_deref(),
+            Some("Vodafone Group Plc")
+        );
+    }
 }

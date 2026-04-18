@@ -133,8 +133,20 @@ pub async fn get_portfolio_detail(
 #[tauri::command]
 pub async fn import_portfolio_csv(
     state: State<'_, AppState>,
-    input: PortfolioCsvImportInput,
+    mut input: PortfolioCsvImportInput,
 ) -> Result<PortfolioImportResult, CommandError> {
+    for row in input.rows.iter_mut() {
+        if row.name.is_none() {
+            if let Some(ref symbol) = row.symbol.clone() {
+                if let Ok(Some(name)) =
+                    crate::infra::price_history::fetch_symbol_name(symbol, row.market.as_deref())
+                        .await
+                {
+                    row.name = Some(name);
+                }
+            }
+        }
+    }
     let db = &state.db;
     Ok(db.import_portfolio_csv(&input)?)
 }

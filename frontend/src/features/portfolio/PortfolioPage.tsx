@@ -317,8 +317,12 @@ function PortfolioView({
         rows,
       };
       const result = await importPortfolioCsv(input);
+      const reviewNote =
+        result.review_count > 0
+          ? ` · ${result.review_count} need review: ${result.warnings.map((w) => w.message).join("; ")}`
+          : "";
       toast.success("Snapshot updated", {
-        description: `${result.imported_count} rows imported, ${result.review_count} need review.`,
+        description: `${result.imported_count} rows imported${reviewNote}`,
       });
       const fresh = await getPortfolioDetail(result.portfolio_id);
       setState({ selectedPortfolio: fresh });
@@ -617,25 +621,43 @@ function PortfolioMeta({
     baseCurrency,
     `${String(holdingCount).padStart(2, "0")} holdings`,
   ];
-  if (totals.length > 0) {
-    segments.push(totals.map(([code, sum]) => formatMoney(sum, code)).join(" · "));
+  if (totals.length === 1) {
+    segments.push(formatMoney(totals[0][1], totals[0][0]));
+  } else if (totals.length > 1) {
+    segments.push(`${totals.length} currencies`);
   }
   if (lastImportAt) {
     segments.push(`Updated ${formatDate(lastImportAt)}`);
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
-      {segments.map((segment, index) => (
-        <span key={segment} className="flex items-center gap-3">
-          {index > 0 && (
-            <span aria-hidden className="text-muted-foreground/50">
-              ·
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+        {segments.map((segment, index) => (
+          <span key={segment} className="flex items-center gap-3">
+            {index > 0 && (
+              <span aria-hidden className="text-muted-foreground/50">
+                ·
+              </span>
+            )}
+            <span className="tabular-nums">{segment}</span>
+          </span>
+        ))}
+      </div>
+      {totals.length > 1 && (
+        <div className="flex flex-wrap items-center gap-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/60">
+          {totals.map(([code, sum], index) => (
+            <span key={code} className="flex items-center gap-3">
+              {index > 0 && (
+                <span aria-hidden className="text-muted-foreground/30">
+                  ·
+                </span>
+              )}
+              <span className="tabular-nums">{formatMoney(sum, code)}</span>
             </span>
-          )}
-          <span className="tabular-nums">{segment}</span>
-        </span>
-      ))}
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -993,7 +1015,9 @@ function FieldLabel({ label }: { label: string }) {
 }
 
 function parseSnapshotRows(text: string): PortfolioCsvRow[] {
-  const records = parseCsvRecords(text);
+  // Drop leading blank lines so a stray newline before the header doesn't
+  // prevent header detection.
+  const records = parseCsvRecords(text).filter((r) => r.some((c) => c.trim()));
   if (records.length === 0) return [];
   const headers = records[0].map((header, index) => header.trim() || `col_${index + 1}`);
   const looksLikeHeader = headers.some((header) => inferField(header) !== null);
@@ -1031,7 +1055,12 @@ function parseSnapshotRows(text: string): PortfolioCsvRow[] {
 }
 
 function defaultHeaders(count: number): string[] {
-  const names = ["symbol", "quantity", "price", "currency"];
+  // ≥5-column CSVs commonly include a market/exchange column between symbol
+  // and quantity (the typical broker export format).
+  const names =
+    count >= 5
+      ? ["symbol", "market", "quantity", "price", "currency"]
+      : ["symbol", "quantity", "price", "currency"];
   return Array.from({ length: count }, (_, index) => names[index] ?? `col_${index + 1}`);
 }
 
