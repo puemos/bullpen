@@ -47,6 +47,7 @@ fn main() {
             commands::update_settings,
             commands::get_all_analyses,
             commands::get_analysis_report,
+            commands::get_stance_stale_metrics,
             commands::delete_analysis,
             commands::create_analysis,
             commands::generate_analysis,

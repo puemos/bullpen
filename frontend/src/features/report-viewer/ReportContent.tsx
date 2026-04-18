@@ -1,7 +1,11 @@
 import { ChartLineUp } from "@phosphor-icons/react";
-import { useCallback, useMemo } from "react";
-import { ageDaysFrom, Eyebrow, SectionHeader } from "@/components/ui/editorial";
-import { getAnalysisReport, setActiveRun } from "@/shared/api/commands";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Eyebrow, SectionHeader } from "@/components/ui/editorial";
+import {
+  getAnalysisReport,
+  getStanceStaleMetrics,
+  setActiveRun,
+} from "@/shared/api/commands";
 import { setSelectedReport, useAppStore } from "@/store";
 import type { AnalysisReport, Entity, Source } from "@/types";
 import { AnalysisSection } from "./AnalysisSection";
@@ -11,8 +15,6 @@ import { ProjectionView } from "./ProjectionView";
 import { ReportHero } from "./ReportHero";
 import { SourceList } from "./SourceList";
 import { StructuredArtifactView } from "./StructuredArtifactView";
-
-const STANCE_STALE_METRIC_DAYS = 365;
 
 export function ReportContent() {
   const report = useAppStore((state) => state.selectedReport);
@@ -237,7 +239,23 @@ function sectionNumber(flags: SectionFlags, which: SectionKey): string {
 }
 
 function StaleStanceBanner({ report }: { report: AnalysisReport }) {
-  const stale = useMemo(() => findStanceStaleMetrics(report), [report]);
+  const [stale, setStale] = useState<string[]>([]);
+  const analysisId = report.analysis.id;
+  const activeRunId = report.analysis.active_run_id;
+  useEffect(() => {
+    let cancelled = false;
+    getStanceStaleMetrics(analysisId, activeRunId ?? undefined)
+      .then((names) => {
+        if (!cancelled) setStale(names);
+      })
+      .catch(() => {
+        if (!cancelled) setStale([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisId, activeRunId]);
+
   if (stale.length === 0) return null;
   return (
     <section className="mb-8 border-t border-border pt-4">
@@ -248,8 +266,8 @@ function StaleStanceBanner({ report }: { report: AnalysisReport }) {
         <div className="flex flex-col gap-1">
           <Eyebrow className="text-destructive">Data freshness</Eyebrow>
           <span className="text-[14px] font-medium leading-snug">
-            {stale.length} metric{stale.length === 1 ? "" : "s"} used in this stance are over 12
-            months old.
+            {stale.length} metric{stale.length === 1 ? "" : "s"} used in this stance are over the
+            freshness cap.
           </span>
         </div>
         <span
@@ -261,32 +279,6 @@ function StaleStanceBanner({ report }: { report: AnalysisReport }) {
       </a>
     </section>
   );
-}
-
-function findStanceStaleMetrics(report: AnalysisReport): string[] {
-  if (!report.final_stance) return [];
-  if (
-    report.final_stance.stance === "neutral" ||
-    report.final_stance.stance === "insufficient_data"
-  ) {
-    return [];
-  }
-  const cited = new Set<string>();
-  for (const block of report.blocks) for (const id of block.evidence_ids) cited.add(id);
-  for (const p of report.projections) for (const id of p.evidence_ids) cited.add(id);
-  for (const a of report.artifacts) for (const id of a.evidence_ids) cited.add(id);
-  for (const c of report.counter_theses)
-    for (const id of c.supporting_evidence_ids) cited.add(id);
-  for (const a of report.decision_criterion_answers)
-    for (const id of a.supporting_evidence_ids) cited.add(id);
-
-  const stale: string[] = [];
-  for (const metric of report.metrics) {
-    if (!cited.has(metric.source_id)) continue;
-    const age = ageDaysFrom(metric.as_of);
-    if (age !== null && age > STANCE_STALE_METRIC_DAYS) stale.push(metric.metric);
-  }
-  return stale;
 }
 
 function DecisionCriteria({ criteria }: { criteria: string[] }) {

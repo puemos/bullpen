@@ -2,8 +2,8 @@ use crate::domain::{
     Analysis, AnalysisBlock, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus,
     AnalysisSummary, ArtifactKind, BlockKind, CounterThesis, CriterionVerdict,
     DecisionCriterionAnswer, Entity, FinalStance, Importance, MethodologyNote, MetricSnapshot,
-    Projection, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
-    StructuredArtifact, UncertaintyEntry, VerificationStatus, age_days, stance_max_metric_age_days,
+    Projection, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceFreshnessInputs,
+    StanceKind, StructuredArtifact, UncertaintyEntry, VerificationStatus, stale_stance_metrics,
 };
 use crate::infra::progress::ProgressEventPayload;
 
@@ -1167,19 +1167,23 @@ impl Database {
             }
         }
 
-        if let Some(stance) = &final_stance {
+        if final_stance.is_some() {
             let metrics = self.get_metrics(run_id)?;
-            let mut freshness_errors = validate_stance_metric_freshness(&StanceFreshnessCheck {
-                stance,
+            let inputs = StanceFreshnessInputs {
+                stance: final_stance.as_ref(),
                 blocks: &blocks,
                 projections: &projections,
                 artifacts: &artifacts,
                 counter_theses: &counter_theses,
                 criterion_answers: &criterion_answers,
                 metrics: &metrics,
-                now: chrono::Utc::now(),
-            });
-            errors.append(&mut freshness_errors);
+            };
+            for stale in stale_stance_metrics(&inputs, chrono::Utc::now()) {
+                errors.push(format!(
+                    "stance-cited metric '{}' from source '{}' is {}d old (max {}d). Re-fetch or downgrade stance to Neutral.",
+                    stale.metric, stale.source_id, stale.age_days, stale.max_days
+                ));
+            }
         }
 
         for projection in &projections {
@@ -1681,77 +1685,6 @@ fn required_artifacts_for(intent: AnalysisIntent) -> Vec<ArtifactKind> {
         }
         _ => Vec::new(),
     }
-}
-
-/// Inputs to the stance-metric-freshness finalize gate. Groups the evidence
-/// graph the validator walks so the function signature stays readable as we
-/// add more sources of citation (v2 will likely include research-plan-level
-/// assertions, etc.).
-pub(crate) struct StanceFreshnessCheck<'a> {
-    pub stance: &'a FinalStance,
-    pub blocks: &'a [AnalysisBlock],
-    pub projections: &'a [Projection],
-    pub artifacts: &'a [StructuredArtifact],
-    pub counter_theses: &'a [CounterThesis],
-    pub criterion_answers: &'a [DecisionCriterionAnswer],
-    pub metrics: &'a [MetricSnapshot],
-    pub now: chrono::DateTime<chrono::Utc>,
-}
-
-/// Reject finalization when any metric whose source is cited by the final
-/// stance's evidence graph is older than the configured threshold. Scoped to
-/// directional stances (`Bullish` / `Bearish` / `Mixed`) — neutral and
-/// insufficient-data reports can stand on stale data because they are not
-/// making a call.
-///
-/// The stance itself does not carry `evidence_ids`; it's derived from the
-/// other typed blocks and projections. We approximate the "stance-cited"
-/// evidence set as the union of evidence referenced by any block,
-/// projection, artifact, counter-thesis, or criterion answer in the run.
-/// Widening the set is the safe direction: a stale primary-source metric
-/// that underpins any part of the report is worth flagging.
-pub(crate) fn validate_stance_metric_freshness(check: &StanceFreshnessCheck<'_>) -> Vec<String> {
-    if matches!(
-        check.stance.stance,
-        StanceKind::Neutral | StanceKind::InsufficientData
-    ) {
-        return Vec::new();
-    }
-
-    let mut cited: HashSet<&str> = HashSet::new();
-    for block in check.blocks {
-        cited.extend(block.evidence_ids.iter().map(String::as_str));
-    }
-    for projection in check.projections {
-        cited.extend(projection.evidence_ids.iter().map(String::as_str));
-    }
-    for artifact in check.artifacts {
-        cited.extend(artifact.evidence_ids.iter().map(String::as_str));
-    }
-    for counter in check.counter_theses {
-        cited.extend(counter.supporting_evidence_ids.iter().map(String::as_str));
-    }
-    for answer in check.criterion_answers {
-        cited.extend(answer.supporting_evidence_ids.iter().map(String::as_str));
-    }
-
-    let max_days = stance_max_metric_age_days();
-    let mut errors = Vec::new();
-    for metric in check.metrics {
-        if !cited.contains(metric.source_id.as_str()) {
-            continue;
-        }
-        let Some(age) = age_days(&metric.as_of, check.now) else {
-            continue;
-        };
-        if age > max_days {
-            errors.push(format!(
-                "stance-cited metric '{}' from source '{}' is {}d old (max {}d). Re-fetch or downgrade stance to Neutral.",
-                metric.metric, metric.source_id, age, max_days
-            ));
-        }
-    }
-    errors
 }
 
 fn source_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Source> {

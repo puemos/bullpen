@@ -5,7 +5,7 @@ pub use error::CommandError;
 
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
-    RunContext,
+    RunContext, stance_stale_metric_names,
 };
 use crate::infra::acp::analysis_generator::{
     AcpCancelled, GenerateAnalysisInput, generate_with_acp,
@@ -71,6 +71,23 @@ pub async fn get_analysis_report(
 ) -> Result<Option<AnalysisReport>, CommandError> {
     let db = &state.db;
     Ok(db.get_report(&analysis_id, run_id.as_deref())?)
+}
+
+/// Names of metrics whose source is cited by the stance's evidence graph
+/// and whose `as_of` is older than the configured cap. The UI banner in the
+/// report viewer consumes this directly — the domain logic (evidence walk
+/// + threshold) lives in `domain::freshness`, not in TS.
+#[tauri::command]
+pub async fn get_stance_stale_metrics(
+    state: State<'_, AppState>,
+    analysis_id: String,
+    run_id: Option<String>,
+) -> Result<Vec<String>, CommandError> {
+    let db = &state.db;
+    let Some(report) = db.get_report(&analysis_id, run_id.as_deref())? else {
+        return Ok(Vec::new());
+    };
+    Ok(stance_stale_metric_names(&report, chrono::Utc::now()))
 }
 
 #[tauri::command]

@@ -31,6 +31,13 @@ export async function getAnalysisReport(
   return invoke("get_analysis_report", { analysisId, runId: runId ?? null });
 }
 
+export async function getStanceStaleMetrics(
+  analysisId: string,
+  runId?: string,
+): Promise<string[]> {
+  return invoke("get_stance_stale_metrics", { analysisId, runId: runId ?? null });
+}
+
 export async function deleteAnalysis(analysisId: string): Promise<void> {
   return invoke("delete_analysis", { analysisId });
 }

@@ -1,5 +1,10 @@
+use crate::domain::analysis::{
+    AnalysisBlock, AnalysisReport, CounterThesis, DecisionCriterionAnswer, FinalStance,
+    MetricSnapshot, Projection, StanceKind, StructuredArtifact,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
 
@@ -119,6 +124,115 @@ pub fn stance_max_metric_age_days() -> i64 {
         .and_then(|v| v.parse::<i64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(DEFAULT_STANCE_MAX_METRIC_AGE_DAYS)
+}
+
+/// One flagged metric cited by the stance's evidence graph with an `as_of`
+/// older than [`stance_max_metric_age_days`]. `age_days` and `max_days` are
+/// kept with the entry so the finalize gate can surface them verbatim in its
+/// error message.
+#[derive(Debug, Clone)]
+pub struct StaleStanceMetric {
+    pub metric: String,
+    pub source_id: String,
+    pub age_days: i64,
+    pub max_days: i64,
+}
+
+/// Inputs to the stance-freshness walk. Grouped so callers don't wire up a
+/// 7-argument function and so v2 extensions (research-plan-level citations,
+/// etc.) can extend the struct without touching every call site.
+pub struct StanceFreshnessInputs<'a> {
+    pub stance: Option<&'a FinalStance>,
+    pub blocks: &'a [AnalysisBlock],
+    pub projections: &'a [Projection],
+    pub artifacts: &'a [StructuredArtifact],
+    pub counter_theses: &'a [CounterThesis],
+    pub criterion_answers: &'a [DecisionCriterionAnswer],
+    pub metrics: &'a [MetricSnapshot],
+}
+
+impl<'a> StanceFreshnessInputs<'a> {
+    #[must_use]
+    pub fn from_report(report: &'a AnalysisReport) -> Self {
+        Self {
+            stance: report.final_stance.as_ref(),
+            blocks: &report.blocks,
+            projections: &report.projections,
+            artifacts: &report.artifacts,
+            counter_theses: &report.counter_theses,
+            criterion_answers: &report.decision_criterion_answers,
+            metrics: &report.metrics,
+        }
+    }
+}
+
+/// Stance-cited metrics older than the configured freshness cap. Returns an
+/// empty vec for neutral / insufficient-data stances (those are not making a
+/// call, so stale data is not a hazard).
+///
+/// Shared by the finalize gate (rejects the run) and the report viewer
+/// (loud banner). Keeping the evidence-graph walk in one place prevents
+/// Rust/TS from drifting as the graph grows.
+#[must_use]
+pub fn stale_stance_metrics(
+    inputs: &StanceFreshnessInputs<'_>,
+    now: DateTime<Utc>,
+) -> Vec<StaleStanceMetric> {
+    let Some(stance) = inputs.stance else {
+        return Vec::new();
+    };
+    if matches!(
+        stance.stance,
+        StanceKind::Neutral | StanceKind::InsufficientData
+    ) {
+        return Vec::new();
+    }
+
+    let mut cited: HashSet<&str> = HashSet::new();
+    for block in inputs.blocks {
+        cited.extend(block.evidence_ids.iter().map(String::as_str));
+    }
+    for projection in inputs.projections {
+        cited.extend(projection.evidence_ids.iter().map(String::as_str));
+    }
+    for artifact in inputs.artifacts {
+        cited.extend(artifact.evidence_ids.iter().map(String::as_str));
+    }
+    for counter in inputs.counter_theses {
+        cited.extend(counter.supporting_evidence_ids.iter().map(String::as_str));
+    }
+    for answer in inputs.criterion_answers {
+        cited.extend(answer.supporting_evidence_ids.iter().map(String::as_str));
+    }
+
+    let max_days = stance_max_metric_age_days();
+    let mut out = Vec::new();
+    for metric in inputs.metrics {
+        if !cited.contains(metric.source_id.as_str()) {
+            continue;
+        }
+        let Some(age) = age_days(&metric.as_of, now) else {
+            continue;
+        };
+        if age > max_days {
+            out.push(StaleStanceMetric {
+                metric: metric.metric.clone(),
+                source_id: metric.source_id.clone(),
+                age_days: age,
+                max_days,
+            });
+        }
+    }
+    out
+}
+
+/// Report-level convenience — returns only the metric names for UI banners.
+#[must_use]
+pub fn stance_stale_metric_names(report: &AnalysisReport, now: DateTime<Utc>) -> Vec<String> {
+    stale_stance_metrics(&StanceFreshnessInputs::from_report(report), now)
+        .into_iter()
+        .map(|m| m.metric)
+        .collect()
 }
 
 #[cfg(test)]
