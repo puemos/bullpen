@@ -2,7 +2,7 @@ import { Eyebrow, SectionHeader } from "@/components/ui/editorial";
 import { formatMetricValue } from "@/features/report-viewer/MetricList";
 import { cn } from "@/lib/utils";
 import type { AnalysisReport, ScenarioLabel } from "@/types";
-import { gridCols } from "./CompareHeader";
+import { gridCols, primaryEntityFor, projectionFor } from "./CompareHeader";
 
 const LABELS: ScenarioLabel[] = ["bull", "base", "bear"];
 
@@ -30,7 +30,7 @@ export function CompareProjectionGrid({
             <Eyebrow>Scenario</Eyebrow>
           </div>
           {ids.map((id, index) => {
-            const entity = reports[id]?.entities?.[0];
+            const entity = primaryEntityFor(reports[id]);
             return (
               <div
                 key={id}
@@ -55,7 +55,9 @@ export function CompareProjectionGrid({
               </span>
             </div>
             {ids.map((id, index) => {
-              const projection = reports[id]?.projections?.[0];
+              const report = reports[id];
+              const entity = primaryEntityFor(report);
+              const projection = projectionFor(report, entity?.id);
               const scenario = projection?.scenarios.find((s) => s.label === label);
               if (!scenario || !projection) {
                 return (
@@ -71,6 +73,10 @@ export function CompareProjectionGrid({
                 );
               }
               const { value, suffix } = formatMetricValue(scenario.target_value, projection.unit);
+              // Compute the pct live from target/current so the display
+              // doesn't depend on the (historically inconsistent) stored
+              // `upside_pct`. Unit-bug insurance.
+              const pct = derivedUpsidePct(scenario.target_value, projection.current_value);
               return (
                 <div
                   key={id}
@@ -90,9 +96,11 @@ export function CompareProjectionGrid({
                     )}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-                      {formatPct(scenario.upside_pct, true)}
-                    </span>
+                    {pct !== null && (
+                      <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
+                        {formatPctFraction(pct, true)}
+                      </span>
+                    )}
                     <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
                       p={Math.round(scenario.probability * 100)}%
                     </span>
@@ -107,9 +115,13 @@ export function CompareProjectionGrid({
   );
 }
 
-function formatPct(value: number, signed: boolean): string {
-  const n = value * 100;
-  const rounded = Math.round(n * 10) / 10;
+function derivedUpsidePct(target: number, current: number): number | null {
+  if (!Number.isFinite(current) || Math.abs(current) < 1e-9) return null;
+  return (target - current) / current;
+}
+
+function formatPctFraction(fraction: number, signed: boolean): string {
+  const rounded = Math.round(fraction * 1000) / 10;
   const body = `${Math.abs(rounded).toFixed(1)}%`;
   if (!signed) return body;
   return rounded > 0 ? `+${body}` : rounded < 0 ? `-${body}` : body;

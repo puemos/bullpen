@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Eyebrow } from "@/components/ui/editorial";
 import { setCompareMode, setState, useAppStore } from "@/store";
 import type { AnalysisReport } from "@/types";
@@ -78,24 +79,37 @@ function ThesisRow({
     >
       {ids.map((id, index) => {
         const thesis = reports[id]?.blocks.find((b) => b.kind === "thesis");
-        const body = thesis?.body ?? "";
-        const clipped = body.length > CLIP_THESIS_CHARS ? `${body.slice(0, CLIP_THESIS_CHARS)}…` : body;
         return (
-          <div
+          <ThesisCell
             key={id}
-            className={
-              index === 0
-                ? "px-4 py-5"
-                : "border-l border-border px-4 py-5"
-            }
-          >
-            <Eyebrow>Thesis</Eyebrow>
-            <p className="mt-2 text-[13.5px] leading-[1.55] text-foreground/85">
-              {clipped || <span className="text-muted-foreground/60">— no thesis block —</span>}
-            </p>
-          </div>
+            body={thesis?.body ?? ""}
+            firstColumn={index === 0}
+          />
         );
       })}
+    </div>
+  );
+}
+
+function ThesisCell({ body, firstColumn }: { body: string; firstColumn: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const clippable = body.length > CLIP_THESIS_CHARS;
+  const shown = !clippable || expanded ? body : `${body.slice(0, CLIP_THESIS_CHARS)}…`;
+  return (
+    <div className={firstColumn ? "px-4 py-5" : "border-l border-border px-4 py-5"}>
+      <Eyebrow>Thesis</Eyebrow>
+      <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-[1.55] text-foreground/85">
+        {shown || <span className="text-muted-foreground/60">— no thesis block —</span>}
+      </p>
+      {clippable && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {expanded ? "Collapse ↑" : "Read more ↓"}
+        </button>
+      )}
     </div>
   );
 }

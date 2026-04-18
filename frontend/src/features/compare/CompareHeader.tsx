@@ -1,7 +1,39 @@
 import { Eyebrow } from "@/components/ui/editorial";
 import { getStanceAccent } from "@/features/report-viewer/badge-styles";
 import { cn } from "@/lib/utils";
-import type { AnalysisReport } from "@/types";
+import type { AnalysisReport, Entity, Projection } from "@/types";
+
+/**
+ * Pick the entity this column represents. Prefer the entity tied to the
+ * first projection (in a compare-equities report each entity has its own
+ * projection); fall back to entities[0] for single-equity reports.
+ */
+export function primaryEntityFor(report: AnalysisReport | null | undefined): Entity | undefined {
+  if (!report) return undefined;
+  const firstProjection = report.projections[0];
+  if (firstProjection) {
+    const match = report.entities.find((e) => e.id === firstProjection.entity_id);
+    if (match) return match;
+  }
+  return report.entities[0];
+}
+
+/**
+ * The projection whose entity matches the column's header entity. Prevents
+ * the compare grid from crossing wires when a report carries multiple
+ * entities + multiple projections (e.g. a compare_equities analysis).
+ */
+export function projectionFor(
+  report: AnalysisReport | null | undefined,
+  entityId: string | undefined,
+): Projection | undefined {
+  if (!report) return undefined;
+  if (entityId) {
+    const match = report.projections.find((p) => p.entity_id === entityId);
+    if (match) return match;
+  }
+  return report.projections[0];
+}
 
 export function CompareHeader({
   reports,
@@ -14,8 +46,9 @@ export function CompareHeader({
     <div className="grid border-y border-border" style={gridCols(ids.length)}>
       {ids.map((id, index) => {
         const report = reports[id];
-        const entity = report?.entities?.[0];
+        const entity = primaryEntityFor(report);
         const stance = report?.final_stance;
+        const projection = projectionFor(report, entity?.id);
         const accent = getStanceAccent(stance?.stance ?? "insufficient_data");
         return (
           <div
@@ -26,7 +59,7 @@ export function CompareHeader({
               <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <Eyebrow>{entity?.asset_type ?? "analysis"}</Eyebrow>
+              <Eyebrow>{entity?.asset_type ?? report?.analysis.intent ?? "analysis"}</Eyebrow>
             </div>
             <div className="truncate text-[18px] font-semibold leading-tight tracking-tight text-foreground">
               {entity?.symbol || entity?.name || report?.analysis.title || "—"}
@@ -45,6 +78,14 @@ export function CompareHeader({
             {stance?.horizon && (
               <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
                 {stance.horizon}
+              </span>
+            )}
+            {projection && (
+              <span
+                className="truncate font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/70"
+                title={`${projection.metric} (${projection.unit})`}
+              >
+                {projection.metric} · {projection.unit}
               </span>
             )}
           </div>
