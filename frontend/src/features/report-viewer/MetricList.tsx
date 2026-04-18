@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Eyebrow } from "@/components/ui/editorial";
+import { Eyebrow, FreshnessChip } from "@/components/ui/editorial";
 import type { Entity, MetricSnapshot, Source } from "@/types";
 import { MetricDelta } from "./MetricDelta";
 
@@ -44,6 +44,7 @@ export const MetricList = memo(function MetricList({
                     {metric.period}
                   </span>
                 )}
+                <FreshnessChip iso={metric.as_of} role="metric" />
               </div>
               {source && (
                 <div className="font-mono text-[10.5px] tabular-nums text-muted-foreground/80">
@@ -88,7 +89,7 @@ function formatNumeric(value: number): string {
   }).format(value);
 }
 
-function formatMetricValue(
+export function formatMetricValue(
   value: number,
   unit: string | null,
 ): { value: string; suffix: string | null } {

@@ -1,6 +1,6 @@
 import { ArrowUpRight } from "@phosphor-icons/react";
 import { memo } from "react";
-import { Eyebrow } from "@/components/ui/editorial";
+import { Eyebrow, FreshnessChip } from "@/components/ui/editorial";
 import { cn } from "@/lib/utils";
 import type { Source } from "@/types";
 
@@ -39,9 +39,22 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
           {source.publisher && (
             <span className="text-[12px] text-muted-foreground">{source.publisher}</span>
           )}
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground/80">
+          <FreshnessChip iso={source.retrieved_at} role="source" />
+          <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/60">
             {formatDate(source.retrieved_at)}
           </span>
+          {source.last_verification_status === "dead" && (
+            <span
+              className="font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-destructive"
+              title={
+                source.last_verified_at
+                  ? `Verified dead on ${formatDate(source.last_verified_at)}`
+                  : "Link dead"
+              }
+            >
+              LINK DEAD
+            </span>
+          )}
         </div>
         <div className="flex items-start gap-1.5 text-[14.5px] font-medium leading-snug text-foreground">
           <span className="min-w-0 flex-1 truncate">{source.title}</span>
@@ -78,7 +91,7 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
   return <div className={baseClass}>{content}</div>;
 }
 
-function ReliabilityPill({ reliability }: { reliability: Source["reliability"] }) {
+export function ReliabilityPill({ reliability }: { reliability: Source["reliability"] }) {
   const accent = reliabilityAccent(reliability);
   return (
     <span className="inline-flex items-center gap-1.5">

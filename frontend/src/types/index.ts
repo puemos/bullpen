@@ -94,6 +94,8 @@ export interface Entity {
   resolution_notes: string | null;
 }
 
+export type VerificationStatus = "ok" | "redirect" | "dead" | "timeout" | "forbidden";
+
 export interface Source {
   id: string;
   run_id: string;
@@ -104,6 +106,8 @@ export interface Source {
   retrieved_at: string;
   reliability: "primary" | "high" | "medium" | "low";
   summary: string;
+  last_verified_at?: string | null;
+  last_verification_status?: VerificationStatus | null;
 }
 
 export interface MetricSnapshot {
