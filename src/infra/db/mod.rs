@@ -1,17 +1,26 @@
 use crate::domain::{
-    Analysis, AnalysisBlock, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus,
-    AnalysisSummary, ArtifactKind, BlockKind, CounterThesis, CriterionVerdict,
-    DecisionCriterionAnswer, Entity, FinalStance, Importance, MethodologyNote, MetricSnapshot,
-    Projection, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceFreshnessInputs,
-    StanceKind, StructuredArtifact, UncertaintyEntry, VerificationStatus, stale_stance_metrics,
+    AllocationReview, Analysis, AnalysisBlock, AnalysisIntent, AnalysisReport, AnalysisRun,
+    AnalysisStatus, AnalysisSummary, ArtifactKind, BlockKind, CounterThesis, CriterionVerdict,
+    DecisionCriterionAnswer, Entity, FinalStance, HoldingReview, HoldingStance, Importance,
+    MethodologyNote, MetricSnapshot, Portfolio, PortfolioAccount, PortfolioCsvImportInput,
+    PortfolioDetail, PortfolioExpectedReturnModel, PortfolioHolding, PortfolioHoldingAccount,
+    PortfolioImportBatch, PortfolioImportKind, PortfolioImportResult, PortfolioImportWarning,
+    PortfolioModelType, PortfolioPosition, PortfolioRisk, PortfolioScenarioAnalysis,
+    PortfolioSummary, PortfolioTransaction, PortfolioTransactionAction, Projection,
+    RebalancingSuggestion, ResearchPlan, ScenarioLabel, Source, SourceReliability,
+    StanceFreshnessInputs, StanceKind, StructuredArtifact, UncertaintyEntry, VerificationStatus,
+    portfolio_holding_entity_id, stale_stance_metrics,
 };
 use crate::infra::progress::ProgressEventPayload;
 
 #[cfg(test)]
-use crate::domain::{ArtifactColumn, ProjectionScenario, RESEARCH_DISCLAIMER};
+use crate::domain::{
+    ArtifactColumn, PortfolioCsvRow, PortfolioExpectedReturnInput, PortfolioScenarioOutcome,
+    PortfolioStressCase, ProjectionScenario, RESEARCH_DISCLAIMER,
+};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -133,6 +142,7 @@ impl Database {
                 intent TEXT NOT NULL,
                 status TEXT NOT NULL,
                 active_run_id TEXT,
+                portfolio_id TEXT REFERENCES portfolios(id) ON DELETE SET NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -316,12 +326,199 @@ impl Database {
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS portfolios (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                base_currency TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_accounts (
+                id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                institution TEXT,
+                account_type TEXT,
+                base_currency TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_import_batches (
+                id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                import_kind TEXT NOT NULL,
+                imported_at TEXT NOT NULL,
+                row_count INTEGER NOT NULL,
+                imported_count INTEGER NOT NULL,
+                duplicate_count INTEGER NOT NULL,
+                review_count INTEGER NOT NULL,
+                warnings TEXT NOT NULL,
+                FOREIGN KEY(portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
+                FOREIGN KEY(account_id) REFERENCES portfolio_accounts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_positions (
+                id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL DEFAULT '',
+                name TEXT,
+                asset_type TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                price REAL,
+                market_value REAL,
+                cost_basis REAL,
+                currency TEXT NOT NULL,
+                as_of TEXT,
+                source_batch_id TEXT,
+                updated_at TEXT NOT NULL,
+                notes TEXT,
+                UNIQUE(portfolio_id, account_id, symbol, market, currency),
+                FOREIGN KEY(portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
+                FOREIGN KEY(account_id) REFERENCES portfolio_accounts(id) ON DELETE CASCADE,
+                FOREIGN KEY(source_batch_id) REFERENCES portfolio_import_batches(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_transactions (
+                id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                import_batch_id TEXT NOT NULL,
+                row_index INTEGER NOT NULL,
+                row_fingerprint TEXT NOT NULL,
+                trade_date TEXT,
+                action TEXT NOT NULL,
+                symbol TEXT,
+                market TEXT NOT NULL DEFAULT '',
+                name TEXT,
+                asset_type TEXT NOT NULL,
+                quantity REAL,
+                price REAL,
+                gross_amount REAL,
+                fees REAL,
+                taxes REAL,
+                currency TEXT NOT NULL,
+                notes TEXT,
+                raw_payload TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(portfolio_id, account_id, row_fingerprint),
+                FOREIGN KEY(portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
+                FOREIGN KEY(account_id) REFERENCES portfolio_accounts(id) ON DELETE CASCADE,
+                FOREIGN KEY(import_batch_id) REFERENCES portfolio_import_batches(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS run_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
                 event_type TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS holding_reviews (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                stance TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                key_reasons TEXT NOT NULL,
+                key_risks TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                importance TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                display_order INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS allocation_reviews (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                dimensions TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_risks (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                factor_exposures TEXT NOT NULL,
+                correlation_notes TEXT,
+                macro_sensitivities TEXT NOT NULL,
+                single_name_risks TEXT NOT NULL,
+                tail_risks TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS rebalancing_suggestions (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                rows TEXT NOT NULL,
+                scenarios TEXT NOT NULL,
+                caveats TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_scenario_analyses (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                base_currency TEXT NOT NULL,
+                current_value REAL,
+                methodology TEXT NOT NULL,
+                key_assumptions TEXT NOT NULL,
+                scenarios TEXT NOT NULL,
+                stress_cases TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_expected_return_models (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                model_type TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                expected_return_pct REAL NOT NULL,
+                volatility_pct REAL,
+                inputs TEXT NOT NULL,
+                correlation_assumptions TEXT NOT NULL,
+                limitations TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_analysis_runs_analysis_id ON analysis_runs(analysis_id);
@@ -334,7 +531,18 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_counter_theses_run_id ON counter_theses(run_id);
             CREATE INDEX IF NOT EXISTS idx_uncertainty_entries_run_id ON uncertainty_entries(run_id);
             CREATE INDEX IF NOT EXISTS idx_decision_criterion_answers_run_id ON decision_criterion_answers(run_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_accounts_portfolio_id ON portfolio_accounts(portfolio_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_import_batches_portfolio_id ON portfolio_import_batches(portfolio_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_positions_portfolio_id ON portfolio_positions(portfolio_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_portfolio_id ON portfolio_transactions(portfolio_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_account_id ON portfolio_transactions(account_id);
             CREATE INDEX IF NOT EXISTS idx_run_progress_run_id ON run_progress(run_id);
+            CREATE INDEX IF NOT EXISTS idx_holding_reviews_run_id ON holding_reviews(run_id);
+            CREATE INDEX IF NOT EXISTS idx_allocation_reviews_run_id ON allocation_reviews(run_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_risks_run_id ON portfolio_risks(run_id);
+            CREATE INDEX IF NOT EXISTS idx_rebalancing_suggestions_run_id ON rebalancing_suggestions(run_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_scenario_analyses_run_id ON portfolio_scenario_analyses(run_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_expected_return_models_run_id ON portfolio_expected_return_models(run_id);
             ",
         )?;
 
@@ -366,6 +574,10 @@ impl Database {
             [],
         );
         let _ = conn.execute(
+            "ALTER TABLE analyses ADD COLUMN portfolio_id TEXT REFERENCES portfolios(id) ON DELETE SET NULL",
+            [],
+        );
+        let _ = conn.execute(
             "UPDATE analysis_blocks SET kind = 'other' WHERE kind = 'scenario_matrix'",
             [],
         );
@@ -377,8 +589,8 @@ impl Database {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT OR REPLACE INTO analyses
-            (id, title, user_prompt, intent, status, active_run_id, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (id, title, user_prompt, intent, status, active_run_id, portfolio_id, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 analysis.id,
                 analysis.title,
@@ -386,6 +598,7 @@ impl Database {
                 analysis.intent.to_string(),
                 analysis.status.to_string(),
                 analysis.active_run_id,
+                analysis.portfolio_id,
                 analysis.created_at,
                 analysis.updated_at
             ],
@@ -493,7 +706,7 @@ impl Database {
             r"
             SELECT
                 a.id, a.title, a.user_prompt, a.intent, a.status, a.active_run_id,
-                ar.status,
+                ar.status, a.portfolio_id,
                 (SELECT COUNT(*) FROM analysis_blocks b WHERE b.run_id = a.active_run_id),
                 (SELECT COUNT(*) FROM sources s WHERE s.run_id = a.active_run_id),
                 a.created_at, a.updated_at
@@ -514,10 +727,11 @@ impl Database {
                 active_run_status: active_status
                     .as_deref()
                     .and_then(|s| AnalysisStatus::from_str(s).ok()),
-                block_count: row.get::<_, i64>(7)? as usize,
-                source_count: row.get::<_, i64>(8)? as usize,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                portfolio_id: row.get(7)?,
+                block_count: row.get::<_, i64>(8)? as usize,
+                source_count: row.get::<_, i64>(9)? as usize,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
 
@@ -558,9 +772,16 @@ impl Database {
                 uncertainty_entries: Vec::new(),
                 methodology_note: None,
                 decision_criterion_answers: Vec::new(),
+                holding_reviews: Vec::new(),
+                allocation_reviews: Vec::new(),
+                portfolio_risks: Vec::new(),
+                rebalancing_suggestions: Vec::new(),
+                portfolio_scenario_analyses: Vec::new(),
+                portfolio_expected_return_models: Vec::new(),
             }));
         };
 
+        let load_portfolio_sections = analysis.intent == AnalysisIntent::Portfolio;
         Ok(Some(AnalysisReport {
             analysis,
             runs,
@@ -576,13 +797,43 @@ impl Database {
             uncertainty_entries: self.get_uncertainty_entries(&run_id)?,
             methodology_note: self.get_methodology_note(&run_id)?,
             decision_criterion_answers: self.get_decision_criterion_answers(&run_id)?,
+            holding_reviews: if load_portfolio_sections {
+                self.get_holding_reviews_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            allocation_reviews: if load_portfolio_sections {
+                self.get_allocation_reviews_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            portfolio_risks: if load_portfolio_sections {
+                self.get_portfolio_risks_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            rebalancing_suggestions: if load_portfolio_sections {
+                self.get_rebalancing_suggestions_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            portfolio_scenario_analyses: if load_portfolio_sections {
+                self.get_portfolio_scenario_analyses_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            portfolio_expected_return_models: if load_portfolio_sections {
+                self.get_portfolio_expected_return_models_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
         }))
     }
 
     fn get_analysis(&self, analysis_id: &str) -> Result<Option<Analysis>> {
         let conn = self.lock_conn()?;
         conn.query_row(
-            "SELECT id, title, user_prompt, intent, status, active_run_id, created_at, updated_at FROM analyses WHERE id = ?1",
+            "SELECT id, title, user_prompt, intent, status, active_run_id, portfolio_id, created_at, updated_at FROM analyses WHERE id = ?1",
             [analysis_id],
             |row| {
                 Ok(Analysis {
@@ -592,8 +843,9 @@ impl Database {
                     intent: AnalysisIntent::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
                     status: AnalysisStatus::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
                     active_run_id: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    portfolio_id: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             },
         )
@@ -935,6 +1187,15 @@ impl Database {
     }
 
     pub(crate) fn validate_finalization(&self, run_id: &str) -> Result<Vec<String>> {
+        let (_analysis_id, persisted_intent, portfolio_id) = {
+            let conn = self.lock_conn()?;
+            analysis_context_for_run(&conn, run_id)?
+        };
+        let effective_intent = if portfolio_id.is_some() {
+            AnalysisIntent::Portfolio
+        } else {
+            persisted_intent
+        };
         let research_plan = self.get_research_plan(run_id)?;
         let entities = self.get_entities(run_id)?;
         let blocks = self.get_blocks(run_id)?;
@@ -951,6 +1212,7 @@ impl Database {
         let block_kinds: HashSet<BlockKind> = blocks.iter().map(|block| block.kind).collect();
         let artifact_kinds: HashSet<ArtifactKind> =
             artifacts.iter().map(|artifact| artifact.kind).collect();
+        let is_portfolio_intent = effective_intent == AnalysisIntent::Portfolio;
 
         if research_plan.is_none() {
             errors.push("missing research plan".to_string());
@@ -961,6 +1223,9 @@ impl Database {
         }
         if !block_kinds.contains(&BlockKind::Risks) {
             errors.push("missing required risks block".to_string());
+        }
+        if is_portfolio_intent && !block_kinds.contains(&BlockKind::OpenQuestions) {
+            errors.push("missing required open_questions block".to_string());
         }
         if sources.is_empty() {
             errors.push("missing sources; submit at least one source".to_string());
@@ -982,18 +1247,24 @@ impl Database {
         }
 
         if let Some(plan) = &research_plan {
-            for required in required_blocks_for(plan.intent) {
+            if plan.intent != effective_intent {
+                errors.push(format!(
+                    "research plan intent '{}' does not match analysis intent '{}'",
+                    plan.intent, effective_intent
+                ));
+            }
+            for required in required_blocks_for(effective_intent) {
                 if !block_kinds.contains(&required) {
                     errors.push(format!("missing required {required} block"));
                 }
             }
-            for required in required_artifacts_for(plan.intent) {
+            for required in required_artifacts_for(effective_intent) {
                 if !artifact_kinds.contains(&required) {
                     errors.push(format!("missing required {required} artifact"));
                 }
             }
             if matches!(
-                plan.intent,
+                effective_intent,
                 AnalysisIntent::CompareEquities | AnalysisIntent::Watchlist
             ) && entities.len() < 2
             {
@@ -1091,7 +1362,7 @@ impl Database {
             }
 
             let directional = matches!(stance.stance, StanceKind::Bullish | StanceKind::Bearish);
-            if directional && counter_theses.is_empty() {
+            if directional && !is_portfolio_intent && counter_theses.is_empty() {
                 errors.push(
                     "directional stance requires a submit_counter_thesis call steelmanning the opposing view"
                         .to_string(),
@@ -1115,9 +1386,9 @@ impl Database {
             }
         }
 
-        if let Some(plan) = &research_plan {
+        if research_plan.is_some() {
             let projection_intent = matches!(
-                plan.intent,
+                effective_intent,
                 AnalysisIntent::SingleEquity | AnalysisIntent::CompareEquities
             );
             if projection_intent {
@@ -1136,7 +1407,7 @@ impl Database {
                     );
                 }
             }
-            if matches!(plan.intent, AnalysisIntent::CompareEquities) && !entities.is_empty() {
+            if matches!(effective_intent, AnalysisIntent::CompareEquities) && !entities.is_empty() {
                 let mut by_entity: std::collections::HashMap<&str, usize> =
                     std::collections::HashMap::new();
                 for projection in &projections {
@@ -1156,7 +1427,7 @@ impl Database {
                     }
                 }
             }
-            if matches!(plan.intent, AnalysisIntent::SingleEquity) && entities.len() > 1 {
+            if matches!(effective_intent, AnalysisIntent::SingleEquity) && entities.len() > 1 {
                 // single equity with more than one entity is fine, but each projection
                 // should still tie back to a resolved entity
                 let entity_ids: HashSet<&str> =
@@ -1188,6 +1459,80 @@ impl Database {
                     "stance-cited metric '{}' from source '{}' is {}d old (max {}d). Re-fetch or downgrade stance to Neutral.",
                     stale.metric, stale.source_id, stale.age_days, stale.max_days
                 ));
+            }
+        }
+
+        if is_portfolio_intent {
+            let holding_reviews = self.get_holding_reviews_for_run(run_id)?;
+            let allocation_reviews = self.get_allocation_reviews_for_run(run_id)?;
+            let portfolio_risks = self.get_portfolio_risks_for_run(run_id)?;
+            let scenario_analyses = self.get_portfolio_scenario_analyses_for_run(run_id)?;
+            let expected_return_models =
+                self.get_portfolio_expected_return_models_for_run(run_id)?;
+
+            match allocation_reviews.len() {
+                0 => errors.push("portfolio analysis missing allocation review".to_string()),
+                1 => {}
+                n => errors.push(format!(
+                    "portfolio analysis must have exactly one allocation review; found {n}"
+                )),
+            }
+            match portfolio_risks.len() {
+                0 => errors.push("portfolio analysis missing portfolio risk review".to_string()),
+                1 => {}
+                n => errors.push(format!(
+                    "portfolio analysis must have exactly one portfolio risk review; found {n}"
+                )),
+            }
+            match scenario_analyses.len() {
+                0 => errors.push("portfolio analysis missing scenario/stress analysis".to_string()),
+                1 => {}
+                n => errors.push(format!(
+                    "portfolio analysis must have exactly one scenario/stress analysis; found {n}"
+                )),
+            }
+            match expected_return_models.len() {
+                0 => errors.push("portfolio analysis missing expected-return model".to_string()),
+                1 => {}
+                n => errors.push(format!(
+                    "portfolio analysis must have exactly one expected-return model; found {n}"
+                )),
+            }
+
+            let review_entity_ids: HashSet<&str> = holding_reviews
+                .iter()
+                .map(|review| review.entity_id.as_str())
+                .collect();
+            if let Some(portfolio_id) = portfolio_id.as_deref() {
+                match self.get_portfolio_detail(portfolio_id)? {
+                    Some(detail) => {
+                        for holding in detail
+                            .holdings
+                            .iter()
+                            .filter(|holding| holding.allocation_pct.unwrap_or_default() >= 0.02)
+                        {
+                            let entity_id = portfolio_holding_entity_id(
+                                &holding.symbol,
+                                holding.market.as_deref(),
+                            );
+                            if !review_entity_ids.contains(entity_id.as_str()) {
+                                errors.push(format!(
+                                    "portfolio analysis missing holding_review for holding entity_id '{}' ({})",
+                                    entity_id,
+                                    holding
+                                        .name
+                                        .as_deref()
+                                        .unwrap_or(holding.symbol.as_str())
+                                ));
+                            }
+                        }
+                    }
+                    None => errors.push(format!(
+                        "portfolio analysis references missing portfolio '{portfolio_id}'"
+                    )),
+                }
+            } else {
+                errors.push("portfolio analysis missing portfolio_id".to_string());
             }
         }
 
@@ -1455,6 +1800,17 @@ impl Database {
         Ok(out)
     }
 
+    pub(crate) fn existing_entity_ids(&self, run_id: &str) -> Result<HashSet<String>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare("SELECT id FROM entities WHERE run_id = ?1")?;
+        let rows = stmt.query_map([run_id], |row| row.get::<_, String>(0))?;
+        let mut out = HashSet::new();
+        for row in rows {
+            out.insert(row?);
+        }
+        Ok(out)
+    }
+
     pub(crate) fn existing_block_ids(&self, run_id: &str) -> Result<HashSet<String>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT id FROM analysis_blocks WHERE run_id = ?1")?;
@@ -1464,6 +1820,15 @@ impl Database {
             out.insert(row?);
         }
         Ok(out)
+    }
+
+    pub(crate) fn analysis_intent_and_portfolio_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<(AnalysisIntent, Option<String>)> {
+        let conn = self.lock_conn()?;
+        let (_analysis_id, intent, portfolio_id) = analysis_context_for_run(&conn, run_id)?;
+        Ok((intent, portfolio_id))
     }
 
     pub(crate) fn save_counter_thesis(&self, thesis: &CounterThesis) -> Result<()> {
@@ -1642,6 +2007,1199 @@ impl Database {
         })?;
         collect_rows(rows)
     }
+
+    pub(crate) fn insert_holding_review(&self, review: &HoldingReview) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &review.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO holding_reviews
+            (id, analysis_id, run_id, entity_id, stance, rationale, key_reasons, key_risks,
+             confidence, importance, evidence_ids, display_order, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                review.id,
+                analysis_id,
+                review.run_id,
+                review.entity_id,
+                review.stance.to_string(),
+                review.rationale,
+                serde_json::to_string(&review.key_reasons)?,
+                serde_json::to_string(&review.key_risks)?,
+                review.confidence,
+                review.importance.to_string(),
+                serde_json::to_string(&review.evidence_ids)?,
+                review.display_order,
+                review.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_holding_reviews_for_run(&self, run_id: &str) -> Result<Vec<HoldingReview>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, entity_id, stance, rationale, key_reasons, key_risks, confidence,
+                    importance, evidence_ids, display_order, created_at
+             FROM holding_reviews WHERE run_id = ?1 ORDER BY display_order, created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let reasons: String = row.get(5)?;
+            let risks: String = row.get(6)?;
+            let evidence: String = row.get(9)?;
+            Ok(HoldingReview {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                entity_id: row.get(2)?,
+                stance: HoldingStance::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
+                rationale: row.get(4)?,
+                key_reasons: serde_json::from_str(&reasons).unwrap_or_default(),
+                key_risks: serde_json::from_str(&risks).unwrap_or_default(),
+                confidence: row.get(7)?,
+                importance: Importance::from_str(&row.get::<_, String>(8)?)
+                    .unwrap_or(Importance::Medium),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                display_order: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_allocation_review(&self, review: &AllocationReview) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &review.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO allocation_reviews
+            (id, analysis_id, run_id, summary, dimensions, evidence_ids, confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                review.id,
+                analysis_id,
+                review.run_id,
+                review.summary,
+                serde_json::to_string(&review.dimensions)?,
+                serde_json::to_string(&review.evidence_ids)?,
+                review.confidence,
+                review.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_allocation_reviews_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<AllocationReview>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, summary, dimensions, evidence_ids, confidence, created_at
+             FROM allocation_reviews WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let dimensions: String = row.get(3)?;
+            let evidence: String = row.get(4)?;
+            Ok(AllocationReview {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                summary: row.get(2)?,
+                dimensions: serde_json::from_str(&dimensions).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_portfolio_risk(&self, risk: &PortfolioRisk) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &risk.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_risks
+            (id, analysis_id, run_id, summary, factor_exposures, correlation_notes,
+             macro_sensitivities, single_name_risks, tail_risks, evidence_ids, confidence,
+             created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                risk.id,
+                analysis_id,
+                risk.run_id,
+                risk.summary,
+                serde_json::to_string(&risk.factor_exposures)?,
+                risk.correlation_notes,
+                serde_json::to_string(&risk.macro_sensitivities)?,
+                serde_json::to_string(&risk.single_name_risks)?,
+                serde_json::to_string(&risk.tail_risks)?,
+                serde_json::to_string(&risk.evidence_ids)?,
+                risk.confidence,
+                risk.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_portfolio_risks_for_run(&self, run_id: &str) -> Result<Vec<PortfolioRisk>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, summary, factor_exposures, correlation_notes, macro_sensitivities,
+                    single_name_risks, tail_risks, evidence_ids, confidence, created_at
+             FROM portfolio_risks WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let exposures: String = row.get(3)?;
+            let macro_: String = row.get(5)?;
+            let single_name: String = row.get(6)?;
+            let tail: String = row.get(7)?;
+            let evidence: String = row.get(8)?;
+            Ok(PortfolioRisk {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                summary: row.get(2)?,
+                factor_exposures: serde_json::from_str(&exposures).unwrap_or_default(),
+                correlation_notes: row.get(4)?,
+                macro_sensitivities: serde_json::from_str(&macro_).unwrap_or_default(),
+                single_name_risks: serde_json::from_str(&single_name).unwrap_or_default(),
+                tail_risks: serde_json::from_str(&tail).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_rebalancing_suggestion(
+        &self,
+        suggestion: &RebalancingSuggestion,
+    ) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &suggestion.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO rebalancing_suggestions
+            (id, analysis_id, run_id, rationale, rows, scenarios, caveats, evidence_ids,
+             confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                suggestion.id,
+                analysis_id,
+                suggestion.run_id,
+                suggestion.rationale,
+                serde_json::to_string(&suggestion.rows)?,
+                serde_json::to_string(&suggestion.scenarios)?,
+                serde_json::to_string(&suggestion.caveats)?,
+                serde_json::to_string(&suggestion.evidence_ids)?,
+                suggestion.confidence,
+                suggestion.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_rebalancing_suggestions_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<RebalancingSuggestion>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, rationale, rows, scenarios, caveats, evidence_ids, confidence, created_at
+             FROM rebalancing_suggestions WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let rows_json: String = row.get(3)?;
+            let scenarios: String = row.get(4)?;
+            let caveats: String = row.get(5)?;
+            let evidence: String = row.get(6)?;
+            Ok(RebalancingSuggestion {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                rationale: row.get(2)?,
+                rows: serde_json::from_str(&rows_json).unwrap_or_default(),
+                scenarios: serde_json::from_str(&scenarios).unwrap_or_default(),
+                caveats: serde_json::from_str(&caveats).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_portfolio_scenario_analysis(
+        &self,
+        analysis: &PortfolioScenarioAnalysis,
+    ) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &analysis.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_scenario_analyses
+            (id, analysis_id, run_id, horizon, base_currency, current_value, methodology,
+             key_assumptions, scenarios, stress_cases, evidence_ids, confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                analysis.id,
+                analysis_id,
+                analysis.run_id,
+                analysis.horizon,
+                analysis.base_currency,
+                analysis.current_value,
+                analysis.methodology,
+                serde_json::to_string(&analysis.key_assumptions)?,
+                serde_json::to_string(&analysis.scenarios)?,
+                serde_json::to_string(&analysis.stress_cases)?,
+                serde_json::to_string(&analysis.evidence_ids)?,
+                analysis.confidence,
+                analysis.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_portfolio_scenario_analyses_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<PortfolioScenarioAnalysis>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, horizon, base_currency, current_value, methodology,
+                    key_assumptions, scenarios, stress_cases, evidence_ids, confidence, created_at
+             FROM portfolio_scenario_analyses WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let assumptions: String = row.get(6)?;
+            let scenarios: String = row.get(7)?;
+            let stress_cases: String = row.get(8)?;
+            let evidence: String = row.get(9)?;
+            Ok(PortfolioScenarioAnalysis {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                horizon: row.get(2)?,
+                base_currency: row.get(3)?,
+                current_value: row.get(4)?,
+                methodology: row.get(5)?,
+                key_assumptions: serde_json::from_str(&assumptions).unwrap_or_default(),
+                scenarios: serde_json::from_str(&scenarios).unwrap_or_default(),
+                stress_cases: serde_json::from_str(&stress_cases).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_portfolio_expected_return_model(
+        &self,
+        model: &PortfolioExpectedReturnModel,
+    ) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &model.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_expected_return_models
+            (id, analysis_id, run_id, horizon, model_type, summary, expected_return_pct,
+             volatility_pct, inputs, correlation_assumptions, limitations, evidence_ids,
+             confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                model.id,
+                analysis_id,
+                model.run_id,
+                model.horizon,
+                model.model_type.to_string(),
+                model.summary,
+                model.expected_return_pct,
+                model.volatility_pct,
+                serde_json::to_string(&model.inputs)?,
+                serde_json::to_string(&model.correlation_assumptions)?,
+                serde_json::to_string(&model.limitations)?,
+                serde_json::to_string(&model.evidence_ids)?,
+                model.confidence,
+                model.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_portfolio_expected_return_models_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<PortfolioExpectedReturnModel>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, horizon, model_type, summary, expected_return_pct,
+                    volatility_pct, inputs, correlation_assumptions, limitations, evidence_ids,
+                    confidence, created_at
+             FROM portfolio_expected_return_models WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let inputs: String = row.get(7)?;
+            let correlations: String = row.get(8)?;
+            let limitations: String = row.get(9)?;
+            let evidence: String = row.get(10)?;
+            Ok(PortfolioExpectedReturnModel {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                horizon: row.get(2)?,
+                model_type: PortfolioModelType::from_str(&row.get::<_, String>(3)?)
+                    .unwrap_or_default(),
+                summary: row.get(4)?,
+                expected_return_pct: row.get(5)?,
+                volatility_pct: row.get(6)?,
+                inputs: serde_json::from_str(&inputs).unwrap_or_default(),
+                correlation_assumptions: serde_json::from_str(&correlations).unwrap_or_default(),
+                limitations: serde_json::from_str(&limitations).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(11)?,
+                created_at: row.get(12)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub fn create_portfolio(&self, name: &str, base_currency: &str) -> Result<Portfolio> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let portfolio = Portfolio {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: non_empty(name).unwrap_or_else(|| "Portfolio".to_string()),
+            base_currency: normalize_currency(Some(base_currency), "USD"),
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO portfolios (id, name, base_currency, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                portfolio.id,
+                portfolio.name,
+                portfolio.base_currency,
+                portfolio.created_at,
+                portfolio.updated_at
+            ],
+        )?;
+        Ok(portfolio)
+    }
+
+    pub fn delete_portfolio(&self, portfolio_id: &str) -> Result<()> {
+        let conn = self.lock_conn()?;
+        conn.execute("DELETE FROM portfolios WHERE id = ?1", [portfolio_id])?;
+        Ok(())
+    }
+
+    pub fn rename_portfolio(&self, portfolio_id: &str, name: &str) -> Result<Portfolio> {
+        let trimmed =
+            non_empty(name).ok_or_else(|| anyhow::anyhow!("portfolio name must not be empty"))?;
+        let now = chrono::Utc::now().to_rfc3339();
+        {
+            let conn = self.lock_conn()?;
+            let updated = conn.execute(
+                "UPDATE portfolios SET name = ?1, updated_at = ?2 WHERE id = ?3",
+                params![trimmed, now, portfolio_id],
+            )?;
+            if updated == 0 {
+                return Err(anyhow::anyhow!("portfolio not found: {portfolio_id}"));
+            }
+        }
+        self.get_portfolio(portfolio_id)?
+            .ok_or_else(|| anyhow::anyhow!("portfolio disappeared after rename"))
+    }
+
+    pub fn list_portfolios(&self) -> Result<Vec<PortfolioSummary>> {
+        let portfolios = self.get_portfolios()?;
+        let mut summaries = Vec::with_capacity(portfolios.len());
+        for portfolio in portfolios {
+            let accounts = self.get_portfolio_accounts(&portfolio.id)?;
+            let positions = self.get_portfolio_positions(&portfolio.id)?;
+            let batches = self.get_portfolio_import_batches(&portfolio.id)?;
+            let holdings = derive_holdings(&accounts, &positions, &[]);
+            summaries.push(PortfolioSummary {
+                id: portfolio.id,
+                name: portfolio.name,
+                base_currency: portfolio.base_currency.clone(),
+                account_count: accounts.len(),
+                holding_count: holdings.len(),
+                total_market_value: total_market_value(&holdings, &portfolio.base_currency),
+                last_import_at: batches.first().map(|batch| batch.imported_at.clone()),
+                updated_at: portfolio.updated_at,
+            });
+        }
+        Ok(summaries)
+    }
+
+    pub fn get_portfolio_detail(&self, portfolio_id: &str) -> Result<Option<PortfolioDetail>> {
+        let Some(portfolio) = self.get_portfolio(portfolio_id)? else {
+            return Ok(None);
+        };
+        let accounts = self.get_portfolio_accounts(portfolio_id)?;
+        let positions = self.get_portfolio_positions(portfolio_id)?;
+        let transactions = self.get_portfolio_transactions(portfolio_id)?;
+        let import_batches = self.get_portfolio_import_batches(portfolio_id)?;
+        let holdings = derive_holdings(&accounts, &positions, &transactions);
+        Ok(Some(PortfolioDetail {
+            portfolio,
+            accounts,
+            holdings,
+            positions,
+            transactions,
+            import_batches,
+        }))
+    }
+
+    pub fn import_portfolio_csv(
+        &self,
+        input: &PortfolioCsvImportInput,
+    ) -> Result<PortfolioImportResult> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let base_currency = normalize_currency(Some(input.base_currency.as_str()), "USD");
+        let portfolio_id = input
+            .portfolio_id
+            .as_deref()
+            .and_then(non_empty)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let using_default_snapshot_account =
+            input.account_id.as_deref().and_then(non_empty).is_none();
+        let account_id = input
+            .account_id
+            .as_deref()
+            .and_then(non_empty)
+            .unwrap_or_else(|| default_snapshot_account_id(&portfolio_id));
+        let portfolio_name = input
+            .portfolio_name
+            .as_deref()
+            .and_then(non_empty)
+            .unwrap_or_else(|| "Portfolio".to_string());
+        let account_name = input
+            .account_name
+            .as_deref()
+            .and_then(non_empty)
+            .unwrap_or_else(|| "Current snapshot".to_string());
+        let source_name = non_empty(&input.source_name).unwrap_or_else(|| "CSV import".to_string());
+        let batch_id = uuid::Uuid::new_v4().to_string();
+        let mut warnings = Vec::new();
+        let mut imported_count = 0_usize;
+        let mut duplicate_count = 0_usize;
+        let mut review_count = 0_usize;
+        let should_replace_positions = input.import_kind == PortfolioImportKind::Positions
+            && input.rows.iter().any(is_importable_position_row);
+
+        {
+            let mut conn = self.lock_conn()?;
+            let tx = conn.transaction()?;
+            tx.execute(
+                "INSERT INTO portfolios (id, name, base_currency, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    base_currency = excluded.base_currency,
+                    updated_at = excluded.updated_at",
+                params![portfolio_id, portfolio_name, base_currency, now, now],
+            )?;
+            tx.execute(
+                "INSERT INTO portfolio_accounts
+                    (id, portfolio_id, name, institution, account_type, base_currency, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    institution = excluded.institution,
+                    account_type = excluded.account_type,
+                    base_currency = excluded.base_currency,
+                    updated_at = excluded.updated_at",
+                params![
+                    account_id,
+                    portfolio_id,
+                    account_name,
+                    clean_string(input.institution.as_deref()),
+                    clean_string(input.account_type.as_deref()).or_else(|| {
+                        using_default_snapshot_account.then(|| "snapshot".to_string())
+                    }),
+                    base_currency,
+                    now,
+                    now
+                ],
+            )?;
+            if should_replace_positions {
+                tx.execute(
+                    "DELETE FROM portfolio_positions WHERE portfolio_id = ?1 AND account_id = ?2",
+                    params![portfolio_id, account_id],
+                )?;
+            }
+            tx.execute(
+                "INSERT INTO portfolio_import_batches
+                    (id, portfolio_id, account_id, source_name, import_kind, imported_at, row_count, imported_count, duplicate_count, review_count, warnings)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0, '[]')",
+                params![
+                    batch_id,
+                    portfolio_id,
+                    account_id,
+                    source_name,
+                    input.import_kind.to_string(),
+                    now,
+                    input.rows.len() as i64,
+                ],
+            )?;
+
+            for row in &input.rows {
+                let outcome = match input.import_kind {
+                    PortfolioImportKind::Positions => import_position_row(
+                        &tx,
+                        row,
+                        &portfolio_id,
+                        &account_id,
+                        &batch_id,
+                        &base_currency,
+                        &now,
+                    )?,
+                    PortfolioImportKind::Transactions => import_transaction_row(
+                        &tx,
+                        row,
+                        &portfolio_id,
+                        &account_id,
+                        &batch_id,
+                        &base_currency,
+                        &now,
+                    )?,
+                };
+                match outcome {
+                    RowImportOutcome::Imported => imported_count += 1,
+                    RowImportOutcome::Duplicate => duplicate_count += 1,
+                    RowImportOutcome::NeedsReview(message) => {
+                        review_count += 1;
+                        warnings.push(PortfolioImportWarning {
+                            row_index: Some(row.row_index),
+                            message,
+                        });
+                    }
+                }
+            }
+
+            tx.execute(
+                "UPDATE portfolio_import_batches
+                 SET imported_count = ?1, duplicate_count = ?2, review_count = ?3, warnings = ?4
+                 WHERE id = ?5",
+                params![
+                    imported_count as i64,
+                    duplicate_count as i64,
+                    review_count as i64,
+                    serde_json::to_string(&warnings)?,
+                    batch_id
+                ],
+            )?;
+            tx.execute(
+                "UPDATE portfolios SET updated_at = ?1 WHERE id = ?2",
+                params![now, portfolio_id],
+            )?;
+            tx.commit()?;
+        }
+
+        let detail = self
+            .get_portfolio_detail(&portfolio_id)?
+            .ok_or_else(|| anyhow::anyhow!("portfolio disappeared after import"))?;
+        Ok(PortfolioImportResult {
+            portfolio_id,
+            account_id,
+            batch_id,
+            row_count: input.rows.len(),
+            imported_count,
+            duplicate_count,
+            review_count,
+            warnings,
+            holdings: detail.holdings,
+        })
+    }
+
+    fn get_portfolios(&self) -> Result<Vec<Portfolio>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, base_currency, created_at, updated_at
+             FROM portfolios ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Portfolio {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                base_currency: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    fn get_portfolio(&self, portfolio_id: &str) -> Result<Option<Portfolio>> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT id, name, base_currency, created_at, updated_at
+             FROM portfolios WHERE id = ?1",
+            [portfolio_id],
+            |row| {
+                Ok(Portfolio {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    base_currency: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    fn get_portfolio_accounts(&self, portfolio_id: &str) -> Result<Vec<PortfolioAccount>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, portfolio_id, name, institution, account_type, base_currency, created_at, updated_at
+             FROM portfolio_accounts WHERE portfolio_id = ?1 ORDER BY updated_at DESC, name ASC",
+        )?;
+        let rows = stmt.query_map([portfolio_id], |row| {
+            Ok(PortfolioAccount {
+                id: row.get(0)?,
+                portfolio_id: row.get(1)?,
+                name: row.get(2)?,
+                institution: row.get(3)?,
+                account_type: row.get(4)?,
+                base_currency: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    fn get_portfolio_positions(&self, portfolio_id: &str) -> Result<Vec<PortfolioPosition>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, portfolio_id, account_id, symbol, market, name, asset_type, quantity, price,
+                    market_value, cost_basis, currency, as_of, source_batch_id, updated_at, notes
+             FROM portfolio_positions
+             WHERE portfolio_id = ?1
+             ORDER BY updated_at DESC, symbol ASC",
+        )?;
+        let rows = stmt.query_map([portfolio_id], |row| {
+            let market: String = row.get(4)?;
+            Ok(PortfolioPosition {
+                id: row.get(0)?,
+                portfolio_id: row.get(1)?,
+                account_id: row.get(2)?,
+                symbol: row.get(3)?,
+                market: non_empty(&market),
+                name: row.get(5)?,
+                asset_type: row.get(6)?,
+                quantity: row.get(7)?,
+                price: row.get(8)?,
+                market_value: row.get(9)?,
+                cost_basis: row.get(10)?,
+                currency: row.get(11)?,
+                as_of: row.get(12)?,
+                source_batch_id: row.get(13)?,
+                updated_at: row.get(14)?,
+                notes: row.get(15)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    fn get_portfolio_transactions(&self, portfolio_id: &str) -> Result<Vec<PortfolioTransaction>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, portfolio_id, account_id, import_batch_id, row_index, trade_date, action,
+                    symbol, market, name, asset_type, quantity, price, gross_amount, fees, taxes,
+                    currency, notes, raw_payload, created_at
+             FROM portfolio_transactions
+             WHERE portfolio_id = ?1
+             ORDER BY COALESCE(trade_date, created_at) DESC, row_index DESC
+             LIMIT 500",
+        )?;
+        let rows = stmt.query_map([portfolio_id], |row| {
+            let action =
+                PortfolioTransactionAction::from_str(&row.get::<_, String>(6)?).unwrap_or_default();
+            let market: String = row.get(8)?;
+            let raw_payload: String = row.get(18)?;
+            Ok(PortfolioTransaction {
+                id: row.get(0)?,
+                portfolio_id: row.get(1)?,
+                account_id: row.get(2)?,
+                import_batch_id: row.get(3)?,
+                row_index: row.get::<_, i64>(4)? as usize,
+                trade_date: row.get(5)?,
+                action,
+                symbol: row.get(7)?,
+                market: non_empty(&market),
+                name: row.get(9)?,
+                asset_type: row.get(10)?,
+                quantity: row.get(11)?,
+                price: row.get(12)?,
+                gross_amount: row.get(13)?,
+                fees: row.get(14)?,
+                taxes: row.get(15)?,
+                currency: row.get(16)?,
+                notes: row.get(17)?,
+                raw_payload: serde_json::from_str(&raw_payload).unwrap_or(serde_json::Value::Null),
+                created_at: row.get(19)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    fn get_portfolio_import_batches(
+        &self,
+        portfolio_id: &str,
+    ) -> Result<Vec<PortfolioImportBatch>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, portfolio_id, account_id, source_name, import_kind, imported_at, row_count,
+                    imported_count, duplicate_count, review_count, warnings
+             FROM portfolio_import_batches
+             WHERE portfolio_id = ?1
+             ORDER BY imported_at DESC",
+        )?;
+        let rows = stmt.query_map([portfolio_id], |row| {
+            let warnings: String = row.get(10)?;
+            Ok(PortfolioImportBatch {
+                id: row.get(0)?,
+                portfolio_id: row.get(1)?,
+                account_id: row.get(2)?,
+                source_name: row.get(3)?,
+                import_kind: PortfolioImportKind::from_str(&row.get::<_, String>(4)?)
+                    .unwrap_or_default(),
+                imported_at: row.get(5)?,
+                row_count: row.get::<_, i64>(6)? as usize,
+                imported_count: row.get::<_, i64>(7)? as usize,
+                duplicate_count: row.get::<_, i64>(8)? as usize,
+                review_count: row.get::<_, i64>(9)? as usize,
+                warnings: serde_json::from_str(&warnings).unwrap_or_default(),
+            })
+        })?;
+        collect_rows(rows)
+    }
+}
+
+enum RowImportOutcome {
+    Imported,
+    Duplicate,
+    NeedsReview(String),
+}
+
+fn is_importable_position_row(row: &crate::domain::PortfolioCsvRow) -> bool {
+    row.quantity.is_some()
+        && (row.symbol.as_deref().and_then(non_empty).is_some()
+            || row.name.as_deref().and_then(non_empty).is_some())
+}
+
+fn import_position_row(
+    tx: &rusqlite::Transaction<'_>,
+    row: &crate::domain::PortfolioCsvRow,
+    portfolio_id: &str,
+    account_id: &str,
+    batch_id: &str,
+    base_currency: &str,
+    now: &str,
+) -> Result<RowImportOutcome> {
+    let symbol = row
+        .symbol
+        .as_deref()
+        .and_then(non_empty)
+        .or_else(|| row.name.as_deref().and_then(non_empty))
+        .map(|value| value.to_ascii_uppercase());
+    let Some(symbol) = symbol else {
+        return Ok(RowImportOutcome::NeedsReview(
+            "Missing symbol or instrument name".to_string(),
+        ));
+    };
+    let Some(quantity) = row.quantity else {
+        return Ok(RowImportOutcome::NeedsReview(format!(
+            "Missing quantity for {symbol}"
+        )));
+    };
+    let currency = normalize_currency(row.currency.as_deref(), base_currency);
+    let market = normalize_market(row.market.as_deref());
+    let market_value = row
+        .market_value
+        .or_else(|| row.price.map(|price| price * quantity));
+    tx.execute(
+        "INSERT INTO portfolio_positions
+            (id, portfolio_id, account_id, symbol, market, name, asset_type, quantity, price,
+             market_value, cost_basis, currency, as_of, source_batch_id, updated_at, notes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         ON CONFLICT(portfolio_id, account_id, symbol, market, currency) DO UPDATE SET
+            name = excluded.name,
+            asset_type = excluded.asset_type,
+            quantity = excluded.quantity,
+            price = excluded.price,
+            market_value = excluded.market_value,
+            cost_basis = excluded.cost_basis,
+            as_of = excluded.as_of,
+            source_batch_id = excluded.source_batch_id,
+            updated_at = excluded.updated_at,
+            notes = excluded.notes",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            portfolio_id,
+            account_id,
+            symbol,
+            market,
+            clean_string(row.name.as_deref()),
+            row.asset_type
+                .as_deref()
+                .and_then(non_empty)
+                .unwrap_or_else(|| "other".to_string()),
+            quantity,
+            row.price,
+            market_value,
+            row.cost_basis,
+            currency,
+            clean_string(row.trade_date.as_deref()),
+            batch_id,
+            now,
+            clean_string(row.notes.as_deref()),
+        ],
+    )?;
+    Ok(RowImportOutcome::Imported)
+}
+
+fn import_transaction_row(
+    tx: &rusqlite::Transaction<'_>,
+    row: &crate::domain::PortfolioCsvRow,
+    portfolio_id: &str,
+    account_id: &str,
+    batch_id: &str,
+    base_currency: &str,
+    now: &str,
+) -> Result<RowImportOutcome> {
+    let action_text = row.action.as_deref().and_then(non_empty);
+    let action = action_text
+        .as_deref()
+        .and_then(|value| PortfolioTransactionAction::from_str(value).ok())
+        .unwrap_or_default();
+    if action_text.is_none() {
+        return Ok(RowImportOutcome::NeedsReview(
+            "Missing transaction action".to_string(),
+        ));
+    }
+
+    let symbol = row
+        .symbol
+        .as_deref()
+        .and_then(non_empty)
+        .map(|value| value.to_ascii_uppercase());
+    if matches!(
+        action,
+        PortfolioTransactionAction::Buy
+            | PortfolioTransactionAction::Sell
+            | PortfolioTransactionAction::TransferIn
+            | PortfolioTransactionAction::TransferOut
+    ) && (symbol.is_none() || row.quantity.is_none())
+    {
+        return Ok(RowImportOutcome::NeedsReview(
+            "Buy/sell/transfer rows need both symbol and quantity".to_string(),
+        ));
+    }
+
+    let currency = normalize_currency(row.currency.as_deref(), base_currency);
+    let market = normalize_market(row.market.as_deref());
+    let gross_amount = row.gross_amount.or_else(|| {
+        row.quantity
+            .zip(row.price)
+            .map(|(quantity, price)| quantity * price)
+    });
+    let raw_payload = serde_json::to_string(&row.raw)?;
+    let fingerprint = row_fingerprint(row, account_id);
+    let changed = tx.execute(
+        "INSERT OR IGNORE INTO portfolio_transactions
+            (id, portfolio_id, account_id, import_batch_id, row_index, row_fingerprint, trade_date,
+             action, symbol, market, name, asset_type, quantity, price, gross_amount, fees, taxes,
+             currency, notes, raw_payload, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            portfolio_id,
+            account_id,
+            batch_id,
+            row.row_index as i64,
+            fingerprint,
+            clean_string(row.trade_date.as_deref()),
+            action.to_string(),
+            symbol,
+            market,
+            clean_string(row.name.as_deref()),
+            row.asset_type
+                .as_deref()
+                .and_then(non_empty)
+                .unwrap_or_else(|| "other".to_string()),
+            row.quantity,
+            row.price,
+            gross_amount,
+            row.fees,
+            row.taxes,
+            currency,
+            clean_string(row.notes.as_deref()),
+            raw_payload,
+            now,
+        ],
+    )?;
+    if changed == 0 {
+        Ok(RowImportOutcome::Duplicate)
+    } else {
+        Ok(RowImportOutcome::Imported)
+    }
+}
+
+fn derive_holdings(
+    accounts: &[PortfolioAccount],
+    positions: &[PortfolioPosition],
+    transactions: &[PortfolioTransaction],
+) -> Vec<PortfolioHolding> {
+    let account_names: HashMap<&str, &str> = accounts
+        .iter()
+        .map(|account| (account.id.as_str(), account.name.as_str()))
+        .collect();
+    if !positions.is_empty() {
+        return derive_holdings_from_positions(&account_names, positions);
+    }
+    derive_holdings_from_transactions(&account_names, transactions)
+}
+
+fn derive_holdings_from_positions(
+    account_names: &HashMap<&str, &str>,
+    positions: &[PortfolioPosition],
+) -> Vec<PortfolioHolding> {
+    let mut holdings: HashMap<(String, String, String), PortfolioHolding> = HashMap::new();
+    for position in positions {
+        if position.quantity.abs() < f64::EPSILON {
+            continue;
+        }
+        let market_key = position.market.clone().unwrap_or_default();
+        let key = (
+            position.symbol.clone(),
+            market_key,
+            position.currency.clone(),
+        );
+        let holding = holdings.entry(key).or_insert_with(|| PortfolioHolding {
+            symbol: position.symbol.clone(),
+            market: position.market.clone(),
+            name: position.name.clone(),
+            asset_type: position.asset_type.clone(),
+            quantity: 0.0,
+            market_value: Some(0.0),
+            cost_basis: Some(0.0),
+            currency: position.currency.clone(),
+            allocation_pct: None,
+            accounts: Vec::new(),
+        });
+        holding.quantity += position.quantity;
+        holding.market_value = sum_optional(holding.market_value, position.market_value);
+        holding.cost_basis = sum_optional(holding.cost_basis, position.cost_basis);
+        holding.accounts.push(PortfolioHoldingAccount {
+            account_id: position.account_id.clone(),
+            account_name: account_names
+                .get(position.account_id.as_str())
+                .copied()
+                .unwrap_or("Account")
+                .to_string(),
+            quantity: position.quantity,
+            market_value: position.market_value,
+            cost_basis: position.cost_basis,
+            currency: position.currency.clone(),
+        });
+    }
+    finalize_holdings(holdings)
+}
+
+fn derive_holdings_from_transactions(
+    account_names: &HashMap<&str, &str>,
+    transactions: &[PortfolioTransaction],
+) -> Vec<PortfolioHolding> {
+    let mut positions: HashMap<(String, String, String, String), PortfolioPosition> =
+        HashMap::new();
+    for transaction in transactions {
+        let Some(symbol) = transaction.symbol.clone() else {
+            continue;
+        };
+        let quantity = transaction.quantity.unwrap_or_default();
+        let qty_delta = match transaction.action {
+            PortfolioTransactionAction::Buy | PortfolioTransactionAction::TransferIn => quantity,
+            PortfolioTransactionAction::Sell | PortfolioTransactionAction::TransferOut => -quantity,
+            PortfolioTransactionAction::Split => quantity,
+            _ => 0.0,
+        };
+        if qty_delta.abs() < f64::EPSILON {
+            continue;
+        }
+        let market_key = transaction.market.clone().unwrap_or_default();
+        let key = (
+            transaction.account_id.clone(),
+            symbol.clone(),
+            market_key,
+            transaction.currency.clone(),
+        );
+        let position = positions.entry(key).or_insert_with(|| PortfolioPosition {
+            id: String::new(),
+            portfolio_id: transaction.portfolio_id.clone(),
+            account_id: transaction.account_id.clone(),
+            symbol: symbol.clone(),
+            market: transaction.market.clone(),
+            name: transaction.name.clone(),
+            asset_type: transaction.asset_type.clone(),
+            quantity: 0.0,
+            price: None,
+            market_value: None,
+            cost_basis: Some(0.0),
+            currency: transaction.currency.clone(),
+            as_of: transaction.trade_date.clone(),
+            source_batch_id: Some(transaction.import_batch_id.clone()),
+            updated_at: transaction.created_at.clone(),
+            notes: None,
+        });
+        position.quantity += qty_delta;
+        if transaction.price.is_some() {
+            position.price = transaction.price;
+        }
+        let signed_amount = transaction
+            .gross_amount
+            .or_else(|| transaction.price.map(|price| price * quantity))
+            .unwrap_or_default();
+        match transaction.action {
+            PortfolioTransactionAction::Buy | PortfolioTransactionAction::TransferIn => {
+                position.cost_basis = sum_optional(
+                    position.cost_basis,
+                    Some(
+                        signed_amount.abs()
+                            + transaction.fees.unwrap_or_default().abs()
+                            + transaction.taxes.unwrap_or_default().abs(),
+                    ),
+                );
+            }
+            PortfolioTransactionAction::Sell | PortfolioTransactionAction::TransferOut => {
+                position.cost_basis = sum_optional(position.cost_basis, Some(-signed_amount.abs()));
+            }
+            _ => {}
+        }
+        position.market_value = position.price.map(|price| price * position.quantity);
+    }
+    let derived_positions: Vec<PortfolioPosition> = positions.into_values().collect();
+    derive_holdings_from_positions(account_names, &derived_positions)
+}
+
+fn finalize_holdings(
+    mut holdings: HashMap<(String, String, String), PortfolioHolding>,
+) -> Vec<PortfolioHolding> {
+    let totals_by_currency = holdings
+        .values()
+        .fold(HashMap::new(), |mut totals, holding| {
+            if let Some(value) = holding.market_value {
+                *totals.entry(holding.currency.clone()).or_insert(0.0) += value;
+            }
+            totals
+        });
+    for holding in holdings.values_mut() {
+        if let (Some(value), Some(total)) = (
+            holding.market_value,
+            totals_by_currency.get(&holding.currency).copied(),
+        ) && total.abs() > f64::EPSILON
+        {
+            holding.allocation_pct = Some(value / total);
+        }
+        if holding.market_value == Some(0.0) {
+            holding.market_value = None;
+        }
+        if holding.cost_basis == Some(0.0) {
+            holding.cost_basis = None;
+        }
+    }
+    let mut out: Vec<PortfolioHolding> = holdings.into_values().collect();
+    out.sort_by(|a, b| {
+        b.market_value
+            .unwrap_or_default()
+            .partial_cmp(&a.market_value.unwrap_or_default())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.symbol.cmp(&b.symbol))
+    });
+    out
+}
+
+fn total_market_value(holdings: &[PortfolioHolding], base_currency: &str) -> Option<f64> {
+    let mut total = 0.0;
+    let mut has_value = false;
+    for holding in holdings {
+        let Some(value) = holding.market_value else {
+            continue;
+        };
+        if !holding.currency.eq_ignore_ascii_case(base_currency) {
+            return None;
+        }
+        total += value;
+        has_value = true;
+    }
+    has_value.then_some(total)
+}
+
+fn sum_optional(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right) {
+        (Some(a), Some(b)) => Some(a + b),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn default_snapshot_account_id(portfolio_id: &str) -> String {
+    format!("snapshot:{portfolio_id}")
+}
+
+fn row_fingerprint(row: &crate::domain::PortfolioCsvRow, account_id: &str) -> String {
+    let mut parts = vec![
+        format!("account={account_id}"),
+        format!("symbol={}", row.symbol.as_deref().unwrap_or_default()),
+        format!("market={}", row.market.as_deref().unwrap_or_default()),
+        format!("name={}", row.name.as_deref().unwrap_or_default()),
+        format!("action={}", row.action.as_deref().unwrap_or_default()),
+        format!("date={}", row.trade_date.as_deref().unwrap_or_default()),
+        format!("quantity={:?}", row.quantity),
+        format!("price={:?}", row.price),
+        format!("gross={:?}", row.gross_amount),
+        format!("currency={}", row.currency.as_deref().unwrap_or_default()),
+    ];
+    let mut raw: Vec<_> = row.raw.iter().collect();
+    raw.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (key, value) in raw {
+        parts.push(format!("raw:{key}={value}"));
+    }
+    format!("{:016x}", fnv1a64(&parts.join("|")))
+}
+
+fn fnv1a64(value: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn normalize_currency(value: Option<&str>, fallback: &str) -> String {
+    value
+        .and_then(non_empty)
+        .unwrap_or_else(|| fallback.to_string())
+        .to_ascii_uppercase()
+}
+
+fn normalize_market(value: Option<&str>) -> String {
+    value
+        .and_then(non_empty)
+        .map(|value| value.to_ascii_uppercase())
+        .unwrap_or_default()
+}
+
+fn clean_string(value: Option<&str>) -> Option<String> {
+    value.and_then(non_empty)
+}
+
+fn non_empty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// Pure-function form of the precedence rules documented on
@@ -1662,6 +3220,36 @@ pub(crate) fn compute_analysis_status(run_statuses: &[AnalysisStatus]) -> Analys
     }
 }
 
+fn analysis_id_for_run(conn: &Connection, run_id: &str) -> Result<String> {
+    conn.query_row(
+        "SELECT analysis_id FROM analysis_runs WHERE id = ?1",
+        [run_id],
+        |row| row.get::<_, String>(0),
+    )
+    .map_err(Into::into)
+}
+
+fn analysis_context_for_run(
+    conn: &Connection,
+    run_id: &str,
+) -> Result<(String, AnalysisIntent, Option<String>)> {
+    conn.query_row(
+        "SELECT a.id, a.intent, a.portfolio_id
+         FROM analysis_runs ar
+         JOIN analyses a ON a.id = ar.analysis_id
+         WHERE ar.id = ?1",
+        [run_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                AnalysisIntent::from_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+                row.get::<_, Option<String>>(2)?,
+            ))
+        },
+    )
+    .map_err(Into::into)
+}
+
 fn required_blocks_for(intent: AnalysisIntent) -> Vec<BlockKind> {
     let mut out = vec![BlockKind::Thesis, BlockKind::Risks];
     match intent {
@@ -1678,7 +3266,9 @@ fn required_blocks_for(intent: AnalysisIntent) -> Vec<BlockKind> {
         AnalysisIntent::SectorAnalysis => {
             out.push(BlockKind::SectorContext);
         }
-        AnalysisIntent::MacroTheme | AnalysisIntent::GeneralResearch => {}
+        AnalysisIntent::MacroTheme
+        | AnalysisIntent::GeneralResearch
+        | AnalysisIntent::Portfolio => {}
     }
     out
 }
@@ -1735,6 +3325,7 @@ pub(crate) mod tests {
             intent,
             status: AnalysisStatus::Running,
             active_run_id: Some(run_id.clone()),
+            portfolio_id: None,
             created_at: now.clone(),
             updated_at: now.clone(),
         })
@@ -1926,6 +3517,114 @@ pub(crate) mod tests {
         .unwrap();
     }
 
+    pub(crate) fn save_portfolio_scenario_analysis(db: &Database, run_id: &str, source_id: &str) {
+        db.insert_portfolio_scenario_analysis(&PortfolioScenarioAnalysis {
+            id: "portfolio-scenarios-1".into(),
+            run_id: run_id.into(),
+            horizon: "12 months".into(),
+            base_currency: "USD".into(),
+            current_value: Some(100_000.0),
+            methodology: "Holding-weighted scenario model.".into(),
+            key_assumptions: vec!["Public-market beta dominates near-term outcomes.".into()],
+            scenarios: vec![
+                PortfolioScenarioOutcome {
+                    label: ScenarioLabel::Bull,
+                    probability: 0.25,
+                    portfolio_return_pct: 0.14,
+                    projected_value: Some(114_000.0),
+                    rationale: "Risk assets rerate higher.".into(),
+                    key_drivers: vec!["Earnings growth".into()],
+                    watch_indicators: vec!["Breadth".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioScenarioOutcome {
+                    label: ScenarioLabel::Base,
+                    probability: 0.55,
+                    portfolio_return_pct: 0.06,
+                    projected_value: Some(106_000.0),
+                    rationale: "Current trend persists.".into(),
+                    key_drivers: vec!["Margins hold".into()],
+                    watch_indicators: vec!["Guidance".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioScenarioOutcome {
+                    label: ScenarioLabel::Bear,
+                    probability: 0.20,
+                    portfolio_return_pct: -0.12,
+                    projected_value: Some(88_000.0),
+                    rationale: "Growth slows and multiples compress.".into(),
+                    key_drivers: vec!["Macro shock".into()],
+                    watch_indicators: vec!["Credit spreads".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+            ],
+            stress_cases: vec![
+                PortfolioStressCase {
+                    name: "Rate shock".into(),
+                    estimated_return_pct: -0.08,
+                    rationale: "Long-duration holdings compress.".into(),
+                    affected_exposures: vec!["Growth equities".into()],
+                    mitigants: vec!["Cash buffer".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioStressCase {
+                    name: "Dollar rally".into(),
+                    estimated_return_pct: -0.04,
+                    rationale: "Foreign-currency exposure translates lower.".into(),
+                    affected_exposures: vec!["Non-USD revenue".into()],
+                    mitigants: vec!["USD base currency".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+            ],
+            evidence_ids: vec![source_id.into()],
+            confidence: 0.6,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    }
+
+    pub(crate) fn save_portfolio_expected_return_model(
+        db: &Database,
+        run_id: &str,
+        source_id: &str,
+    ) {
+        db.insert_portfolio_expected_return_model(&PortfolioExpectedReturnModel {
+            id: "portfolio-model-1".into(),
+            run_id: run_id.into(),
+            horizon: "12 months".into(),
+            model_type: PortfolioModelType::Hybrid,
+            summary: "Weighted return assumptions imply moderate upside.".into(),
+            expected_return_pct: 0.066,
+            volatility_pct: Some(0.18),
+            inputs: vec![
+                PortfolioExpectedReturnInput {
+                    name: "Core equities".into(),
+                    input_type: "asset_class".into(),
+                    weight: 0.70,
+                    expected_return_pct: 0.08,
+                    volatility_pct: Some(0.20),
+                    rationale: "Equity risk premium plus earnings growth.".into(),
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioExpectedReturnInput {
+                    name: "Cash and defensives".into(),
+                    input_type: "asset_class".into(),
+                    weight: 0.30,
+                    expected_return_pct: 0.035,
+                    volatility_pct: Some(0.04),
+                    rationale: "Lower return, lower volatility ballast.".into(),
+                    evidence_ids: vec![source_id.into()],
+                },
+            ],
+            correlation_assumptions: vec!["Equity holdings remain positively correlated.".into()],
+            limitations: vec!["No tax or personal-liability modeling.".into()],
+            evidence_ids: vec![source_id.into()],
+            confidence: 0.6,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    }
+
     pub(crate) fn save_artifact(db: &Database, run_id: &str, kind: ArtifactKind, source_id: &str) {
         db.save_structured_artifact(&StructuredArtifact {
             id: format!("artifact-{kind}"),
@@ -1977,6 +3676,260 @@ pub(crate) mod tests {
         assert!(errors.iter().any(|e| e.contains("thesis")));
         assert!(errors.iter().any(|e| e.contains("sources")));
         assert!(errors.iter().any(|e| e.contains("methodology note")));
+    }
+
+    #[test]
+    fn portfolio_position_import_creates_holdings_and_summary() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("Core portfolio".into()),
+            account_id: None,
+            account_name: Some("Broker".into()),
+            institution: Some("Generic broker".into()),
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "positions.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![
+                PortfolioCsvRow {
+                    row_index: 2,
+                    raw: HashMap::from([
+                        ("Symbol".to_string(), "VTI".to_string()),
+                        ("Quantity".to_string(), "10".to_string()),
+                    ]),
+                    symbol: Some("VTI".into()),
+                    market: None,
+                    name: Some("Vanguard Total Stock Market ETF".into()),
+                    asset_type: Some("etf".into()),
+                    quantity: Some(10.0),
+                    price: Some(250.0),
+                    market_value: None,
+                    cost_basis: Some(2_200.0),
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("USD".into()),
+                    trade_date: Some("2026-04-18".into()),
+                    action: None,
+                    notes: None,
+                },
+                PortfolioCsvRow {
+                    row_index: 3,
+                    raw: HashMap::from([
+                        ("Symbol".to_string(), "BND".to_string()),
+                        ("Quantity".to_string(), "20".to_string()),
+                    ]),
+                    symbol: Some("BND".into()),
+                    market: None,
+                    name: Some("Vanguard Total Bond Market ETF".into()),
+                    asset_type: Some("etf".into()),
+                    quantity: Some(20.0),
+                    price: Some(72.5),
+                    market_value: None,
+                    cost_basis: Some(1_400.0),
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("USD".into()),
+                    trade_date: Some("2026-04-18".into()),
+                    action: None,
+                    notes: None,
+                },
+            ],
+        };
+
+        let result = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(result.imported_count, 2);
+        assert_eq!(result.review_count, 0);
+        assert_eq!(result.holdings.len(), 2);
+
+        let detail = db
+            .get_portfolio_detail(&result.portfolio_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.portfolio.name, "Core portfolio");
+        assert_eq!(detail.accounts.len(), 1);
+        assert_eq!(detail.positions.len(), 2);
+        assert!(detail.holdings.iter().any(|holding| holding.symbol == "VTI"
+            && holding.market_value == Some(2_500.0)
+            && holding.allocation_pct.is_some()));
+
+        let summaries = db.list_portfolios().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].holding_count, 2);
+        assert_eq!(summaries[0].total_market_value, Some(3_950.0));
+    }
+
+    #[test]
+    fn portfolio_position_import_replaces_current_snapshot() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("Current portfolio".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "first.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![
+                PortfolioCsvRow {
+                    row_index: 2,
+                    raw: HashMap::from([("Symbol".to_string(), "VTI".to_string())]),
+                    symbol: Some("VTI".into()),
+                    market: None,
+                    name: Some("Vanguard Total Stock Market ETF".into()),
+                    asset_type: Some("etf".into()),
+                    quantity: Some(10.0),
+                    price: Some(250.0),
+                    market_value: None,
+                    cost_basis: None,
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("USD".into()),
+                    trade_date: None,
+                    action: None,
+                    notes: None,
+                },
+                PortfolioCsvRow {
+                    row_index: 3,
+                    raw: HashMap::from([("Symbol".to_string(), "BND".to_string())]),
+                    symbol: Some("BND".into()),
+                    market: None,
+                    name: Some("Vanguard Total Bond Market ETF".into()),
+                    asset_type: Some("etf".into()),
+                    quantity: Some(20.0),
+                    price: Some(72.5),
+                    market_value: None,
+                    cost_basis: None,
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("USD".into()),
+                    trade_date: None,
+                    action: None,
+                    notes: None,
+                },
+            ],
+        };
+
+        let first = db.import_portfolio_csv(&input).unwrap();
+        let second = db
+            .import_portfolio_csv(&PortfolioCsvImportInput {
+                portfolio_id: Some(first.portfolio_id.clone()),
+                portfolio_name: Some("Current portfolio".into()),
+                source_name: "second.csv".into(),
+                rows: vec![PortfolioCsvRow {
+                    row_index: 2,
+                    raw: HashMap::from([("Symbol".to_string(), "VXUS".to_string())]),
+                    symbol: Some("VXUS".into()),
+                    market: None,
+                    name: Some("Vanguard Total International Stock ETF".into()),
+                    asset_type: Some("etf".into()),
+                    quantity: Some(7.0),
+                    price: Some(65.0),
+                    market_value: None,
+                    cost_basis: None,
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("USD".into()),
+                    trade_date: None,
+                    action: None,
+                    notes: None,
+                }],
+                ..input
+            })
+            .unwrap();
+
+        assert_eq!(second.account_id, first.account_id);
+        assert_eq!(second.imported_count, 1);
+
+        let detail = db
+            .get_portfolio_detail(&first.portfolio_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.accounts[0].name, "Current snapshot");
+        assert_eq!(detail.positions.len(), 1);
+        assert_eq!(detail.holdings.len(), 1);
+        assert_eq!(detail.holdings[0].symbol, "VXUS");
+        assert!(
+            !detail
+                .holdings
+                .iter()
+                .any(|holding| holding.symbol == "VTI")
+        );
+        assert!(
+            !detail
+                .holdings
+                .iter()
+                .any(|holding| holding.symbol == "BND")
+        );
+    }
+
+    #[test]
+    fn portfolio_transaction_import_skips_repeated_rows_for_same_account() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("Ledger portfolio".into()),
+            account_id: None,
+            account_name: Some("Broker".into()),
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "transactions.csv".into(),
+            import_kind: PortfolioImportKind::Transactions,
+            rows: vec![PortfolioCsvRow {
+                row_index: 2,
+                raw: HashMap::from([
+                    ("Date".to_string(), "2026-04-18".to_string()),
+                    ("Action".to_string(), "Buy".to_string()),
+                    ("Symbol".to_string(), "AAPL".to_string()),
+                ]),
+                symbol: Some("AAPL".into()),
+                market: None,
+                name: Some("Apple Inc.".into()),
+                asset_type: Some("equity".into()),
+                quantity: Some(10.0),
+                price: Some(190.0),
+                market_value: None,
+                cost_basis: None,
+                gross_amount: None,
+                fees: Some(1.0),
+                taxes: None,
+                currency: Some("USD".into()),
+                trade_date: Some("2026-04-18".into()),
+                action: Some("Buy".into()),
+                notes: None,
+            }],
+        };
+
+        let first = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(first.imported_count, 1);
+        assert_eq!(first.duplicate_count, 0);
+
+        let second = db
+            .import_portfolio_csv(&PortfolioCsvImportInput {
+                portfolio_id: Some(first.portfolio_id.clone()),
+                account_id: Some(first.account_id.clone()),
+                ..input
+            })
+            .unwrap();
+        assert_eq!(second.imported_count, 0);
+        assert_eq!(second.duplicate_count, 1);
+
+        let detail = db
+            .get_portfolio_detail(&first.portfolio_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.transactions.len(), 1);
+        assert_eq!(detail.holdings.len(), 1);
+        assert_eq!(detail.holdings[0].symbol, "AAPL");
+        assert_eq!(detail.holdings[0].quantity, 10.0);
     }
 
     #[test]
@@ -2568,5 +4521,469 @@ pub(crate) mod tests {
         assert_eq!(runs[0].model_id.as_deref(), Some("gpt-5"));
         assert_eq!(runs[0].status, AnalysisStatus::Completed);
         assert_eq!(runs[0].prompt_text, "second");
+    }
+
+    fn table_has_column(db: &Database, table: &str, column: &str) -> bool {
+        let conn = db.lock_conn().unwrap();
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let rows = stmt.query_map([], |row| row.get::<_, String>(1)).unwrap();
+        rows.filter_map(Result::ok).any(|name| name == column)
+    }
+
+    #[test]
+    fn schema_migration_adds_portfolio_id_column_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bullpen.sqlite");
+        let db = Database::open_at(path.clone()).unwrap();
+        assert!(table_has_column(&db, "analyses", "portfolio_id"));
+        drop(db);
+        // Re-open — migration must be idempotent.
+        let db = Database::open_at(path).unwrap();
+        assert!(table_has_column(&db, "analyses", "portfolio_id"));
+    }
+
+    fn seed_portfolio(db: &Database) -> (String, String) {
+        let portfolio = db.create_portfolio("Core", "USD").unwrap();
+        let run_id = seed_run(db, "Review portfolio", AnalysisIntent::Portfolio);
+        // Tag the analysis with the portfolio.
+        let conn = db.lock_conn().unwrap();
+        conn.execute(
+            "UPDATE analyses SET portfolio_id = ?1, intent = 'portfolio' WHERE id = 'a'",
+            [&portfolio.id],
+        )
+        .unwrap();
+        drop(conn);
+        (portfolio.id, run_id)
+    }
+
+    #[test]
+    fn get_report_returns_portfolio_sections_only_for_portfolio_intent() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        db.save_entity(&Entity {
+            id: "AAPL".into(),
+            run_id: run_id.clone(),
+            symbol: Some("AAPL".into()),
+            name: "Apple Inc.".into(),
+            exchange: None,
+            asset_type: "equity".into(),
+            sector: None,
+            country: None,
+            confidence: 0.9,
+            resolution_notes: None,
+        })
+        .unwrap();
+        db.insert_holding_review(&HoldingReview {
+            id: "hr-1".into(),
+            run_id: run_id.clone(),
+            entity_id: "AAPL".into(),
+            stance: HoldingStance::Keep,
+            rationale: "Steady compounder.".into(),
+            key_reasons: vec!["Cash".into()],
+            key_risks: vec!["Cycles".into()],
+            confidence: 0.6,
+            importance: Importance::High,
+            evidence_ids: vec![source_id.clone()],
+            display_order: 10,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        db.insert_allocation_review(&AllocationReview {
+            id: "ar-1".into(),
+            run_id: run_id.clone(),
+            summary: "Equity-heavy.".into(),
+            dimensions: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        db.insert_portfolio_risk(&PortfolioRisk {
+            id: "pr-1".into(),
+            run_id: run_id.clone(),
+            summary: "Concentrated.".into(),
+            factor_exposures: Vec::new(),
+            correlation_notes: None,
+            macro_sensitivities: Vec::new(),
+            single_name_risks: Vec::new(),
+            tail_risks: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        save_portfolio_scenario_analysis(&db, &run_id, &source_id);
+        save_portfolio_expected_return_model(&db, &run_id, &source_id);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        assert_eq!(report.holding_reviews.len(), 1);
+        assert_eq!(report.allocation_reviews.len(), 1);
+        assert_eq!(report.portfolio_risks.len(), 1);
+        assert_eq!(report.rebalancing_suggestions.len(), 0);
+        assert_eq!(report.portfolio_scenario_analyses.len(), 1);
+        assert_eq!(report.portfolio_expected_return_models.len(), 1);
+
+        // Non-portfolio intent: vecs must be empty even if rows happened to be inserted.
+        let other_db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let other_run = seed_run(&other_db, "Analyze AAPL", AnalysisIntent::SingleEquity);
+        let other_report = other_db.get_report("a", Some(&other_run)).unwrap().unwrap();
+        assert!(other_report.holding_reviews.is_empty());
+        assert!(other_report.allocation_reviews.is_empty());
+        assert!(other_report.portfolio_risks.is_empty());
+        assert!(other_report.rebalancing_suggestions.is_empty());
+        assert!(other_report.portfolio_scenario_analyses.is_empty());
+        assert!(other_report.portfolio_expected_return_models.is_empty());
+    }
+
+    #[test]
+    fn validate_finalization_rejects_portfolio_run_missing_allocation_review() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_plan(&db, &run_id, AnalysisIntent::Portfolio);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::OpenQuestions,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
+        save_stance(&db, &run_id);
+        save_criterion_answers(&db, &run_id);
+        db.insert_portfolio_risk(&PortfolioRisk {
+            id: "pr-1".into(),
+            run_id: run_id.clone(),
+            summary: "Concentrated.".into(),
+            factor_exposures: Vec::new(),
+            correlation_notes: None,
+            macro_sensitivities: Vec::new(),
+            single_name_risks: Vec::new(),
+            tail_risks: Vec::new(),
+            evidence_ids: vec![source_id],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors.iter().any(|e| e.contains("allocation review")),
+            "expected missing allocation review error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn validate_finalization_rejects_portfolio_run_missing_outcome_models() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_plan(&db, &run_id, AnalysisIntent::Portfolio);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::OpenQuestions,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
+        save_stance(&db, &run_id);
+        save_criterion_answers(&db, &run_id);
+        db.insert_allocation_review(&AllocationReview {
+            id: "ar-1".into(),
+            run_id: run_id.clone(),
+            summary: "Equity-heavy.".into(),
+            dimensions: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        db.insert_portfolio_risk(&PortfolioRisk {
+            id: "pr-1".into(),
+            run_id: run_id.clone(),
+            summary: "Concentrated.".into(),
+            factor_exposures: Vec::new(),
+            correlation_notes: None,
+            macro_sensitivities: Vec::new(),
+            single_name_risks: Vec::new(),
+            tail_risks: Vec::new(),
+            evidence_ids: vec![source_id],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("scenario/stress analysis")),
+            "expected missing scenario/stress analysis error, got {errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("expected-return model")),
+            "expected missing expected-return model error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn valid_portfolio_report_can_finalize_with_outcome_models() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_plan(&db, &run_id, AnalysisIntent::Portfolio);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::OpenQuestions,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
+        save_stance(&db, &run_id);
+        save_criterion_answers(&db, &run_id);
+        db.insert_allocation_review(&AllocationReview {
+            id: "ar-1".into(),
+            run_id: run_id.clone(),
+            summary: "Equity-heavy.".into(),
+            dimensions: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        db.insert_portfolio_risk(&PortfolioRisk {
+            id: "pr-1".into(),
+            run_id: run_id.clone(),
+            summary: "Concentrated.".into(),
+            factor_exposures: Vec::new(),
+            correlation_notes: None,
+            macro_sensitivities: Vec::new(),
+            single_name_risks: Vec::new(),
+            tail_risks: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        save_portfolio_scenario_analysis(&db, &run_id, &source_id);
+        save_portfolio_expected_return_model(&db, &run_id, &source_id);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors.is_empty(),
+            "expected valid portfolio report, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn portfolio_outcome_models_round_trip_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_portfolio_scenario_analysis(&db, &run_id, &source_id);
+        save_portfolio_expected_return_model(&db, &run_id, &source_id);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        let scenario = &report.portfolio_scenario_analyses[0];
+        assert_eq!(scenario.scenarios.len(), 3);
+        assert_eq!(scenario.stress_cases.len(), 2);
+        let model = &report.portfolio_expected_return_models[0];
+        assert_eq!(model.model_type, PortfolioModelType::Hybrid);
+        assert!((model.expected_return_pct - 0.066).abs() < f64::EPSILON);
+        assert_eq!(model.inputs.len(), 2);
+    }
+
+    #[test]
+    fn portfolio_import_stores_enriched_name() {
+        // Simulate what the command handler does: import once without a name
+        // (raw CSV has no name column), then re-import with the name filled in
+        // by fetch_symbol_name. Verifies the upsert persists the enriched name.
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+
+        let base_row = PortfolioCsvRow {
+            row_index: 2,
+            raw: HashMap::from([("Symbol".to_string(), "AAPL".to_string())]),
+            symbol: Some("AAPL".into()),
+            market: Some("NASDAQ".into()),
+            name: None,
+            asset_type: None,
+            quantity: Some(10.0),
+            price: Some(213.0),
+            market_value: None,
+            cost_basis: None,
+            gross_amount: None,
+            fees: None,
+            taxes: None,
+            currency: Some("USD".into()),
+            trade_date: None,
+            action: None,
+            notes: None,
+        };
+
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("Test".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "import.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![base_row.clone()],
+        };
+
+        // First import — no name.
+        let first = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(first.imported_count, 1);
+        assert_eq!(first.holdings[0].name, None);
+
+        // Second import — name enriched by metadata fetch.
+        let enriched = PortfolioCsvImportInput {
+            rows: vec![PortfolioCsvRow {
+                name: Some("Apple Inc.".into()),
+                ..base_row
+            }],
+            ..input
+        };
+        let second = db.import_portfolio_csv(&enriched).unwrap();
+        assert_eq!(second.imported_count, 1);
+        assert_eq!(second.holdings[0].name.as_deref(), Some("Apple Inc."));
+    }
+
+    #[test]
+    fn portfolio_import_multi_market_multi_currency_all_imported() {
+        // Represents the international CSV use-case: VOD on LSE (GBP),
+        // SAP on XETRA (EUR), SHOP on TSX (CAD). All rows must import cleanly
+        // with correct market and currency normalisation.
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+
+        fn row(
+            idx: usize,
+            symbol: &str,
+            market: &str,
+            qty: f64,
+            price: f64,
+            currency: &str,
+            name: &str,
+        ) -> PortfolioCsvRow {
+            PortfolioCsvRow {
+                row_index: idx,
+                raw: HashMap::new(),
+                symbol: Some(symbol.into()),
+                market: Some(market.into()),
+                name: Some(name.into()),
+                asset_type: None,
+                quantity: Some(qty),
+                price: Some(price),
+                market_value: None,
+                cost_basis: None,
+                gross_amount: None,
+                fees: None,
+                taxes: None,
+                currency: Some(currency.into()),
+                trade_date: None,
+                action: None,
+                notes: None,
+            }
+        }
+
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("International".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "international.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![
+                row(2, "VOD", "LSE", 500.0, 65.50, "GBP", "Vodafone Group Plc"),
+                row(3, "SAP", "XETRA", 10.0, 215.30, "EUR", "SAP SE"),
+                row(4, "SHOP", "TSX", 25.0, 108.40, "CAD", "Shopify Inc."),
+            ],
+        };
+
+        let result = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(result.imported_count, 3, "all rows should import");
+        assert_eq!(result.review_count, 0);
+
+        let detail = db
+            .get_portfolio_detail(&result.portfolio_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.holdings.len(), 3);
+
+        let vod = detail.holdings.iter().find(|h| h.symbol == "VOD").unwrap();
+        assert_eq!(vod.market.as_deref(), Some("LSE"));
+        assert_eq!(vod.name.as_deref(), Some("Vodafone Group Plc"));
+
+        let sap = detail.holdings.iter().find(|h| h.symbol == "SAP").unwrap();
+        assert_eq!(sap.market.as_deref(), Some("XETRA"));
+        assert_eq!(sap.name.as_deref(), Some("SAP SE"));
+    }
+
+    #[test]
+    fn portfolio_import_name_upsert_overwrites_null() {
+        // A row initially imported with name=None (raw broker CSV) then
+        // re-imported with a name from the metadata fetch must overwrite.
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+
+        let base = PortfolioCsvRow {
+            row_index: 2,
+            raw: HashMap::new(),
+            symbol: Some("VOD".into()),
+            market: Some("LSE".into()),
+            name: None,
+            asset_type: None,
+            quantity: Some(500.0),
+            price: Some(65.50),
+            market_value: None,
+            cost_basis: None,
+            gross_amount: None,
+            fees: None,
+            taxes: None,
+            currency: Some("GBP".into()),
+            trade_date: None,
+            action: None,
+            notes: None,
+        };
+
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("P".into()),
+            account_id: None,
+            account_name: None,
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "import.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![base.clone()],
+        };
+
+        let first = db.import_portfolio_csv(&input).unwrap();
+        assert_eq!(first.imported_count, 1);
+        assert_eq!(first.holdings[0].name, None);
+
+        let with_name = PortfolioCsvImportInput {
+            rows: vec![PortfolioCsvRow {
+                name: Some("Vodafone Group Plc".into()),
+                ..base
+            }],
+            ..input
+        };
+        let second = db.import_portfolio_csv(&with_name).unwrap();
+        assert_eq!(second.imported_count, 1);
+        assert_eq!(
+            second.holdings[0].name.as_deref(),
+            Some("Vodafone Group Plc")
+        );
     }
 }

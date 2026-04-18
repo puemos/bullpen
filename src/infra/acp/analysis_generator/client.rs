@@ -19,6 +19,16 @@ const BULLPEN_TOOLS: &[&str] = &[
     "submit_analysis_block",
     "submit_final_stance",
     "submit_projection",
+    "submit_counter_thesis",
+    "submit_uncertainty_ledger",
+    "submit_methodology_note",
+    "submit_decision_criterion_answer",
+    "submit_holding_review",
+    "submit_allocation_review",
+    "submit_portfolio_risk",
+    "submit_rebalancing_suggestion",
+    "submit_portfolio_scenario_analysis",
+    "submit_portfolio_expected_return_model",
     "finalize_analysis",
 ];
 
@@ -153,7 +163,7 @@ impl BullpenClient {
                 if let Some(tx) = &self.progress {
                     let _ = tx.send(extra);
                 }
-            } else if tool_name == Some("finalize_analysis") {
+            } else if matches!(tool_name, Some("finalize_analysis")) {
                 self.mark_finalization_received();
             }
         }
@@ -179,6 +189,8 @@ fn submitted_event_for(tool_name: Option<&str>) -> Option<ProgressEventPayload> 
         "submit_analysis_block" => Some(ProgressEventPayload::BlockSubmitted),
         "submit_final_stance" => Some(ProgressEventPayload::StanceSubmitted),
         "submit_projection" => Some(ProgressEventPayload::ProjectionSubmitted),
+        "submit_portfolio_scenario_analysis" => Some(ProgressEventPayload::ArtifactSubmitted),
+        "submit_portfolio_expected_return_model" => Some(ProgressEventPayload::ArtifactSubmitted),
         _ => None,
     }
 }

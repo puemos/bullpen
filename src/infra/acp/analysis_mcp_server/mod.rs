@@ -72,6 +72,30 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
             tool::create_submit_decision_criterion_answer_tool(config.clone()),
         )
         .tool(
+            "submit_holding_review",
+            tool::create_submit_holding_review_tool(config.clone()),
+        )
+        .tool(
+            "submit_allocation_review",
+            tool::create_submit_allocation_review_tool(config.clone()),
+        )
+        .tool(
+            "submit_portfolio_risk",
+            tool::create_submit_portfolio_risk_tool(config.clone()),
+        )
+        .tool(
+            "submit_rebalancing_suggestion",
+            tool::create_submit_rebalancing_suggestion_tool(config.clone()),
+        )
+        .tool(
+            "submit_portfolio_scenario_analysis",
+            tool::create_submit_portfolio_scenario_analysis_tool(config.clone()),
+        )
+        .tool(
+            "submit_portfolio_expected_return_model",
+            tool::create_submit_portfolio_expected_return_model_tool(config.clone()),
+        )
+        .tool(
             "finalize_analysis",
             tool::create_finalize_analysis_tool(config.clone()),
         );

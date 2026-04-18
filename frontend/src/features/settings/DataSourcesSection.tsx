@@ -68,8 +68,7 @@ export function DataSourcesSection() {
     [grouped],
   );
 
-  const setBusy = (id: string, busy: boolean) =>
-    setPending((prev) => ({ ...prev, [id]: busy }));
+  const setBusy = (id: string, busy: boolean) => setPending((prev) => ({ ...prev, [id]: busy }));
 
   const onSaveKey = async (id: string) => {
     const key = draftKey[id]?.trim();
@@ -110,10 +109,7 @@ export function DataSourcesSection() {
     try {
       const result = await testSourceKey(id);
       setTestResults((prev) => ({ ...prev, [id]: result }));
-      setTimeout(
-        () => setTestResults((prev) => ({ ...prev, [id]: null })),
-        4000,
-      );
+      setTimeout(() => setTestResults((prev) => ({ ...prev, [id]: null })), 4000);
     } catch (err) {
       setTestResults((prev) => ({
         ...prev,
@@ -126,9 +122,7 @@ export function DataSourcesSection() {
 
   const onToggleEnabled = async (id: string, enabled: boolean) => {
     if (!sources) return;
-    const next = sources
-      .filter((s) => (s.id === id ? enabled : s.enabled))
-      .map((s) => s.id);
+    const next = sources.filter((s) => (s.id === id ? enabled : s.enabled)).map((s) => s.id);
     setBusy(id, true);
     try {
       await setEnabledSources(next);
@@ -161,19 +155,11 @@ export function DataSourcesSection() {
         meta={
           sources && (
             <span className="flex items-center gap-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
-              <span className="tabular-nums">
-                {String(enabledCount).padStart(2, "0")} enabled
-              </span>
+              <span className="tabular-nums">{String(enabledCount).padStart(2, "0")} enabled</span>
               <span aria-hidden className="h-3 w-px bg-border" />
-              <span className="tabular-nums">
-                {String(keyedCount).padStart(2, "0")} keyed
-              </span>
+              <span className="tabular-nums">{String(keyedCount).padStart(2, "0")} keyed</span>
               <span aria-hidden className="h-3 w-px bg-border" />
-              <button
-                type="button"
-                onClick={onRefresh}
-                className="hover:text-foreground"
-              >
+              <button type="button" onClick={onRefresh} className="hover:text-foreground">
                 Refresh
               </button>
             </span>
@@ -181,9 +167,9 @@ export function DataSourcesSection() {
         }
       />
       <p className="max-w-[60ch] text-[14px] leading-[1.6] text-muted-foreground">
-        Enable the providers the agent may call during a research run. Paid-tier keys
-        live in your OS keychain — Bullpen never writes them to disk. Disable a
-        provider globally here, or flip it off for a single run from the composer.
+        Enable the providers the agent may call during a research run. Paid-tier keys live in your
+        OS keychain — Bullpen never writes them to disk. Disable a provider globally here, or flip
+        it off for a single run from the composer.
       </p>
       {error && <div className="text-sm text-destructive">{error}</div>}
       {!sources ? (
@@ -221,9 +207,7 @@ export function DataSourcesSection() {
                       onSave={() => void onSaveKey(src.id)}
                       onClear={() => void onClearKey(src.id)}
                       onTest={() => void onTestKey(src.id)}
-                      onToggleEnabled={(enabled) =>
-                        void onToggleEnabled(src.id, enabled)
-                      }
+                      onToggleEnabled={(enabled) => void onToggleEnabled(src.id, enabled)}
                     />
                   ))}
                 </div>
@@ -282,11 +266,7 @@ function ProviderRow({
           {src.description}
         </p>
       </div>
-      <EnabledToggle
-        enabled={src.enabled}
-        disabled={busy}
-        onChange={onToggleEnabled}
-      />
+      <EnabledToggle enabled={src.enabled} disabled={busy} onChange={onToggleEnabled} />
       <div className="col-span-2 space-y-3 pt-1">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
           <a
@@ -359,9 +339,7 @@ function ProviderRow({
               <span
                 className={
                   "ml-auto font-mono text-[10.5px] uppercase tracking-[0.14em] tabular-nums " +
-                  (testResult.status === "ok"
-                    ? "text-foreground"
-                    : "text-destructive")
+                  (testResult.status === "ok" ? "text-foreground" : "text-destructive")
                 }
               >
                 {testResult.status === "ok"
@@ -384,9 +362,7 @@ function ProviderRow({
               <span
                 className={
                   "font-mono text-[10.5px] uppercase tracking-[0.14em] tabular-nums " +
-                  (testResult.status === "ok"
-                    ? "text-foreground"
-                    : "text-destructive")
+                  (testResult.status === "ok" ? "text-foreground" : "text-destructive")
                 }
               >
                 {testResult.status === "ok"
@@ -424,9 +400,7 @@ function EnabledToggle({ enabled, disabled, onChange }: EnabledToggleProps) {
     >
       <span
         aria-hidden
-        className={
-          "h-1.5 w-1.5 " + (enabled ? "bg-background" : "bg-muted-foreground/60")
-        }
+        className={"h-1.5 w-1.5 " + (enabled ? "bg-background" : "bg-muted-foreground/60")}
       />
       <span>{enabled ? "Enabled" : "Disabled"}</span>
     </button>

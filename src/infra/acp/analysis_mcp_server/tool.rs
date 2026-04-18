@@ -1,10 +1,14 @@
 use super::config::ServerConfig;
 use crate::domain::{
-    AnalysisBlock, AnalysisIntent, AnalysisStatus, ArtifactColumn, ArtifactKind, ArtifactSeries,
-    BlockKind, CounterThesis, CriterionVerdict, DecisionCriterionAnswer, Entity, FinalStance,
-    Importance, MethodologyNote, MetricSnapshot, Projection, ProjectionScenario,
-    RESEARCH_DISCLAIMER, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
-    StructuredArtifact, UncertaintyEntry, VerificationStatus, age_days,
+    AllocationBucket, AllocationDimension, AllocationReview, AnalysisBlock, AnalysisIntent,
+    AnalysisStatus, ArtifactColumn, ArtifactKind, ArtifactSeries, BlockKind, CounterThesis,
+    CriterionVerdict, DecisionCriterionAnswer, Entity, FactorExposure, FinalStance, HoldingReview,
+    HoldingStance, Importance, MethodologyNote, MetricSnapshot, PortfolioExpectedReturnInput,
+    PortfolioExpectedReturnModel, PortfolioModelType, PortfolioRisk, PortfolioScenarioAnalysis,
+    PortfolioScenarioOutcome, PortfolioStressCase, Projection, ProjectionScenario,
+    RESEARCH_DISCLAIMER, RebalancingRow, RebalancingSuggestion, ResearchPlan, RiskLevel,
+    ScenarioLabel, Source, SourceReliability, StanceKind, StructuredArtifact, UncertaintyEntry,
+    VerificationStatus, age_days,
 };
 use crate::infra::db::Database;
 use pmcp::{SimpleTool, ToolHandler};
@@ -125,6 +129,15 @@ pub fn create_submit_research_plan_tool(config: Arc<ServerConfig>) -> impl ToolH
                 .as_deref()
                 .and_then(|v| AnalysisIntent::from_str(v).ok())
                 .unwrap_or_default();
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            let (_persisted_intent, portfolio_id) = database
+                .analysis_intent_and_portfolio_for_run(&context.run_id)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            if portfolio_id.is_some() && intent != AnalysisIntent::Portfolio {
+                return Err(pmcp::Error::Validation(format!(
+                    "intent: portfolio-linked analyses must submit intent='portfolio', got '{intent}'"
+                )));
+            }
             let plan = ResearchPlan {
                 id: uuid::Uuid::new_v4().to_string(),
                 run_id: context.run_id.clone(),
@@ -134,7 +147,6 @@ pub fn create_submit_research_plan_tool(config: Arc<ServerConfig>) -> impl ToolH
                 planned_checks: input.planned_checks,
                 created_at: now(),
             };
-            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
             database
                 .save_research_plan(&plan)
                 .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
@@ -149,7 +161,7 @@ pub fn create_submit_research_plan_tool(config: Arc<ServerConfig>) -> impl ToolH
         "type": "object",
         "required": ["summary", "decision_criteria", "planned_checks"],
         "properties": {
-            "intent": { "type": "string", "enum": ["single_equity", "compare_equities", "sector_analysis", "macro_theme", "watchlist", "general_research"] },
+            "intent": { "type": "string", "enum": ["single_equity", "compare_equities", "sector_analysis", "macro_theme", "watchlist", "portfolio", "general_research"] },
             "title": { "type": "string" },
             "summary": { "type": "string" },
             "decision_criteria": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -1222,6 +1234,906 @@ pub fn create_source_tool(
     .with_schema(schema)
 }
 
+fn validate_entity_id(
+    database: &Database,
+    run_id: &str,
+    field: &str,
+    entity_id: &str,
+) -> Result<(), pmcp::Error> {
+    let existing = database
+        .existing_entity_ids(run_id)
+        .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+    if !existing.contains(entity_id) {
+        return Err(pmcp::Error::Validation(format!(
+            "{field}: unknown entity_id '{entity_id}'; submit_entity_resolution it first"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitHoldingReviewArgs {
+    id: Option<String>,
+    entity_id: String,
+    stance: String,
+    rationale: String,
+    key_reasons: Vec<String>,
+    key_risks: Vec<String>,
+    confidence: Option<f64>,
+    importance: Option<String>,
+    evidence_ids: Vec<String>,
+    display_order: Option<i32>,
+}
+
+pub fn create_submit_holding_review_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_holding_review", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitHoldingReviewArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let stance = HoldingStance::from_str(&input.stance).map_err(pmcp::Error::Validation)?;
+            let confidence = parse_confidence("confidence", input.confidence)?;
+            let importance = Importance::from_str(
+                input
+                    .importance
+                    .as_deref()
+                    .ok_or_else(|| pmcp::Error::Validation("importance: required".to_string()))?,
+            )
+            .map_err(pmcp::Error::Validation)?;
+            if input.key_reasons.is_empty() {
+                return Err(pmcp::Error::Validation(
+                    "key_reasons: submit at least one reason".to_string(),
+                ));
+            }
+            if input.key_risks.is_empty() {
+                return Err(pmcp::Error::Validation(
+                    "key_risks: submit at least one risk".to_string(),
+                ));
+            }
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            validate_entity_id(&database, &context.run_id, "entity_id", &input.entity_id)?;
+            validate_evidence_ids(
+                &database,
+                &context.run_id,
+                "evidence_ids",
+                &input.evidence_ids,
+            )?;
+            let review = HoldingReview {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                entity_id: input.entity_id,
+                stance,
+                rationale: input.rationale,
+                key_reasons: input.key_reasons,
+                key_risks: input.key_risks,
+                confidence,
+                importance,
+                evidence_ids: input.evidence_ids,
+                display_order: input.display_order.unwrap_or(100),
+                created_at: now(),
+            };
+            database
+                .insert_holding_review(&review)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "holding_review_id": review.id }))
+        })
+    })
+    .with_description("Submit a per-holding review with stance, rationale, and evidence. Required for every resolved portfolio holding above ~2% weight.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["entity_id", "stance", "rationale", "key_reasons", "key_risks", "confidence", "importance", "evidence_ids"],
+        "properties": {
+            "id": { "type": "string" },
+            "entity_id": { "type": "string" },
+            "stance": { "type": "string", "enum": ["keep", "trim", "add", "watch", "exit", "mixed"] },
+            "rationale": { "type": "string" },
+            "key_reasons": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "key_risks": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "importance": { "type": "string", "enum": ["high", "medium", "low"] },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "display_order": { "type": "integer" }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitAllocationReviewArgs {
+    id: Option<String>,
+    summary: String,
+    dimensions: Vec<AllocationDimensionInput>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AllocationDimensionInput {
+    dimension: String,
+    breakdown: Vec<AllocationBucketInput>,
+    #[serde(default)]
+    concentration_flags: Vec<String>,
+    #[serde(default)]
+    overlap_notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AllocationBucketInput {
+    label: String,
+    weight: f64,
+    #[serde(default)]
+    commentary: Option<String>,
+}
+
+pub fn create_submit_allocation_review_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_allocation_review", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitAllocationReviewArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let confidence = parse_confidence("confidence", input.confidence)?;
+            if input.dimensions.is_empty() {
+                return Err(pmcp::Error::Validation(
+                    "dimensions: submit at least one allocation dimension".to_string(),
+                ));
+            }
+            let mut dimensions = Vec::with_capacity(input.dimensions.len());
+            for dim in input.dimensions {
+                if dim.breakdown.is_empty() {
+                    return Err(pmcp::Error::Validation(format!(
+                        "dimension '{}' must include at least one bucket",
+                        dim.dimension
+                    )));
+                }
+                let sum: f64 = dim.breakdown.iter().map(|b| b.weight).sum();
+                if (sum - 1.0).abs() > 0.02 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "dimension '{}' weights sum to {sum:.3}; must sum to 1.0 within 0.02",
+                        dim.dimension
+                    )));
+                }
+                for bucket in &dim.breakdown {
+                    if bucket.weight.is_nan() || !(0.0..=1.0).contains(&bucket.weight) {
+                        return Err(pmcp::Error::Validation(format!(
+                            "dimension '{}' bucket '{}' weight {:.3} must be in [0.0, 1.0]",
+                            dim.dimension, bucket.label, bucket.weight
+                        )));
+                    }
+                }
+                dimensions.push(AllocationDimension {
+                    dimension: crate::domain::AllocationAxis::from_str(&dim.dimension)
+                        .unwrap_or_default(),
+                    breakdown: dim
+                        .breakdown
+                        .into_iter()
+                        .map(|b| AllocationBucket {
+                            label: b.label,
+                            weight: b.weight,
+                            commentary: b.commentary,
+                        })
+                        .collect(),
+                    concentration_flags: dim.concentration_flags,
+                    overlap_notes: dim.overlap_notes,
+                });
+            }
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            validate_evidence_ids(
+                &database,
+                &context.run_id,
+                "evidence_ids",
+                &input.evidence_ids,
+            )?;
+            let review = AllocationReview {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                summary: input.summary,
+                dimensions,
+                evidence_ids: input.evidence_ids,
+                confidence,
+                created_at: now(),
+            };
+            database
+                .insert_allocation_review(&review)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "allocation_review_id": review.id }))
+        })
+    })
+    .with_description("Submit a portfolio-level allocation review. Per dimension (asset class, sector, geography, currency, other), weights must sum to ~1.0. Required exactly once for portfolio analyses.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["summary", "dimensions", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "summary": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "dimensions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["dimension", "breakdown"],
+                    "properties": {
+                        "dimension": { "type": "string", "enum": ["asset_class", "sector", "geography", "currency", "other"] },
+                        "breakdown": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "required": ["label", "weight"],
+                                "properties": {
+                                    "label": { "type": "string" },
+                                    "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                                    "commentary": { "type": "string" }
+                                }
+                            }
+                        },
+                        "concentration_flags": { "type": "array", "items": { "type": "string" } },
+                        "overlap_notes": { "type": "string" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitPortfolioRiskArgs {
+    id: Option<String>,
+    summary: String,
+    factor_exposures: Vec<FactorExposureInput>,
+    #[serde(default)]
+    correlation_notes: Option<String>,
+    #[serde(default)]
+    macro_sensitivities: Vec<String>,
+    #[serde(default)]
+    single_name_risks: Vec<String>,
+    #[serde(default)]
+    tail_risks: Vec<String>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FactorExposureInput {
+    factor: String,
+    level: String,
+    #[serde(default)]
+    commentary: Option<String>,
+}
+
+pub fn create_submit_portfolio_risk_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_portfolio_risk", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitPortfolioRiskArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let confidence = parse_confidence("confidence", input.confidence)?;
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            validate_evidence_ids(
+                &database,
+                &context.run_id,
+                "evidence_ids",
+                &input.evidence_ids,
+            )?;
+
+            let factor_exposures: Vec<FactorExposure> = input
+                .factor_exposures
+                .into_iter()
+                .map(|e| FactorExposure {
+                    factor: e.factor,
+                    level: RiskLevel::from_str(&e.level).unwrap_or_default(),
+                    commentary: e.commentary,
+                })
+                .collect();
+
+            let risk = PortfolioRisk {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                summary: input.summary,
+                factor_exposures,
+                correlation_notes: input.correlation_notes,
+                macro_sensitivities: input.macro_sensitivities,
+                single_name_risks: input.single_name_risks,
+                tail_risks: input.tail_risks,
+                evidence_ids: input.evidence_ids,
+                confidence,
+                created_at: now(),
+            };
+            database
+                .insert_portfolio_risk(&risk)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "portfolio_risk_id": risk.id }))
+        })
+    })
+    .with_description("Submit a portfolio-level risk review covering factor exposures, macro sensitivities, single-name risks, and tail risks. Required exactly once for portfolio analyses.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["summary", "factor_exposures", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "summary": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "correlation_notes": { "type": "string" },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "macro_sensitivities": { "type": "array", "items": { "type": "string" } },
+            "single_name_risks": { "type": "array", "items": { "type": "string" } },
+            "tail_risks": { "type": "array", "items": { "type": "string" } },
+            "factor_exposures": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["factor", "level"],
+                    "properties": {
+                        "factor": { "type": "string" },
+                        "level": { "type": "string", "enum": ["low", "medium", "high"] },
+                        "commentary": { "type": "string" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitRebalancingSuggestionArgs {
+    id: Option<String>,
+    rationale: String,
+    rows: Vec<RebalancingRowInput>,
+    #[serde(default)]
+    scenarios: Vec<String>,
+    #[serde(default)]
+    caveats: Vec<String>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RebalancingRowInput {
+    label: String,
+    current_weight: f64,
+    suggested_weight: f64,
+    delta: f64,
+    #[serde(default)]
+    commentary: Option<String>,
+}
+
+pub fn create_submit_rebalancing_suggestion_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new(
+        "submit_rebalancing_suggestion",
+        move |args: Value, _extra| {
+            let config = config.clone();
+            Box::pin(async move {
+                let input: SubmitRebalancingSuggestionArgs = serde_json::from_value(args)
+                    .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+                let context = config
+                    .load_context()
+                    .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+                let confidence = parse_confidence("confidence", input.confidence)?;
+                if input.rows.is_empty() {
+                    return Err(pmcp::Error::Validation(
+                        "rows: submit at least one rebalancing row".to_string(),
+                    ));
+                }
+                for row in &input.rows {
+                    let expected = row.suggested_weight - row.current_weight;
+                    if (expected - row.delta).abs() > 0.005 {
+                        return Err(pmcp::Error::Validation(format!(
+                            "row '{}' delta {:.3} must equal suggested {:.3} - current {:.3}",
+                            row.label, row.delta, row.suggested_weight, row.current_weight
+                        )));
+                    }
+                }
+                let suggested_sum: f64 = input.rows.iter().map(|r| r.suggested_weight).sum();
+                if (suggested_sum - 1.0).abs() > 0.02 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "suggested weights sum to {suggested_sum:.3}; must sum to 1.0 within 0.02"
+                    )));
+                }
+                let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                validate_evidence_ids(
+                    &database,
+                    &context.run_id,
+                    "evidence_ids",
+                    &input.evidence_ids,
+                )?;
+                let rows: Vec<RebalancingRow> = input
+                    .rows
+                    .into_iter()
+                    .map(|r| RebalancingRow {
+                        label: r.label,
+                        current_weight: r.current_weight,
+                        suggested_weight: r.suggested_weight,
+                        delta: r.delta,
+                        commentary: r.commentary,
+                    })
+                    .collect();
+                let suggestion = RebalancingSuggestion {
+                    id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    run_id: context.run_id,
+                    rationale: input.rationale,
+                    rows,
+                    scenarios: input.scenarios,
+                    caveats: input.caveats,
+                    evidence_ids: input.evidence_ids,
+                    confidence,
+                    created_at: now(),
+                };
+                database
+                    .insert_rebalancing_suggestion(&suggestion)
+                    .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                Ok(json!({ "status": "ok", "rebalancing_suggestion_id": suggestion.id }))
+            })
+        },
+    )
+    .with_description("Submit an optional portfolio rebalancing suggestion. Always framed as non-prescriptive scenarios. Rows must satisfy delta = suggested - current and suggested weights must sum to ~1.0.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["rationale", "rows", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "rationale": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "scenarios": { "type": "array", "items": { "type": "string" } },
+            "caveats": { "type": "array", "items": { "type": "string" } },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "rows": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["label", "current_weight", "suggested_weight", "delta"],
+                    "properties": {
+                        "label": { "type": "string" },
+                        "current_weight": { "type": "number" },
+                        "suggested_weight": { "type": "number" },
+                        "delta": { "type": "number" },
+                        "commentary": { "type": "string" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+fn validate_finite_fraction(field: &str, value: f64) -> Result<(), pmcp::Error> {
+    if !value.is_finite() {
+        return Err(pmcp::Error::Validation(format!(
+            "{field}: must be a finite number, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitPortfolioScenarioAnalysisArgs {
+    id: Option<String>,
+    horizon: String,
+    base_currency: String,
+    #[serde(default)]
+    current_value: Option<f64>,
+    methodology: String,
+    key_assumptions: Vec<String>,
+    scenarios: Vec<PortfolioScenarioOutcomeInput>,
+    stress_cases: Vec<PortfolioStressCaseInput>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PortfolioScenarioOutcomeInput {
+    label: String,
+    probability: f64,
+    portfolio_return_pct: f64,
+    #[serde(default)]
+    projected_value: Option<f64>,
+    rationale: String,
+    key_drivers: Vec<String>,
+    watch_indicators: Vec<String>,
+    evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PortfolioStressCaseInput {
+    name: String,
+    estimated_return_pct: f64,
+    rationale: String,
+    affected_exposures: Vec<String>,
+    mitigants: Vec<String>,
+    evidence_ids: Vec<String>,
+}
+
+pub fn create_submit_portfolio_scenario_analysis_tool(
+    config: Arc<ServerConfig>,
+) -> impl ToolHandler {
+    SimpleTool::new(
+        "submit_portfolio_scenario_analysis",
+        move |args: Value, _extra| {
+            let config = config.clone();
+            Box::pin(async move {
+                let input: SubmitPortfolioScenarioAnalysisArgs = serde_json::from_value(args)
+                    .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+                let context = config
+                    .load_context()
+                    .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+                let confidence = parse_confidence("confidence", input.confidence)?;
+                if input.key_assumptions.is_empty() {
+                    return Err(pmcp::Error::Validation(
+                        "key_assumptions: submit at least one assumption".to_string(),
+                    ));
+                }
+                if input.scenarios.len() != 3 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "scenarios: expected exactly bull/base/bear scenarios, got {}",
+                        input.scenarios.len()
+                    )));
+                }
+                if input.stress_cases.len() < 2 {
+                    return Err(pmcp::Error::Validation(
+                        "stress_cases: submit at least two named stress cases".to_string(),
+                    ));
+                }
+                if let Some(current_value) = input.current_value {
+                    validate_finite_fraction("current_value", current_value)?;
+                    if current_value <= 0.0 {
+                        return Err(pmcp::Error::Validation(
+                            "current_value: must be positive when supplied".to_string(),
+                        ));
+                    }
+                }
+
+                let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                let mut all_evidence = input.evidence_ids.clone();
+                let mut labels = HashSet::new();
+                let mut probability_sum = 0.0;
+                let mut scenarios = Vec::with_capacity(input.scenarios.len());
+                for (index, scenario) in input.scenarios.into_iter().enumerate() {
+                    let label = ScenarioLabel::from_str(&scenario.label)
+                        .map_err(pmcp::Error::Validation)?;
+                    if !labels.insert(label) {
+                        return Err(pmcp::Error::Validation(format!(
+                            "scenarios[{index}].label: duplicate '{label}'"
+                        )));
+                    }
+                    let probability =
+                        parse_probability(&format!("scenarios[{label}].probability"), scenario.probability)?;
+                    probability_sum += probability;
+                    validate_finite_fraction(
+                        &format!("scenarios[{label}].portfolio_return_pct"),
+                        scenario.portfolio_return_pct,
+                    )?;
+                    if scenario.key_drivers.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "scenarios[{label}].key_drivers: submit at least one driver"
+                        )));
+                    }
+                    if scenario.watch_indicators.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "scenarios[{label}].watch_indicators: submit at least one indicator"
+                        )));
+                    }
+                    if scenario.evidence_ids.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "scenarios[{label}].evidence_ids: submit at least one source id"
+                        )));
+                    }
+                    all_evidence.extend(scenario.evidence_ids.clone());
+                    let projected_value =
+                        scenario.projected_value.or_else(|| input.current_value.map(|v| {
+                            v * (1.0 + scenario.portfolio_return_pct)
+                        }));
+                    scenarios.push(PortfolioScenarioOutcome {
+                        label,
+                        probability,
+                        portfolio_return_pct: scenario.portfolio_return_pct,
+                        projected_value,
+                        rationale: scenario.rationale,
+                        key_drivers: scenario.key_drivers,
+                        watch_indicators: scenario.watch_indicators,
+                        evidence_ids: scenario.evidence_ids,
+                    });
+                }
+                for required in [ScenarioLabel::Bull, ScenarioLabel::Base, ScenarioLabel::Bear] {
+                    if !labels.contains(&required) {
+                        return Err(pmcp::Error::Validation(format!(
+                            "scenarios: missing required '{required}' scenario"
+                        )));
+                    }
+                }
+                if (probability_sum - 1.0).abs() > 0.02 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "scenario probabilities sum to {probability_sum:.3}; must sum to 1.0 within 0.02"
+                    )));
+                }
+
+                let mut stress_cases = Vec::with_capacity(input.stress_cases.len());
+                for (index, stress) in input.stress_cases.into_iter().enumerate() {
+                    validate_finite_fraction(
+                        &format!("stress_cases[{index}].estimated_return_pct"),
+                        stress.estimated_return_pct,
+                    )?;
+                    if stress.affected_exposures.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "stress_cases[{index}].affected_exposures: submit at least one exposure"
+                        )));
+                    }
+                    if stress.mitigants.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "stress_cases[{index}].mitigants: submit at least one mitigant or limitation"
+                        )));
+                    }
+                    if stress.evidence_ids.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "stress_cases[{index}].evidence_ids: submit at least one source id"
+                        )));
+                    }
+                    all_evidence.extend(stress.evidence_ids.clone());
+                    stress_cases.push(PortfolioStressCase {
+                        name: stress.name,
+                        estimated_return_pct: stress.estimated_return_pct,
+                        rationale: stress.rationale,
+                        affected_exposures: stress.affected_exposures,
+                        mitigants: stress.mitigants,
+                        evidence_ids: stress.evidence_ids,
+                    });
+                }
+                validate_evidence_ids(&database, &context.run_id, "evidence_ids", &all_evidence)?;
+
+                let analysis = PortfolioScenarioAnalysis {
+                    id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    run_id: context.run_id,
+                    horizon: input.horizon,
+                    base_currency: input.base_currency,
+                    current_value: input.current_value,
+                    methodology: input.methodology,
+                    key_assumptions: input.key_assumptions,
+                    scenarios,
+                    stress_cases,
+                    evidence_ids: input.evidence_ids,
+                    confidence,
+                    created_at: now(),
+                };
+                database
+                    .insert_portfolio_scenario_analysis(&analysis)
+                    .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                Ok(json!({ "status": "ok", "portfolio_scenario_analysis_id": analysis.id }))
+            })
+        },
+    )
+    .with_description("Submit required portfolio-level bull/base/bear outcome scenarios plus named stress cases. Percent fields are fractions, e.g. 0.08 for 8%.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["horizon", "base_currency", "methodology", "key_assumptions", "scenarios", "stress_cases", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "horizon": { "type": "string" },
+            "base_currency": { "type": "string" },
+            "current_value": { "type": "number" },
+            "methodology": { "type": "string" },
+            "key_assumptions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "scenarios": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "required": ["label", "probability", "portfolio_return_pct", "rationale", "key_drivers", "watch_indicators", "evidence_ids"],
+                    "properties": {
+                        "label": { "type": "string", "enum": ["bull", "base", "bear"] },
+                        "probability": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "portfolio_return_pct": { "type": "number" },
+                        "projected_value": { "type": "number" },
+                        "rationale": { "type": "string" },
+                        "key_drivers": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                        "watch_indicators": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                        "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                    }
+                }
+            },
+            "stress_cases": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                    "type": "object",
+                    "required": ["name", "estimated_return_pct", "rationale", "affected_exposures", "mitigants", "evidence_ids"],
+                    "properties": {
+                        "name": { "type": "string" },
+                        "estimated_return_pct": { "type": "number" },
+                        "rationale": { "type": "string" },
+                        "affected_exposures": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                        "mitigants": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                        "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitPortfolioExpectedReturnModelArgs {
+    id: Option<String>,
+    horizon: String,
+    model_type: String,
+    summary: String,
+    inputs: Vec<PortfolioExpectedReturnInputArg>,
+    #[serde(default)]
+    volatility_pct: Option<f64>,
+    correlation_assumptions: Vec<String>,
+    limitations: Vec<String>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PortfolioExpectedReturnInputArg {
+    name: String,
+    input_type: String,
+    weight: f64,
+    expected_return_pct: f64,
+    #[serde(default)]
+    volatility_pct: Option<f64>,
+    rationale: String,
+    evidence_ids: Vec<String>,
+}
+
+pub fn create_submit_portfolio_expected_return_model_tool(
+    config: Arc<ServerConfig>,
+) -> impl ToolHandler {
+    SimpleTool::new(
+        "submit_portfolio_expected_return_model",
+        move |args: Value, _extra| {
+            let config = config.clone();
+            Box::pin(async move {
+                let input: SubmitPortfolioExpectedReturnModelArgs = serde_json::from_value(args)
+                    .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+                let context = config
+                    .load_context()
+                    .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+                let confidence = parse_confidence("confidence", input.confidence)?;
+                let model_type =
+                    PortfolioModelType::from_str(&input.model_type).map_err(pmcp::Error::Validation)?;
+                if input.inputs.is_empty() {
+                    return Err(pmcp::Error::Validation(
+                        "inputs: submit at least one expected-return input".to_string(),
+                    ));
+                }
+                if input.correlation_assumptions.is_empty() {
+                    return Err(pmcp::Error::Validation(
+                        "correlation_assumptions: submit at least one assumption".to_string(),
+                    ));
+                }
+                if input.limitations.is_empty() {
+                    return Err(pmcp::Error::Validation(
+                        "limitations: submit at least one limitation".to_string(),
+                    ));
+                }
+                if let Some(volatility) = input.volatility_pct {
+                    validate_finite_fraction("volatility_pct", volatility)?;
+                    if volatility < 0.0 {
+                        return Err(pmcp::Error::Validation(
+                            "volatility_pct: must be non-negative".to_string(),
+                        ));
+                    }
+                }
+
+                let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                let mut all_evidence = input.evidence_ids.clone();
+                let mut model_inputs = Vec::with_capacity(input.inputs.len());
+                let mut weight_sum = 0.0;
+                let mut expected_return_pct = 0.0;
+                for (index, item) in input.inputs.into_iter().enumerate() {
+                    if item.weight.is_nan() || !(0.0..=1.0).contains(&item.weight) {
+                        return Err(pmcp::Error::Validation(format!(
+                            "inputs[{index}].weight {:.3} must be in [0.0, 1.0]",
+                            item.weight
+                        )));
+                    }
+                    validate_finite_fraction(
+                        &format!("inputs[{index}].expected_return_pct"),
+                        item.expected_return_pct,
+                    )?;
+                    if let Some(volatility) = item.volatility_pct {
+                        validate_finite_fraction(&format!("inputs[{index}].volatility_pct"), volatility)?;
+                        if volatility < 0.0 {
+                            return Err(pmcp::Error::Validation(format!(
+                                "inputs[{index}].volatility_pct: must be non-negative"
+                            )));
+                        }
+                    }
+                    if item.evidence_ids.is_empty() {
+                        return Err(pmcp::Error::Validation(format!(
+                            "inputs[{index}].evidence_ids: submit at least one source id"
+                        )));
+                    }
+                    weight_sum += item.weight;
+                    expected_return_pct += item.weight * item.expected_return_pct;
+                    all_evidence.extend(item.evidence_ids.clone());
+                    model_inputs.push(PortfolioExpectedReturnInput {
+                        name: item.name,
+                        input_type: item.input_type,
+                        weight: item.weight,
+                        expected_return_pct: item.expected_return_pct,
+                        volatility_pct: item.volatility_pct,
+                        rationale: item.rationale,
+                        evidence_ids: item.evidence_ids,
+                    });
+                }
+                if (weight_sum - 1.0).abs() > 0.02 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "input weights sum to {weight_sum:.3}; must sum to 1.0 within 0.02"
+                    )));
+                }
+                validate_evidence_ids(&database, &context.run_id, "evidence_ids", &all_evidence)?;
+
+                let model = PortfolioExpectedReturnModel {
+                    id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    run_id: context.run_id,
+                    horizon: input.horizon,
+                    model_type,
+                    summary: input.summary,
+                    expected_return_pct,
+                    volatility_pct: input.volatility_pct,
+                    inputs: model_inputs,
+                    correlation_assumptions: input.correlation_assumptions,
+                    limitations: input.limitations,
+                    evidence_ids: input.evidence_ids,
+                    confidence,
+                    created_at: now(),
+                };
+                database
+                    .insert_portfolio_expected_return_model(&model)
+                    .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                Ok(json!({ "status": "ok", "portfolio_expected_return_model_id": model.id, "expected_return_pct": model.expected_return_pct }))
+            })
+        },
+    )
+    .with_description("Submit the required portfolio expected-return model. Percent fields are fractions, e.g. 0.08 for 8%; expected_return_pct is derived server-side from inputs.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["horizon", "model_type", "summary", "inputs", "correlation_assumptions", "limitations", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "horizon": { "type": "string" },
+            "model_type": { "type": "string", "enum": ["holding_weighted", "asset_class_cma", "factor_overlay", "hybrid"] },
+            "summary": { "type": "string" },
+            "volatility_pct": { "type": "number" },
+            "correlation_assumptions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "limitations": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "inputs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["name", "input_type", "weight", "expected_return_pct", "rationale", "evidence_ids"],
+                    "properties": {
+                        "name": { "type": "string" },
+                        "input_type": { "type": "string" },
+                        "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "expected_return_pct": { "type": "number" },
+                        "volatility_pct": { "type": "number" },
+                        "rationale": { "type": "string" },
+                        "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                    }
+                }
+            }
+        }
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1407,6 +2319,148 @@ mod tests {
     }
 
     // -------- handler tests --------
+
+    fn valid_portfolio_scenario_args(source_id: &str) -> Value {
+        json!({
+            "horizon": "12 months",
+            "base_currency": "USD",
+            "current_value": 100000.0,
+            "methodology": "Holding-weighted scenario model.",
+            "key_assumptions": ["Equity beta remains the main driver."],
+            "evidence_ids": [source_id],
+            "confidence": 0.6,
+            "scenarios": [
+                {
+                    "label": "bull",
+                    "probability": 0.25,
+                    "portfolio_return_pct": 0.14,
+                    "rationale": "Risk assets rerate.",
+                    "key_drivers": ["earnings"],
+                    "watch_indicators": ["breadth"],
+                    "evidence_ids": [source_id]
+                },
+                {
+                    "label": "base",
+                    "probability": 0.55,
+                    "portfolio_return_pct": 0.06,
+                    "rationale": "Trend persists.",
+                    "key_drivers": ["margins"],
+                    "watch_indicators": ["guidance"],
+                    "evidence_ids": [source_id]
+                },
+                {
+                    "label": "bear",
+                    "probability": 0.20,
+                    "portfolio_return_pct": -0.12,
+                    "rationale": "Multiples compress.",
+                    "key_drivers": ["macro"],
+                    "watch_indicators": ["spreads"],
+                    "evidence_ids": [source_id]
+                }
+            ],
+            "stress_cases": [
+                {
+                    "name": "Rate shock",
+                    "estimated_return_pct": -0.08,
+                    "rationale": "Long-duration exposures compress.",
+                    "affected_exposures": ["growth"],
+                    "mitigants": ["cash"],
+                    "evidence_ids": [source_id]
+                },
+                {
+                    "name": "Dollar rally",
+                    "estimated_return_pct": -0.04,
+                    "rationale": "Currency translation lowers value.",
+                    "affected_exposures": ["non-USD revenue"],
+                    "mitigants": ["USD base"],
+                    "evidence_ids": [source_id]
+                }
+            ]
+        })
+    }
+
+    fn valid_expected_return_model_args(source_id: &str) -> Value {
+        json!({
+            "horizon": "12 months",
+            "model_type": "hybrid",
+            "summary": "Weighted assumptions imply moderate upside.",
+            "volatility_pct": 0.18,
+            "correlation_assumptions": ["Equities remain positively correlated."],
+            "limitations": ["No tax or personal-liability modeling."],
+            "evidence_ids": [source_id],
+            "confidence": 0.6,
+            "inputs": [
+                {
+                    "name": "Core equities",
+                    "input_type": "asset_class",
+                    "weight": 0.70,
+                    "expected_return_pct": 0.08,
+                    "volatility_pct": 0.20,
+                    "rationale": "Equity risk premium plus earnings growth.",
+                    "evidence_ids": [source_id]
+                },
+                {
+                    "name": "Cash and defensives",
+                    "input_type": "asset_class",
+                    "weight": 0.30,
+                    "expected_return_pct": 0.035,
+                    "volatility_pct": 0.04,
+                    "rationale": "Lower return ballast.",
+                    "evidence_ids": [source_id]
+                }
+            ]
+        })
+    }
+
+    #[tokio::test]
+    async fn submit_portfolio_scenario_analysis_rejects_bad_probability_sum() {
+        let (_tmp, config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+        let mut args = valid_portfolio_scenario_args(&source_id);
+        args["scenarios"][0]["probability"] = json!(0.50);
+
+        let handler = create_submit_portfolio_scenario_analysis_tool(config);
+        let err = handler.handle(args, extra()).await.unwrap_err();
+        assert!(matches!(
+            err,
+            pmcp::Error::Validation(ref message) if message.contains("probabilities sum")
+        ));
+    }
+
+    #[tokio::test]
+    async fn submit_portfolio_expected_return_model_derives_aggregate_return() {
+        let (_tmp, config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+
+        let handler = create_submit_portfolio_expected_return_model_tool(config);
+        let result = handler
+            .handle(valid_expected_return_model_args(&source_id), extra())
+            .await
+            .expect("model handler succeeds");
+        assert_eq!(result["status"], "ok");
+        assert!((result["expected_return_pct"].as_f64().unwrap() - 0.0665).abs() < 1e-9);
+
+        let saved = db
+            .get_portfolio_expected_return_models_for_run(&run_id)
+            .unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!((saved[0].expected_return_pct - 0.0665).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn submit_portfolio_expected_return_model_rejects_bad_weight_sum() {
+        let (_tmp, config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+        let mut args = valid_expected_return_model_args(&source_id);
+        args["inputs"][0]["weight"] = json!(0.90);
+
+        let handler = create_submit_portfolio_expected_return_model_tool(config);
+        let err = handler.handle(args, extra()).await.unwrap_err();
+        assert!(matches!(
+            err,
+            pmcp::Error::Validation(ref message) if message.contains("weights sum")
+        ));
+    }
 
     #[tokio::test]
     async fn submit_source_then_submit_block_succeeds() {
@@ -1612,5 +2666,116 @@ mod tests {
         // Status flipped to Completed.
         let runs = db.get_runs("a").unwrap();
         assert_eq!(runs[0].status, AnalysisStatus::Completed);
+    }
+
+    fn setup_portfolio_run() -> (TempDir, Arc<ServerConfig>, Database, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("bullpen-test.sqlite");
+        let ctx_path = tmp.path().join("ctx.json");
+        let db = Database::open_at(db_path.clone()).unwrap();
+        let run_id = seed_run(&db, "Review portfolio", AnalysisIntent::Portfolio);
+        // Seed an entity so submit_holding_review can validate.
+        db.save_entity(&crate::domain::Entity {
+            id: "AAPL".into(),
+            run_id: run_id.clone(),
+            symbol: Some("AAPL".into()),
+            name: "Apple Inc.".into(),
+            exchange: Some("NASDAQ".into()),
+            asset_type: "equity".into(),
+            sector: Some("Technology".into()),
+            country: Some("US".into()),
+            confidence: 0.95,
+            resolution_notes: None,
+        })
+        .unwrap();
+        save_source(&db, &run_id);
+        let context = RunContext {
+            analysis_id: "a".into(),
+            run_id: run_id.clone(),
+            agent_id: "fake".into(),
+            user_prompt: "Review".into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            enabled_sources: Vec::new(),
+        };
+        std::fs::write(&ctx_path, serde_json::to_string(&context).unwrap()).unwrap();
+        let config = Arc::new(ServerConfig {
+            run_context: Some(ctx_path),
+            db_path: Some(db_path),
+            source_keys: std::collections::HashMap::new(),
+        });
+        (tmp, config, db, run_id)
+    }
+
+    #[tokio::test]
+    async fn submit_holding_review_persists_and_rejects_unknown_evidence() {
+        let (_tmp, config, db, run_id) = setup_portfolio_run();
+
+        let handler = create_submit_holding_review_tool(config.clone());
+        let ok = handler
+            .handle(
+                json!({
+                    "id": "hr-1",
+                    "entity_id": "AAPL",
+                    "stance": "keep",
+                    "rationale": "Compounding services franchise.",
+                    "key_reasons": ["Cash generation"],
+                    "key_risks": ["Hardware cyclicality"],
+                    "confidence": 0.6,
+                    "importance": "high",
+                    "evidence_ids": ["source-1"]
+                }),
+                extra(),
+            )
+            .await
+            .expect("submit_holding_review succeeds with known evidence");
+        assert_eq!(ok["status"], "ok");
+        let persisted = db.get_holding_reviews_for_run(&run_id).unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].entity_id, "AAPL");
+
+        let err = handler
+            .handle(
+                json!({
+                    "entity_id": "AAPL",
+                    "stance": "keep",
+                    "rationale": "Bad evidence.",
+                    "key_reasons": ["x"],
+                    "key_risks": ["y"],
+                    "confidence": 0.6,
+                    "importance": "medium",
+                    "evidence_ids": ["ghost"]
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(ref m) if m.contains("ghost")));
+    }
+
+    #[tokio::test]
+    async fn submit_allocation_review_rejects_when_weights_do_not_sum_to_one() {
+        let (_tmp, config, _db, _run_id) = setup_portfolio_run();
+        let handler = create_submit_allocation_review_tool(config);
+        let err = handler
+            .handle(
+                json!({
+                    "summary": "Concentrated.",
+                    "confidence": 0.5,
+                    "evidence_ids": ["source-1"],
+                    "dimensions": [
+                        {
+                            "dimension": "asset_class",
+                            "breakdown": [
+                                { "label": "Equity", "weight": 0.6 },
+                                { "label": "Bonds", "weight": 0.3 }
+                            ]
+                        }
+                    ]
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(ref m) if m.contains("sum to 1.0")));
     }
 }

@@ -6,6 +6,7 @@ export type AnalysisIntent =
   | "sector_analysis"
   | "macro_theme"
   | "watchlist"
+  | "portfolio"
   | "general_research";
 
 export interface AgentModel {
@@ -72,10 +73,194 @@ export interface AnalysisSummary {
   status: AnalysisStatus;
   active_run_id: string | null;
   active_run_status: AnalysisStatus | null;
+  portfolio_id: string | null;
   block_count: number;
   source_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export type PortfolioImportKind = "positions" | "transactions";
+
+export type PortfolioTransactionAction =
+  | "buy"
+  | "sell"
+  | "dividend"
+  | "interest"
+  | "deposit"
+  | "withdrawal"
+  | "fee"
+  | "tax"
+  | "split"
+  | "transfer_in"
+  | "transfer_out"
+  | "other";
+
+export interface PortfolioSummary {
+  id: string;
+  name: string;
+  base_currency: string;
+  account_count: number;
+  holding_count: number;
+  total_market_value: number | null;
+  last_import_at: string | null;
+  updated_at: string;
+}
+
+export interface Portfolio {
+  id: string;
+  name: string;
+  base_currency: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PortfolioAccount {
+  id: string;
+  portfolio_id: string;
+  name: string;
+  institution: string | null;
+  account_type: string | null;
+  base_currency: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PortfolioImportWarning {
+  row_index: number | null;
+  message: string;
+}
+
+export interface PortfolioImportBatch {
+  id: string;
+  portfolio_id: string;
+  account_id: string;
+  source_name: string;
+  import_kind: PortfolioImportKind;
+  imported_at: string;
+  row_count: number;
+  imported_count: number;
+  duplicate_count: number;
+  review_count: number;
+  warnings: PortfolioImportWarning[];
+}
+
+export interface PortfolioPosition {
+  id: string;
+  portfolio_id: string;
+  account_id: string;
+  symbol: string;
+  market: string | null;
+  name: string | null;
+  asset_type: string;
+  quantity: number;
+  price: number | null;
+  market_value: number | null;
+  cost_basis: number | null;
+  currency: string;
+  as_of: string | null;
+  source_batch_id: string | null;
+  updated_at: string;
+  notes: string | null;
+}
+
+export interface PortfolioTransaction {
+  id: string;
+  portfolio_id: string;
+  account_id: string;
+  import_batch_id: string;
+  row_index: number;
+  trade_date: string | null;
+  action: PortfolioTransactionAction;
+  symbol: string | null;
+  market: string | null;
+  name: string | null;
+  asset_type: string;
+  quantity: number | null;
+  price: number | null;
+  gross_amount: number | null;
+  fees: number | null;
+  taxes: number | null;
+  currency: string;
+  notes: string | null;
+  raw_payload: unknown;
+  created_at: string;
+}
+
+export interface PortfolioHoldingAccount {
+  account_id: string;
+  account_name: string;
+  quantity: number;
+  market_value: number | null;
+  cost_basis: number | null;
+  currency: string;
+}
+
+export interface PortfolioHolding {
+  symbol: string;
+  market: string | null;
+  name: string | null;
+  asset_type: string;
+  quantity: number;
+  market_value: number | null;
+  cost_basis: number | null;
+  currency: string;
+  allocation_pct: number | null;
+  accounts: PortfolioHoldingAccount[];
+}
+
+export interface PortfolioDetail {
+  portfolio: Portfolio;
+  accounts: PortfolioAccount[];
+  holdings: PortfolioHolding[];
+  positions: PortfolioPosition[];
+  transactions: PortfolioTransaction[];
+  import_batches: PortfolioImportBatch[];
+}
+
+export interface PortfolioCsvRow {
+  row_index: number;
+  raw: Record<string, string>;
+  symbol: string | null;
+  market: string | null;
+  name: string | null;
+  asset_type: string | null;
+  quantity: number | null;
+  price: number | null;
+  market_value: number | null;
+  cost_basis: number | null;
+  gross_amount: number | null;
+  fees: number | null;
+  taxes: number | null;
+  currency: string | null;
+  trade_date: string | null;
+  action: string | null;
+  notes: string | null;
+}
+
+export interface PortfolioCsvImportInput {
+  portfolio_id: string | null;
+  portfolio_name: string | null;
+  account_id: string | null;
+  account_name: string | null;
+  institution: string | null;
+  account_type: string | null;
+  base_currency: string;
+  source_name: string;
+  import_kind: PortfolioImportKind;
+  rows: PortfolioCsvRow[];
+}
+
+export interface PortfolioImportResult {
+  portfolio_id: string;
+  account_id: string;
+  batch_id: string;
+  row_count: number;
+  imported_count: number;
+  duplicate_count: number;
+  review_count: number;
+  warnings: PortfolioImportWarning[];
+  holdings: PortfolioHolding[];
 }
 
 export interface Analysis {
@@ -85,6 +270,7 @@ export interface Analysis {
   intent: AnalysisIntent;
   status: AnalysisStatus;
   active_run_id: string | null;
+  portfolio_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -315,6 +501,155 @@ export interface DecisionCriterionAnswer {
   created_at: string;
 }
 
+export type HoldingStance = "keep" | "trim" | "add" | "watch" | "exit" | "mixed";
+export type AllocationAxis = "asset_class" | "sector" | "geography" | "currency" | "other";
+export type RiskLevel = "low" | "medium" | "high";
+
+export interface HoldingReview {
+  id: string;
+  run_id: string;
+  entity_id: string;
+  stance: HoldingStance;
+  rationale: string;
+  key_reasons: string[];
+  key_risks: string[];
+  confidence: number;
+  importance: Importance;
+  evidence_ids: string[];
+  display_order: number;
+  created_at: string;
+}
+
+export interface AllocationBucket {
+  label: string;
+  weight: number;
+  commentary: string | null;
+}
+
+export interface AllocationDimension {
+  dimension: AllocationAxis;
+  breakdown: AllocationBucket[];
+  concentration_flags: string[];
+  overlap_notes: string | null;
+}
+
+export interface AllocationReview {
+  id: string;
+  run_id: string;
+  summary: string;
+  dimensions: AllocationDimension[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
+export interface FactorExposure {
+  factor: string;
+  level: RiskLevel;
+  commentary: string | null;
+}
+
+export interface PortfolioRisk {
+  id: string;
+  run_id: string;
+  summary: string;
+  factor_exposures: FactorExposure[];
+  correlation_notes: string | null;
+  macro_sensitivities: string[];
+  single_name_risks: string[];
+  tail_risks: string[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
+export interface RebalancingRow {
+  label: string;
+  current_weight: number;
+  suggested_weight: number;
+  delta: number;
+  commentary: string | null;
+}
+
+export interface RebalancingSuggestion {
+  id: string;
+  run_id: string;
+  rationale: string;
+  rows: RebalancingRow[];
+  scenarios: string[];
+  caveats: string[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
+export interface PortfolioScenarioOutcome {
+  label: ScenarioLabel;
+  probability: number;
+  portfolio_return_pct: number;
+  projected_value: number | null;
+  rationale: string;
+  key_drivers: string[];
+  watch_indicators: string[];
+  evidence_ids: string[];
+}
+
+export interface PortfolioStressCase {
+  name: string;
+  estimated_return_pct: number;
+  rationale: string;
+  affected_exposures: string[];
+  mitigants: string[];
+  evidence_ids: string[];
+}
+
+export interface PortfolioScenarioAnalysis {
+  id: string;
+  run_id: string;
+  horizon: string;
+  base_currency: string;
+  current_value: number | null;
+  methodology: string;
+  key_assumptions: string[];
+  scenarios: PortfolioScenarioOutcome[];
+  stress_cases: PortfolioStressCase[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
+export type PortfolioModelType =
+  | "holding_weighted"
+  | "asset_class_cma"
+  | "factor_overlay"
+  | "hybrid";
+
+export interface PortfolioExpectedReturnInput {
+  name: string;
+  input_type: string;
+  weight: number;
+  expected_return_pct: number;
+  volatility_pct: number | null;
+  rationale: string;
+  evidence_ids: string[];
+}
+
+export interface PortfolioExpectedReturnModel {
+  id: string;
+  run_id: string;
+  horizon: string;
+  model_type: PortfolioModelType;
+  summary: string;
+  expected_return_pct: number;
+  volatility_pct: number | null;
+  inputs: PortfolioExpectedReturnInput[];
+  correlation_assumptions: string[];
+  limitations: string[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
 export interface AnalysisReport {
   analysis: Analysis;
   runs: AnalysisRun[];
@@ -330,6 +665,12 @@ export interface AnalysisReport {
   uncertainty_entries: UncertaintyEntry[];
   methodology_note: MethodologyNote | null;
   decision_criterion_answers: DecisionCriterionAnswer[];
+  holding_reviews: HoldingReview[];
+  allocation_reviews: AllocationReview[];
+  portfolio_risks: PortfolioRisk[];
+  rebalancing_suggestions: RebalancingSuggestion[];
+  portfolio_scenario_analyses: PortfolioScenarioAnalysis[];
+  portfolio_expected_return_models: PortfolioExpectedReturnModel[];
 }
 
 export interface PlanEntry {
