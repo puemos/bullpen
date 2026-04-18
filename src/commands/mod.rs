@@ -628,12 +628,22 @@ fn render_markdown(report: &AnalysisReport) -> String {
             );
             let _ = writeln!(out, "**Methodology:** {}\n", projection.methodology);
             for scenario in &projection.scenarios {
+                // Derive upside from target/current instead of the stored
+                // `upside_pct` field — historical rows mixed fraction and
+                // percent conventions, so computing fresh is the only way
+                // to guarantee the markdown export matches what the viewer
+                // shows.
+                let upside_fraction = if projection.current_value.abs() > f64::EPSILON {
+                    (scenario.target_value - projection.current_value) / projection.current_value
+                } else {
+                    0.0
+                };
                 let _ = writeln!(
                     out,
                     "- **{}** → {} ({:+.1}%, probability {:.0}%) — {}",
                     scenario.label,
                     scenario.target_label,
-                    scenario.upside_pct * 100.0,
+                    upside_fraction * 100.0,
                     scenario.probability * 100.0,
                     scenario.rationale
                 );

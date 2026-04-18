@@ -758,7 +758,6 @@ struct SubmitProjectionScenarioArgs {
     label: String,
     target_value: f64,
     target_label: Option<String>,
-    upside_pct: Option<f64>,
     probability: f64,
     rationale: String,
     #[serde(default)]
@@ -814,13 +813,17 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
                 let target_label = scenario
                     .target_label
                     .unwrap_or_else(|| format!("{:.2}", scenario.target_value));
-                let upside_pct = scenario.upside_pct.unwrap_or_else(|| {
-                    if current_value.abs() > f64::EPSILON {
-                        (scenario.target_value - current_value) / current_value
-                    } else {
-                        0.0
-                    }
-                });
+                // `upside_pct` is derived, not user-input. The MCP schema
+                // previously accepted it; agents submitted it in mixed units
+                // (fraction vs percent) which corrupted every downstream
+                // renderer. Compute it once, server-side, from
+                // (target - current) / current and ignore anything the
+                // agent sent.
+                let upside_pct = if current_value.abs() > f64::EPSILON {
+                    (scenario.target_value - current_value) / current_value
+                } else {
+                    0.0
+                };
                 scenarios.push(ProjectionScenario {
                     label,
                     target_value: scenario.target_value,
@@ -891,7 +894,6 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
                         "label": { "type": "string", "enum": ["bull", "base", "bear"] },
                         "target_value": { "type": "number" },
                         "target_label": { "type": "string" },
-                        "upside_pct": { "type": "number" },
                         "probability": { "type": "number", "minimum": 0, "maximum": 1 },
                         "rationale": { "type": "string" },
                         "catalysts": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
