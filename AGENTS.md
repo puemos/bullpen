@@ -15,6 +15,25 @@ Bullpen is a Rust/Tauri desktop app with a Vite React frontend. Rust application
 - `cargo fmt`: format Rust code with rustfmt.
 - `cargo clippy --all-targets --all-features`: run Rust lint checks.
 
+## CI Validation (Zero Tolerance)
+
+Before committing, all checks must pass with **zero warnings**:
+
+**Frontend:**
+```bash
+cd frontend && pnpm check:ci   # Biome lint + format (must pass cleanly)
+cd frontend && pnpm build      # TypeScript type-check (no errors)
+```
+
+**Rust:**
+```bash
+cargo fmt --check                                    # Formatting (no diffs)
+cargo clippy --all-targets --all-features -- -D warnings  # Lint (warnings = errors)
+cargo test                                           # All tests pass
+```
+
+Do not push code that produces warnings. Fix all clippy lints, biome issues, and type errors before committing.
+
 ## Coding Style & Naming Conventions
 
 Rust uses edition 2024 and the stable toolchain defined in `rust-toolchain.toml`. Keep modules small and aligned with the existing layers: domain logic should not depend on Tauri, SQLite, or ACP process details. Use `snake_case` for Rust modules, functions, and fields; use `PascalCase` for Rust types and React components. Frontend TypeScript follows the existing style: ES modules, functional React components, single quotes, and two-space indentation in JSX/TSX.
