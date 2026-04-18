@@ -5,8 +5,8 @@ pub use error::CommandError;
 
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
-    Portfolio, PortfolioCsvImportInput, PortfolioDetail, PortfolioImportResult, PortfolioSummary,
-    RunContext, stance_stale_metric_names,
+    Portfolio, PortfolioCsvImportInput, PortfolioCsvRow, PortfolioDetail, PortfolioImportResult,
+    PortfolioSummary, RunContext, stance_stale_metric_names,
 };
 use crate::infra::acp::analysis_generator::{
     AcpCancelled, GenerateAnalysisInput, generate_with_acp,
@@ -41,6 +41,11 @@ pub struct DataChangedPayload {
 pub struct GenerateAnalysisResult {
     pub analysis_id: String,
     pub run_id: String,
+}
+
+#[tauri::command]
+pub async fn parse_portfolio_csv(text: String) -> Result<Vec<PortfolioCsvRow>, CommandError> {
+    Ok(crate::infra::csv_parser::parse_portfolio_csv(&text))
 }
 
 #[tauri::command]

@@ -7,6 +7,7 @@ import type {
   AppSettings,
   Portfolio,
   PortfolioCsvImportInput,
+  PortfolioCsvRow,
   PortfolioDetail,
   PortfolioImportResult,
   PortfolioSummary,
@@ -62,6 +63,10 @@ export async function importPortfolioCsv(
   input: PortfolioCsvImportInput,
 ): Promise<PortfolioImportResult> {
   return invoke("import_portfolio_csv", { input });
+}
+
+export async function parsePortfolioCsv(text: string): Promise<PortfolioCsvRow[]> {
+  return invoke("parse_portfolio_csv", { text });
 }
 
 export async function deletePortfolio(portfolioId: string): Promise<void> {

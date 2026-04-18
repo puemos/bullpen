@@ -53,6 +53,7 @@ fn main() {
             commands::get_portfolios,
             commands::get_portfolio_detail,
             commands::import_portfolio_csv,
+            commands::parse_portfolio_csv,
             commands::delete_portfolio,
             commands::rename_portfolio,
             commands::create_analysis,

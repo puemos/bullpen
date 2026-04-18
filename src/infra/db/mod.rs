@@ -2434,6 +2434,7 @@ impl Database {
         let transactions = self.get_portfolio_transactions(portfolio_id)?;
         let import_batches = self.get_portfolio_import_batches(portfolio_id)?;
         let holdings = derive_holdings(&accounts, &positions, &transactions);
+        let totals_by_currency = compute_totals_by_currency(&holdings, &portfolio.base_currency);
         Ok(Some(PortfolioDetail {
             portfolio,
             accounts,
@@ -2441,6 +2442,7 @@ impl Database {
             positions,
             transactions,
             import_batches,
+            totals_by_currency,
         }))
     }
 
@@ -3131,6 +3133,35 @@ fn total_market_value(holdings: &[PortfolioHolding], base_currency: &str) -> Opt
         has_value = true;
     }
     has_value.then_some(total)
+}
+
+fn compute_totals_by_currency(
+    holdings: &[PortfolioHolding],
+    base_currency: &str,
+) -> Vec<(String, f64)> {
+    let mut totals: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for holding in holdings {
+        let Some(market_value) = holding.market_value else {
+            continue;
+        };
+        let code = if holding.currency.is_empty() {
+            base_currency.to_string()
+        } else {
+            holding.currency.clone()
+        };
+        *totals.entry(code).or_insert(0.0) += market_value;
+    }
+    let mut result: Vec<_> = totals.into_iter().collect();
+    result.sort_by(|(a, _), (b, _)| {
+        if a == base_currency {
+            std::cmp::Ordering::Less
+        } else if b == base_currency {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
+    });
+    result
 }
 
 fn sum_optional(left: Option<f64>, right: Option<f64>) -> Option<f64> {

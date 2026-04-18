@@ -216,6 +216,7 @@ export interface PortfolioDetail {
   positions: PortfolioPosition[];
   transactions: PortfolioTransaction[];
   import_batches: PortfolioImportBatch[];
+  totals_by_currency: [string, number][];
 }
 
 export interface PortfolioCsvRow {

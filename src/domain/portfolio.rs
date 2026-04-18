@@ -255,6 +255,7 @@ pub struct PortfolioDetail {
     pub positions: Vec<PortfolioPosition>,
     pub transactions: Vec<PortfolioTransaction>,
     pub import_batches: Vec<PortfolioImportBatch>,
+    pub totals_by_currency: Vec<(String, f64)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

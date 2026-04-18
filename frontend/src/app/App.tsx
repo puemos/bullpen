@@ -223,6 +223,7 @@ export function App() {
           positions: [],
           transactions: [],
           import_batches: [],
+          totals_by_currency: [],
         }
       : null;
 

@@ -44,6 +44,7 @@ import {
   getPriceHistory,
   getSettings,
   importPortfolioCsv,
+  parsePortfolioCsv,
   renamePortfolio,
   updateSettings,
 } from "@/shared/api/commands";
@@ -70,8 +71,6 @@ async function persistModelByAgent(map: Record<string, string | null>) {
   }
 }
 
-type CsvField = keyof Omit<PortfolioCsvRow, "row_index" | "raw">;
-
 interface PortfolioPageProps {
   agents: AgentCandidate[];
   onRefresh: () => Promise<void> | void;
@@ -79,24 +78,6 @@ interface PortfolioPageProps {
 }
 
 const CURRENCY_OPTIONS = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD", "SEK", "NOK"] as const;
-
-const FIELD_ALIASES: Record<CsvField, string[]> = {
-  symbol: ["symbol", "ticker", "isin", "cusip", "instrument", "security"],
-  market: ["market", "exchange", "venue", "mic", "listing"],
-  name: ["name", "description", "instrument name", "security name"],
-  asset_type: ["asset type", "type", "category", "asset class"],
-  quantity: ["quantity", "qty", "shares", "units"],
-  price: ["price", "unit price", "last price"],
-  market_value: ["market value", "value", "current value"],
-  cost_basis: ["cost basis", "book value", "cost", "invested"],
-  gross_amount: ["gross amount", "amount", "net amount", "total"],
-  fees: ["fees", "commission", "commissions"],
-  taxes: ["tax", "taxes", "withholding"],
-  currency: ["currency", "ccy"],
-  trade_date: ["date", "as of", "trade date", "settlement date"],
-  action: ["action", "operation"],
-  notes: ["notes", "note", "memo", "comment"],
-};
 
 export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: PortfolioPageProps) {
   const _portfolios = useAppStore((state) => state.portfolios);
@@ -267,17 +248,7 @@ function PortfolioView({
     },
   });
 
-  const totalsByCurrency = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const holding of detail.holdings) {
-      if (holding.market_value === null) continue;
-      const code = holding.currency || baseCurrency;
-      totals.set(code, (totals.get(code) ?? 0) + holding.market_value);
-    }
-    return Array.from(totals.entries()).sort(([a], [b]) =>
-      a === baseCurrency ? -1 : b === baseCurrency ? 1 : a.localeCompare(b),
-    );
-  }, [detail.holdings, baseCurrency]);
+  const totalsByCurrency = detail.totals_by_currency;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -299,12 +270,20 @@ function PortfolioView({
       toast.error("Paste or upload a snapshot first");
       return;
     }
-    const rows = parseSnapshotRows(trimmed);
-    if (rows.length === 0) {
-      toast.error("No importable rows detected");
+    setSubmitting(true);
+    let rows: PortfolioCsvRow[];
+    try {
+      rows = await parsePortfolioCsv(trimmed);
+    } catch (err) {
+      toast.error("CSV parsing failed", { description: String(err) });
+      setSubmitting(false);
       return;
     }
-    setSubmitting(true);
+    if (rows.length === 0) {
+      toast.error("No importable rows detected");
+      setSubmitting(false);
+      return;
+    }
     try {
       const input: PortfolioCsvImportInput = {
         portfolio_id: detail.portfolio.id,
@@ -1001,151 +980,6 @@ function FieldLabel({ label }: { label: string }) {
       {label}
     </span>
   );
-}
-
-function parseSnapshotRows(text: string): PortfolioCsvRow[] {
-  // Drop leading blank lines so a stray newline before the header doesn't
-  // prevent header detection.
-  const records = parseCsvRecords(text).filter((r) => r.some((c) => c.trim()));
-  if (records.length === 0) return [];
-  const headers = records[0].map((header, index) => header.trim() || `col_${index + 1}`);
-  const looksLikeHeader = headers.some((header) => inferField(header) !== null);
-  const data = looksLikeHeader ? records.slice(1) : records;
-  const headerRow = looksLikeHeader ? headers : defaultHeaders(records[0].length);
-  const mapping = buildHeaderMapping(headerRow);
-  const rows: PortfolioCsvRow[] = [];
-  data.forEach((record, index) => {
-    if (record.every((cell) => !cell.trim())) return;
-    const raw: Record<string, string> = {};
-    headerRow.forEach((header, columnIndex) => {
-      raw[header] = record[columnIndex]?.trim() ?? "";
-    });
-    rows.push({
-      row_index: index + 1,
-      raw,
-      symbol: pickString(raw, mapping.symbol),
-      market: pickString(raw, mapping.market),
-      name: pickString(raw, mapping.name),
-      asset_type: pickString(raw, mapping.asset_type),
-      quantity: pickNumber(raw, mapping.quantity),
-      price: pickNumber(raw, mapping.price),
-      market_value: pickNumber(raw, mapping.market_value),
-      cost_basis: pickNumber(raw, mapping.cost_basis),
-      gross_amount: pickNumber(raw, mapping.gross_amount),
-      fees: pickNumber(raw, mapping.fees),
-      taxes: pickNumber(raw, mapping.taxes),
-      currency: pickString(raw, mapping.currency),
-      trade_date: pickString(raw, mapping.trade_date),
-      action: pickString(raw, mapping.action),
-      notes: pickString(raw, mapping.notes),
-    });
-  });
-  return rows;
-}
-
-function defaultHeaders(count: number): string[] {
-  // ≥5-column CSVs commonly include a market/exchange column between symbol
-  // and quantity (the typical broker export format).
-  const names =
-    count >= 5
-      ? ["symbol", "market", "quantity", "price", "currency"]
-      : ["symbol", "quantity", "price", "currency"];
-  return Array.from({ length: count }, (_, index) => names[index] ?? `col_${index + 1}`);
-}
-
-function buildHeaderMapping(headers: string[]): Record<CsvField, string | null> {
-  const mapping = (Object.keys(FIELD_ALIASES) as CsvField[]).reduce(
-    (acc, field) => {
-      acc[field] = null;
-      return acc;
-    },
-    {} as Record<CsvField, string | null>,
-  );
-  headers.forEach((header) => {
-    const field = inferField(header);
-    if (field && !mapping[field]) mapping[field] = header;
-  });
-  return mapping;
-}
-
-function inferField(header: string): CsvField | null {
-  const normalized = header
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-  if (!normalized) return null;
-  const entries = Object.entries(FIELD_ALIASES) as [CsvField, string[]][];
-  for (const [field, aliases] of entries) {
-    if (aliases.some((alias) => normalized === alias)) return field;
-  }
-  for (const [field, aliases] of entries) {
-    if (aliases.some((alias) => normalized.includes(alias))) return field;
-  }
-  return null;
-}
-
-function pickString(raw: Record<string, string>, header: string | null): string | null {
-  if (!header) return null;
-  const value = raw[header]?.trim();
-  return value ? value : null;
-}
-
-function pickNumber(raw: Record<string, string>, header: string | null): number | null {
-  const value = pickString(raw, header);
-  if (!value) return null;
-  const stripped = value.replace(/[^0-9,.-]/g, "");
-  const lastComma = stripped.lastIndexOf(",");
-  const lastDot = stripped.lastIndexOf(".");
-  let normalized = stripped;
-  if (lastComma > -1 && lastDot > -1) {
-    const decimal = lastComma > lastDot ? "," : ".";
-    const thousands = decimal === "," ? "." : ",";
-    normalized = stripped.replaceAll(thousands, "").replace(decimal, ".");
-  } else if (lastComma > -1) {
-    normalized = stripped.replace(",", ".");
-  }
-  const parsed = Number.parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseCsvRecords(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        cell += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if ((char === "," || char === "\t") && !inQuotes) {
-      row.push(cell);
-      cell = "";
-    } else if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") index += 1;
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-
-  if (cell || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-
-  return rows;
 }
 
 function formatMoney(value: number, currency: string): string {
