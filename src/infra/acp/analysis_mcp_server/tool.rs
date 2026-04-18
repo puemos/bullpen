@@ -1,10 +1,12 @@
 use super::config::ServerConfig;
 use crate::domain::{
-    AnalysisBlock, AnalysisIntent, AnalysisStatus, ArtifactColumn, ArtifactKind, ArtifactSeries,
-    BlockKind, CounterThesis, CriterionVerdict, DecisionCriterionAnswer, Entity, FinalStance,
-    Importance, MethodologyNote, MetricSnapshot, Projection, ProjectionScenario,
-    RESEARCH_DISCLAIMER, ResearchPlan, ScenarioLabel, Source, SourceReliability, StanceKind,
-    StructuredArtifact, UncertaintyEntry, VerificationStatus, age_days,
+    AllocationBucket, AllocationDimension, AllocationReview, AnalysisBlock, AnalysisIntent,
+    AnalysisStatus, ArtifactColumn, ArtifactKind, ArtifactSeries, BlockKind, CounterThesis,
+    CriterionVerdict, DecisionCriterionAnswer, Entity, FactorExposure, FinalStance, HoldingReview,
+    HoldingStance, Importance, MethodologyNote, MetricSnapshot, PortfolioRisk, Projection,
+    ProjectionScenario, RESEARCH_DISCLAIMER, RebalancingRow, RebalancingSuggestion, ResearchPlan,
+    RiskLevel, ScenarioLabel, Source, SourceReliability, StanceKind, StructuredArtifact,
+    UncertaintyEntry, VerificationStatus, age_days,
 };
 use crate::infra::db::Database;
 use pmcp::{SimpleTool, ToolHandler};
@@ -1222,6 +1224,477 @@ pub fn create_source_tool(
     .with_schema(schema)
 }
 
+fn validate_entity_id(
+    database: &Database,
+    run_id: &str,
+    field: &str,
+    entity_id: &str,
+) -> Result<(), pmcp::Error> {
+    let existing = database
+        .existing_entity_ids(run_id)
+        .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+    if !existing.contains(entity_id) {
+        return Err(pmcp::Error::Validation(format!(
+            "{field}: unknown entity_id '{entity_id}'; submit_entity_resolution it first"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitHoldingReviewArgs {
+    id: Option<String>,
+    entity_id: String,
+    stance: String,
+    rationale: String,
+    key_reasons: Vec<String>,
+    key_risks: Vec<String>,
+    confidence: Option<f64>,
+    importance: Option<String>,
+    evidence_ids: Vec<String>,
+    display_order: Option<i32>,
+}
+
+pub fn create_submit_holding_review_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_holding_review", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitHoldingReviewArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let stance = HoldingStance::from_str(&input.stance).map_err(pmcp::Error::Validation)?;
+            let confidence = parse_confidence("confidence", input.confidence)?;
+            let importance = Importance::from_str(
+                input
+                    .importance
+                    .as_deref()
+                    .ok_or_else(|| pmcp::Error::Validation("importance: required".to_string()))?,
+            )
+            .map_err(pmcp::Error::Validation)?;
+            if input.key_reasons.is_empty() {
+                return Err(pmcp::Error::Validation(
+                    "key_reasons: submit at least one reason".to_string(),
+                ));
+            }
+            if input.key_risks.is_empty() {
+                return Err(pmcp::Error::Validation(
+                    "key_risks: submit at least one risk".to_string(),
+                ));
+            }
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            validate_entity_id(&database, &context.run_id, "entity_id", &input.entity_id)?;
+            validate_evidence_ids(
+                &database,
+                &context.run_id,
+                "evidence_ids",
+                &input.evidence_ids,
+            )?;
+            let review = HoldingReview {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                entity_id: input.entity_id,
+                stance,
+                rationale: input.rationale,
+                key_reasons: input.key_reasons,
+                key_risks: input.key_risks,
+                confidence,
+                importance,
+                evidence_ids: input.evidence_ids,
+                display_order: input.display_order.unwrap_or(100),
+                created_at: now(),
+            };
+            database
+                .insert_holding_review(&review)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "holding_review_id": review.id }))
+        })
+    })
+    .with_description("Submit a per-holding review with stance, rationale, and evidence. Required for every resolved portfolio holding above ~2% weight.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["entity_id", "stance", "rationale", "key_reasons", "key_risks", "confidence", "importance", "evidence_ids"],
+        "properties": {
+            "id": { "type": "string" },
+            "entity_id": { "type": "string" },
+            "stance": { "type": "string", "enum": ["keep", "trim", "add", "watch", "exit", "mixed"] },
+            "rationale": { "type": "string" },
+            "key_reasons": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "key_risks": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "importance": { "type": "string", "enum": ["high", "medium", "low"] },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "display_order": { "type": "integer" }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitAllocationReviewArgs {
+    id: Option<String>,
+    summary: String,
+    dimensions: Vec<AllocationDimensionInput>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AllocationDimensionInput {
+    dimension: String,
+    breakdown: Vec<AllocationBucketInput>,
+    #[serde(default)]
+    concentration_flags: Vec<String>,
+    #[serde(default)]
+    overlap_notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AllocationBucketInput {
+    label: String,
+    weight: f64,
+    #[serde(default)]
+    commentary: Option<String>,
+}
+
+pub fn create_submit_allocation_review_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_allocation_review", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitAllocationReviewArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let confidence = parse_confidence("confidence", input.confidence)?;
+            if input.dimensions.is_empty() {
+                return Err(pmcp::Error::Validation(
+                    "dimensions: submit at least one allocation dimension".to_string(),
+                ));
+            }
+            let mut dimensions = Vec::with_capacity(input.dimensions.len());
+            for dim in input.dimensions {
+                if dim.breakdown.is_empty() {
+                    return Err(pmcp::Error::Validation(format!(
+                        "dimension '{}' must include at least one bucket",
+                        dim.dimension
+                    )));
+                }
+                let sum: f64 = dim.breakdown.iter().map(|b| b.weight).sum();
+                if (sum - 1.0).abs() > 0.02 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "dimension '{}' weights sum to {sum:.3}; must sum to 1.0 within 0.02",
+                        dim.dimension
+                    )));
+                }
+                for bucket in &dim.breakdown {
+                    if bucket.weight.is_nan() || !(0.0..=1.0).contains(&bucket.weight) {
+                        return Err(pmcp::Error::Validation(format!(
+                            "dimension '{}' bucket '{}' weight {:.3} must be in [0.0, 1.0]",
+                            dim.dimension, bucket.label, bucket.weight
+                        )));
+                    }
+                }
+                dimensions.push(AllocationDimension {
+                    dimension: crate::domain::AllocationAxis::from_str(&dim.dimension)
+                        .unwrap_or_default(),
+                    breakdown: dim
+                        .breakdown
+                        .into_iter()
+                        .map(|b| AllocationBucket {
+                            label: b.label,
+                            weight: b.weight,
+                            commentary: b.commentary,
+                        })
+                        .collect(),
+                    concentration_flags: dim.concentration_flags,
+                    overlap_notes: dim.overlap_notes,
+                });
+            }
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            validate_evidence_ids(
+                &database,
+                &context.run_id,
+                "evidence_ids",
+                &input.evidence_ids,
+            )?;
+            let review = AllocationReview {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                summary: input.summary,
+                dimensions,
+                evidence_ids: input.evidence_ids,
+                confidence,
+                created_at: now(),
+            };
+            database
+                .insert_allocation_review(&review)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "allocation_review_id": review.id }))
+        })
+    })
+    .with_description("Submit a portfolio-level allocation review. Per dimension (asset class, sector, geography, currency, other), weights must sum to ~1.0. Required exactly once for portfolio analyses.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["summary", "dimensions", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "summary": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "dimensions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["dimension", "breakdown"],
+                    "properties": {
+                        "dimension": { "type": "string", "enum": ["asset_class", "sector", "geography", "currency", "other"] },
+                        "breakdown": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "required": ["label", "weight"],
+                                "properties": {
+                                    "label": { "type": "string" },
+                                    "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                                    "commentary": { "type": "string" }
+                                }
+                            }
+                        },
+                        "concentration_flags": { "type": "array", "items": { "type": "string" } },
+                        "overlap_notes": { "type": "string" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitPortfolioRiskArgs {
+    id: Option<String>,
+    summary: String,
+    factor_exposures: Vec<FactorExposureInput>,
+    #[serde(default)]
+    correlation_notes: Option<String>,
+    #[serde(default)]
+    macro_sensitivities: Vec<String>,
+    #[serde(default)]
+    single_name_risks: Vec<String>,
+    #[serde(default)]
+    tail_risks: Vec<String>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FactorExposureInput {
+    factor: String,
+    level: String,
+    #[serde(default)]
+    commentary: Option<String>,
+}
+
+pub fn create_submit_portfolio_risk_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new("submit_portfolio_risk", move |args: Value, _extra| {
+        let config = config.clone();
+        Box::pin(async move {
+            let input: SubmitPortfolioRiskArgs = serde_json::from_value(args)
+                .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+            let context = config
+                .load_context()
+                .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+            let confidence = parse_confidence("confidence", input.confidence)?;
+            let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            validate_evidence_ids(
+                &database,
+                &context.run_id,
+                "evidence_ids",
+                &input.evidence_ids,
+            )?;
+
+            let factor_exposures: Vec<FactorExposure> = input
+                .factor_exposures
+                .into_iter()
+                .map(|e| FactorExposure {
+                    factor: e.factor,
+                    level: RiskLevel::from_str(&e.level).unwrap_or_default(),
+                    commentary: e.commentary,
+                })
+                .collect();
+
+            let risk = PortfolioRisk {
+                id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                run_id: context.run_id,
+                summary: input.summary,
+                factor_exposures,
+                correlation_notes: input.correlation_notes,
+                macro_sensitivities: input.macro_sensitivities,
+                single_name_risks: input.single_name_risks,
+                tail_risks: input.tail_risks,
+                evidence_ids: input.evidence_ids,
+                confidence,
+                created_at: now(),
+            };
+            database
+                .insert_portfolio_risk(&risk)
+                .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+            Ok(json!({ "status": "ok", "portfolio_risk_id": risk.id }))
+        })
+    })
+    .with_description("Submit a portfolio-level risk review covering factor exposures, macro sensitivities, single-name risks, and tail risks. Required exactly once for portfolio analyses.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["summary", "factor_exposures", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "summary": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "correlation_notes": { "type": "string" },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "macro_sensitivities": { "type": "array", "items": { "type": "string" } },
+            "single_name_risks": { "type": "array", "items": { "type": "string" } },
+            "tail_risks": { "type": "array", "items": { "type": "string" } },
+            "factor_exposures": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["factor", "level"],
+                    "properties": {
+                        "factor": { "type": "string" },
+                        "level": { "type": "string", "enum": ["low", "medium", "high"] },
+                        "commentary": { "type": "string" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitRebalancingSuggestionArgs {
+    id: Option<String>,
+    rationale: String,
+    rows: Vec<RebalancingRowInput>,
+    #[serde(default)]
+    scenarios: Vec<String>,
+    #[serde(default)]
+    caveats: Vec<String>,
+    evidence_ids: Vec<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RebalancingRowInput {
+    label: String,
+    current_weight: f64,
+    suggested_weight: f64,
+    delta: f64,
+    #[serde(default)]
+    commentary: Option<String>,
+}
+
+pub fn create_submit_rebalancing_suggestion_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
+    SimpleTool::new(
+        "submit_rebalancing_suggestion",
+        move |args: Value, _extra| {
+            let config = config.clone();
+            Box::pin(async move {
+                let input: SubmitRebalancingSuggestionArgs = serde_json::from_value(args)
+                    .map_err(|err| pmcp::Error::Validation(err.to_string()))?;
+                let context = config
+                    .load_context()
+                    .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
+                let confidence = parse_confidence("confidence", input.confidence)?;
+                if input.rows.is_empty() {
+                    return Err(pmcp::Error::Validation(
+                        "rows: submit at least one rebalancing row".to_string(),
+                    ));
+                }
+                for row in &input.rows {
+                    let expected = row.suggested_weight - row.current_weight;
+                    if (expected - row.delta).abs() > 0.005 {
+                        return Err(pmcp::Error::Validation(format!(
+                            "row '{}' delta {:.3} must equal suggested {:.3} - current {:.3}",
+                            row.label, row.delta, row.suggested_weight, row.current_weight
+                        )));
+                    }
+                }
+                let suggested_sum: f64 = input.rows.iter().map(|r| r.suggested_weight).sum();
+                if (suggested_sum - 1.0).abs() > 0.02 {
+                    return Err(pmcp::Error::Validation(format!(
+                        "suggested weights sum to {suggested_sum:.3}; must sum to 1.0 within 0.02"
+                    )));
+                }
+                let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                validate_evidence_ids(
+                    &database,
+                    &context.run_id,
+                    "evidence_ids",
+                    &input.evidence_ids,
+                )?;
+                let rows: Vec<RebalancingRow> = input
+                    .rows
+                    .into_iter()
+                    .map(|r| RebalancingRow {
+                        label: r.label,
+                        current_weight: r.current_weight,
+                        suggested_weight: r.suggested_weight,
+                        delta: r.delta,
+                        commentary: r.commentary,
+                    })
+                    .collect();
+                let suggestion = RebalancingSuggestion {
+                    id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    run_id: context.run_id,
+                    rationale: input.rationale,
+                    rows,
+                    scenarios: input.scenarios,
+                    caveats: input.caveats,
+                    evidence_ids: input.evidence_ids,
+                    confidence,
+                    created_at: now(),
+                };
+                database
+                    .insert_rebalancing_suggestion(&suggestion)
+                    .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
+                Ok(json!({ "status": "ok", "rebalancing_suggestion_id": suggestion.id }))
+            })
+        },
+    )
+    .with_description("Submit an optional portfolio rebalancing suggestion. Always framed as non-prescriptive scenarios. Rows must satisfy delta = suggested - current and suggested weights must sum to ~1.0.")
+    .with_schema(json!({
+        "type": "object",
+        "required": ["rationale", "rows", "evidence_ids", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "rationale": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "scenarios": { "type": "array", "items": { "type": "string" } },
+            "caveats": { "type": "array", "items": { "type": "string" } },
+            "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "rows": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["label", "current_weight", "suggested_weight", "delta"],
+                    "properties": {
+                        "label": { "type": "string" },
+                        "current_weight": { "type": "number" },
+                        "suggested_weight": { "type": "number" },
+                        "delta": { "type": "number" },
+                        "commentary": { "type": "string" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1612,5 +2085,116 @@ mod tests {
         // Status flipped to Completed.
         let runs = db.get_runs("a").unwrap();
         assert_eq!(runs[0].status, AnalysisStatus::Completed);
+    }
+
+    fn setup_portfolio_run() -> (TempDir, Arc<ServerConfig>, Database, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("bullpen-test.sqlite");
+        let ctx_path = tmp.path().join("ctx.json");
+        let db = Database::open_at(db_path.clone()).unwrap();
+        let run_id = seed_run(&db, "Review portfolio", AnalysisIntent::Portfolio);
+        // Seed an entity so submit_holding_review can validate.
+        db.save_entity(&crate::domain::Entity {
+            id: "AAPL".into(),
+            run_id: run_id.clone(),
+            symbol: Some("AAPL".into()),
+            name: "Apple Inc.".into(),
+            exchange: Some("NASDAQ".into()),
+            asset_type: "equity".into(),
+            sector: Some("Technology".into()),
+            country: Some("US".into()),
+            confidence: 0.95,
+            resolution_notes: None,
+        })
+        .unwrap();
+        save_source(&db, &run_id);
+        let context = RunContext {
+            analysis_id: "a".into(),
+            run_id: run_id.clone(),
+            agent_id: "fake".into(),
+            user_prompt: "Review".into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            enabled_sources: Vec::new(),
+        };
+        std::fs::write(&ctx_path, serde_json::to_string(&context).unwrap()).unwrap();
+        let config = Arc::new(ServerConfig {
+            run_context: Some(ctx_path),
+            db_path: Some(db_path),
+            source_keys: std::collections::HashMap::new(),
+        });
+        (tmp, config, db, run_id)
+    }
+
+    #[tokio::test]
+    async fn submit_holding_review_persists_and_rejects_unknown_evidence() {
+        let (_tmp, config, db, run_id) = setup_portfolio_run();
+
+        let handler = create_submit_holding_review_tool(config.clone());
+        let ok = handler
+            .handle(
+                json!({
+                    "id": "hr-1",
+                    "entity_id": "AAPL",
+                    "stance": "keep",
+                    "rationale": "Compounding services franchise.",
+                    "key_reasons": ["Cash generation"],
+                    "key_risks": ["Hardware cyclicality"],
+                    "confidence": 0.6,
+                    "importance": "high",
+                    "evidence_ids": ["source-1"]
+                }),
+                extra(),
+            )
+            .await
+            .expect("submit_holding_review succeeds with known evidence");
+        assert_eq!(ok["status"], "ok");
+        let persisted = db.get_holding_reviews_for_run(&run_id).unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].entity_id, "AAPL");
+
+        let err = handler
+            .handle(
+                json!({
+                    "entity_id": "AAPL",
+                    "stance": "keep",
+                    "rationale": "Bad evidence.",
+                    "key_reasons": ["x"],
+                    "key_risks": ["y"],
+                    "confidence": 0.6,
+                    "importance": "medium",
+                    "evidence_ids": ["ghost"]
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(ref m) if m.contains("ghost")));
+    }
+
+    #[tokio::test]
+    async fn submit_allocation_review_rejects_when_weights_do_not_sum_to_one() {
+        let (_tmp, config, _db, _run_id) = setup_portfolio_run();
+        let handler = create_submit_allocation_review_tool(config);
+        let err = handler
+            .handle(
+                json!({
+                    "summary": "Concentrated.",
+                    "confidence": 0.5,
+                    "evidence_ids": ["source-1"],
+                    "dimensions": [
+                        {
+                            "dimension": "asset_class",
+                            "breakdown": [
+                                { "label": "Equity", "weight": 0.6 },
+                                { "label": "Bonds", "weight": 0.3 }
+                            ]
+                        }
+                    ]
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(ref m) if m.contains("sum to 1.0")));
     }
 }

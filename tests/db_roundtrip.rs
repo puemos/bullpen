@@ -31,6 +31,7 @@ fn analysis_fixture(id: &str) -> Analysis {
         intent: AnalysisIntent::SingleEquity,
         status: AnalysisStatus::Running,
         active_run_id: None,
+        portfolio_id: None,
         created_at: now(),
         updated_at: now(),
     }

@@ -19,6 +19,14 @@ const BULLPEN_TOOLS: &[&str] = &[
     "submit_analysis_block",
     "submit_final_stance",
     "submit_projection",
+    "submit_counter_thesis",
+    "submit_uncertainty_ledger",
+    "submit_methodology_note",
+    "submit_decision_criterion_answer",
+    "submit_holding_review",
+    "submit_allocation_review",
+    "submit_portfolio_risk",
+    "submit_rebalancing_suggestion",
     "finalize_analysis",
 ];
 
@@ -153,7 +161,7 @@ impl BullpenClient {
                 if let Some(tx) = &self.progress {
                     let _ = tx.send(extra);
                 }
-            } else if tool_name == Some("finalize_analysis") {
+            } else if matches!(tool_name, Some("finalize_analysis")) {
                 self.mark_finalization_received();
             }
         }

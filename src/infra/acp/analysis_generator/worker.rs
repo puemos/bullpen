@@ -1,7 +1,6 @@
 use super::client::BullpenClient;
 use crate::domain::RunContext;
 use crate::infra::progress::ProgressEventPayload;
-use crate::prompts;
 use agent_client_protocol::{
     Agent, ClientCapabilities, ClientSideConnection, ContentBlock, EnvVariable,
     FileSystemCapabilities, Implementation, InitializeRequest, McpServer, McpServerStdio,
@@ -26,6 +25,7 @@ pub type ProgressTx = tokio::sync::mpsc::UnboundedSender<ProgressEventPayload>;
 
 pub struct GenerateAnalysisInput {
     pub run_context: RunContext,
+    pub prompt_text: String,
     pub agent_command: String,
     pub agent_args: Vec<String>,
     pub model_flag: Option<(String, String)>,
@@ -120,6 +120,7 @@ pub async fn generate_with_acp(mut input: GenerateAnalysisInput) -> Result<Gener
 async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<GenerateAnalysisResult> {
     let GenerateAnalysisInput {
         run_context,
+        prompt_text,
         agent_command,
         mut agent_args,
         model_flag,
@@ -290,7 +291,6 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
             .await
             .context("ACP new_session failed")?;
 
-        let prompt_text = prompts::build_analysis_prompt(&run_context)?;
         let prompt_result = connection
             .prompt(PromptRequest::new(
                 session.session_id,

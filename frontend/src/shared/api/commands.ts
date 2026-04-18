@@ -5,6 +5,11 @@ import type {
   AnalysisReport,
   AnalysisSummary,
   AppSettings,
+  Portfolio,
+  PortfolioCsvImportInput,
+  PortfolioDetail,
+  PortfolioImportResult,
+  PortfolioSummary,
   ProgressEventPayload,
   SourceDescriptor,
   SourceKeyTestResult,
@@ -44,8 +49,44 @@ export async function deleteAnalysis(analysisId: string): Promise<void> {
   return invoke("delete_analysis", { analysisId });
 }
 
+export async function createPortfolio(
+  name: string,
+  baseCurrency: string,
+): Promise<Portfolio> {
+  return invoke("create_portfolio", { name, baseCurrency });
+}
+
+export async function getPortfolios(): Promise<PortfolioSummary[]> {
+  return invoke("get_portfolios");
+}
+
+export async function getPortfolioDetail(portfolioId: string): Promise<PortfolioDetail | null> {
+  return invoke("get_portfolio_detail", { portfolioId });
+}
+
+export async function importPortfolioCsv(
+  input: PortfolioCsvImportInput,
+): Promise<PortfolioImportResult> {
+  return invoke("import_portfolio_csv", { input });
+}
+
+export async function deletePortfolio(portfolioId: string): Promise<void> {
+  return invoke("delete_portfolio", { portfolioId });
+}
+
+export async function renamePortfolio(portfolioId: string, name: string): Promise<Portfolio> {
+  return invoke("rename_portfolio", { portfolioId, name });
+}
+
 export async function stopAnalysis(runId: string): Promise<void> {
   return invoke("stop_analysis", { runId });
+}
+
+export async function getPriceHistory(
+  symbol: string,
+  market: string | null,
+): Promise<number[]> {
+  return invoke("get_price_history", { symbol, market });
 }
 
 export async function exportAnalysisMarkdown(analysisId: string): Promise<string> {
@@ -73,7 +114,17 @@ export async function publishAnalysisHtml(analysisId: string): Promise<Published
 }
 
 export async function createAnalysis(userPrompt: string): Promise<string> {
-  return invoke("create_analysis", { userPrompt });
+  return invoke("create_analysis", { userPrompt, portfolioId: null });
+}
+
+export async function createPortfolioAnalysis(
+  portfolioId: string,
+  userPrompt: string | null,
+): Promise<string> {
+  return invoke("create_analysis", {
+    userPrompt: userPrompt ?? "",
+    portfolioId,
+  });
 }
 
 export async function setActiveRun(analysisId: string, runId: string): Promise<void> {

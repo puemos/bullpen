@@ -55,6 +55,7 @@ pub enum AnalysisIntent {
     SectorAnalysis,
     MacroTheme,
     Watchlist,
+    Portfolio,
     #[default]
     GeneralResearch,
 }
@@ -67,6 +68,7 @@ impl fmt::Display for AnalysisIntent {
             Self::SectorAnalysis => "sector_analysis",
             Self::MacroTheme => "macro_theme",
             Self::Watchlist => "watchlist",
+            Self::Portfolio => "portfolio",
             Self::GeneralResearch => "general_research",
         };
         write!(f, "{value}")
@@ -83,6 +85,7 @@ impl FromStr for AnalysisIntent {
             "sector_analysis" => Ok(Self::SectorAnalysis),
             "macro_theme" => Ok(Self::MacroTheme),
             "watchlist" => Ok(Self::Watchlist),
+            "portfolio" => Ok(Self::Portfolio),
             _ => Ok(Self::GeneralResearch),
         }
     }
@@ -96,6 +99,8 @@ pub struct Analysis {
     pub intent: AnalysisIntent,
     pub status: AnalysisStatus,
     pub active_run_id: Option<AnalysisRunId>,
+    #[serde(default)]
+    pub portfolio_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -125,6 +130,7 @@ pub struct AnalysisSummary {
     pub status: AnalysisStatus,
     pub active_run_id: Option<AnalysisRunId>,
     pub active_run_status: Option<AnalysisStatus>,
+    pub portfolio_id: Option<String>,
     pub block_count: usize,
     pub source_count: usize,
     pub created_at: String,
@@ -612,6 +618,210 @@ pub struct DecisionCriterionAnswer {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HoldingStance {
+    Keep,
+    Trim,
+    Add,
+    Watch,
+    Exit,
+    #[default]
+    Mixed,
+}
+
+impl fmt::Display for HoldingStance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Keep => "keep",
+            Self::Trim => "trim",
+            Self::Add => "add",
+            Self::Watch => "watch",
+            Self::Exit => "exit",
+            Self::Mixed => "mixed",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for HoldingStance {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "keep" => Ok(Self::Keep),
+            "trim" => Ok(Self::Trim),
+            "add" => Ok(Self::Add),
+            "watch" => Ok(Self::Watch),
+            "exit" => Ok(Self::Exit),
+            "mixed" => Ok(Self::Mixed),
+            other => Err(format!("unknown holding stance: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AllocationAxis {
+    AssetClass,
+    Sector,
+    Geography,
+    Currency,
+    #[default]
+    Other,
+}
+
+impl fmt::Display for AllocationAxis {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::AssetClass => "asset_class",
+            Self::Sector => "sector",
+            Self::Geography => "geography",
+            Self::Currency => "currency",
+            Self::Other => "other",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for AllocationAxis {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "asset_class" => Ok(Self::AssetClass),
+            "sector" => Ok(Self::Sector),
+            "geography" => Ok(Self::Geography),
+            "currency" => Ok(Self::Currency),
+            _ => Ok(Self::Other),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskLevel {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl fmt::Display for RiskLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for RiskLevel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "low" => Ok(Self::Low),
+            "high" => Ok(Self::High),
+            _ => Ok(Self::Medium),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HoldingReview {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub entity_id: String,
+    pub stance: HoldingStance,
+    pub rationale: String,
+    pub key_reasons: Vec<String>,
+    pub key_risks: Vec<String>,
+    pub confidence: f64,
+    pub importance: Importance,
+    pub evidence_ids: Vec<String>,
+    pub display_order: i32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllocationBucket {
+    pub label: String,
+    pub weight: f64,
+    #[serde(default)]
+    pub commentary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllocationDimension {
+    pub dimension: AllocationAxis,
+    pub breakdown: Vec<AllocationBucket>,
+    #[serde(default)]
+    pub concentration_flags: Vec<String>,
+    #[serde(default)]
+    pub overlap_notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllocationReview {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub summary: String,
+    pub dimensions: Vec<AllocationDimension>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: f64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactorExposure {
+    pub factor: String,
+    pub level: RiskLevel,
+    #[serde(default)]
+    pub commentary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioRisk {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub summary: String,
+    pub factor_exposures: Vec<FactorExposure>,
+    #[serde(default)]
+    pub correlation_notes: Option<String>,
+    pub macro_sensitivities: Vec<String>,
+    pub single_name_risks: Vec<String>,
+    pub tail_risks: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: f64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RebalancingRow {
+    pub label: String,
+    pub current_weight: f64,
+    pub suggested_weight: f64,
+    pub delta: f64,
+    #[serde(default)]
+    pub commentary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RebalancingSuggestion {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub rationale: String,
+    pub rows: Vec<RebalancingRow>,
+    pub scenarios: Vec<String>,
+    pub caveats: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: f64,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisReport {
     pub analysis: Analysis,
@@ -628,6 +838,14 @@ pub struct AnalysisReport {
     pub uncertainty_entries: Vec<UncertaintyEntry>,
     pub methodology_note: Option<MethodologyNote>,
     pub decision_criterion_answers: Vec<DecisionCriterionAnswer>,
+    #[serde(default)]
+    pub holding_reviews: Vec<HoldingReview>,
+    #[serde(default)]
+    pub allocation_reviews: Vec<AllocationReview>,
+    #[serde(default)]
+    pub portfolio_risks: Vec<PortfolioRisk>,
+    #[serde(default)]
+    pub rebalancing_suggestions: Vec<RebalancingSuggestion>,
 }
 
 #[cfg(test)]
@@ -779,6 +997,7 @@ mod tests {
             AnalysisIntent::SectorAnalysis,
             AnalysisIntent::MacroTheme,
             AnalysisIntent::Watchlist,
+            AnalysisIntent::Portfolio,
             AnalysisIntent::GeneralResearch,
         ] {
             let parsed = AnalysisIntent::from_str(&intent.to_string()).unwrap();

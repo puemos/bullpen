@@ -5,6 +5,7 @@ pub use error::CommandError;
 
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
+    Portfolio, PortfolioCsvImportInput, PortfolioDetail, PortfolioImportResult, PortfolioSummary,
     RunContext, stance_stale_metric_names,
 };
 use crate::infra::acp::analysis_generator::{
@@ -100,6 +101,78 @@ pub async fn delete_analysis(
 ) -> Result<(), CommandError> {
     let db = &state.db;
     Ok(db.delete_analysis(&analysis_id)?)
+}
+
+#[tauri::command]
+pub async fn create_portfolio(
+    state: State<'_, AppState>,
+    name: String,
+    base_currency: String,
+) -> Result<Portfolio, CommandError> {
+    let db = &state.db;
+    Ok(db.create_portfolio(&name, &base_currency)?)
+}
+
+#[tauri::command]
+pub async fn get_portfolios(
+    state: State<'_, AppState>,
+) -> Result<Vec<PortfolioSummary>, CommandError> {
+    let db = &state.db;
+    Ok(db.list_portfolios()?)
+}
+
+#[tauri::command]
+pub async fn get_portfolio_detail(
+    state: State<'_, AppState>,
+    portfolio_id: String,
+) -> Result<Option<PortfolioDetail>, CommandError> {
+    let db = &state.db;
+    Ok(db.get_portfolio_detail(&portfolio_id)?)
+}
+
+#[tauri::command]
+pub async fn import_portfolio_csv(
+    state: State<'_, AppState>,
+    input: PortfolioCsvImportInput,
+) -> Result<PortfolioImportResult, CommandError> {
+    let db = &state.db;
+    Ok(db.import_portfolio_csv(&input)?)
+}
+
+#[tauri::command]
+pub async fn delete_portfolio(
+    state: State<'_, AppState>,
+    portfolio_id: String,
+) -> Result<(), CommandError> {
+    let db = &state.db;
+    Ok(db.delete_portfolio(&portfolio_id)?)
+}
+
+#[tauri::command]
+pub async fn rename_portfolio(
+    state: State<'_, AppState>,
+    portfolio_id: String,
+    name: String,
+) -> Result<Portfolio, CommandError> {
+    let db = &state.db;
+    Ok(db.rename_portfolio(&portfolio_id, &name)?)
+}
+
+#[tauri::command]
+pub async fn get_price_history(
+    symbol: String,
+    market: Option<String>,
+) -> Result<Vec<f64>, CommandError> {
+    use crate::infra::price_history::fetch_price_history;
+    // Swallow transient network/API errors — the sparkline is decorative, we
+    // don't want a toast every time Yahoo blinks.
+    match fetch_price_history(&symbol, market.as_deref()).await {
+        Ok(series) => Ok(series),
+        Err(err) => {
+            log::debug!("price_history fetch failed for {symbol}: {err:#}");
+            Ok(Vec::new())
+        }
+    }
 }
 
 #[tauri::command]
@@ -336,24 +409,62 @@ pub async fn export_analysis_markdown(
 pub async fn create_analysis(
     state: State<'_, AppState>,
     user_prompt: String,
+    portfolio_id: Option<String>,
 ) -> Result<String, CommandError> {
-    let trimmed = user_prompt.trim();
-    if trimmed.is_empty() {
-        return Err("Enter a research request before starting analysis.".into());
-    }
+    let db = &state.db;
+
+    let (intent, title, effective_prompt, persisted_portfolio_id) = if let Some(portfolio_id) =
+        portfolio_id
+    {
+        let detail = db
+            .get_portfolio_detail(&portfolio_id)?
+            .ok_or_else(|| CommandError::new("Portfolio not found"))?;
+        let trimmed = user_prompt.trim();
+        let title = if trimmed.is_empty() {
+            format!("Portfolio review — {}", detail.portfolio.name)
+        } else {
+            derive_title(trimmed)
+        };
+        let effective_prompt = if trimmed.is_empty() {
+            format!(
+                "Review the current snapshot of portfolio \"{}\" ({}): concentration, allocation, risk, and non-prescriptive rebalancing scenarios.",
+                detail.portfolio.name, detail.portfolio.base_currency
+            )
+        } else {
+            trimmed.to_string()
+        };
+        (
+            AnalysisIntent::Portfolio,
+            title,
+            effective_prompt,
+            Some(portfolio_id),
+        )
+    } else {
+        let trimmed = user_prompt.trim();
+        if trimmed.is_empty() {
+            return Err("Enter a research request before starting analysis.".into());
+        }
+        (
+            AnalysisIntent::GeneralResearch,
+            derive_title(trimmed),
+            trimmed.to_string(),
+            None,
+        )
+    };
+
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let analysis = Analysis {
         id: id.clone(),
-        title: derive_title(trimmed),
-        user_prompt: trimmed.to_string(),
-        intent: AnalysisIntent::GeneralResearch,
+        title,
+        user_prompt: effective_prompt,
+        intent,
         status: AnalysisStatus::Running,
         active_run_id: None,
+        portfolio_id: persisted_portfolio_id,
         created_at: now.clone(),
         updated_at: now,
     };
-    let db = &state.db;
     db.save_analysis(&analysis)?;
     Ok(id)
 }
@@ -569,8 +680,17 @@ pub async fn generate_analysis(
         candidate.label
     )));
 
+    let prompt_text = {
+        let db = &state.db;
+        let analysis = db
+            .get_report(&analysis_id, None)?
+            .ok_or_else(|| CommandError::new("Analysis not found"))?
+            .analysis;
+        crate::prompts::build_prompt_for(&analysis, &context, db)?
+    };
     let generation_result = generate_with_acp(GenerateAnalysisInput {
         run_context: context,
+        prompt_text,
         agent_command: command,
         agent_args,
         model_flag,
@@ -964,6 +1084,7 @@ mod tests {
                 intent: AnalysisIntent::SingleEquity,
                 status: AnalysisStatus::Completed,
                 active_run_id: Some("run-1".to_string()),
+                portfolio_id: None,
                 created_at: "2026-04-17T00:00:00Z".to_string(),
                 updated_at: "2026-04-17T00:00:00Z".to_string(),
             },
@@ -980,6 +1101,10 @@ mod tests {
             uncertainty_entries: vec![],
             methodology_note: None,
             decision_criterion_answers: vec![],
+            holding_reviews: vec![],
+            allocation_reviews: vec![],
+            portfolio_risks: vec![],
+            rebalancing_suggestions: vec![],
         }
     }
 

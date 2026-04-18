@@ -27,34 +27,33 @@ interface UseRunAnalysisOptions {
 export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalysisOptions) {
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const start = async (prompt: string, enabledSources: string[] | null = null) => {
-    if (!canRun) return;
-
-    setLocalError(null);
-
-    const agent = agents.find((a) => a.id === agentId);
-    const modelId = getState().modelByAgent[agentId] ?? null;
-
-    let analysisId: string;
-    try {
-      analysisId = await createAnalysis(prompt);
-    } catch (err) {
-      setLocalError(String(err));
-      return;
-    }
-
+  const startWithAnalysisId = (
+    analysisId: string,
+    prompt: string,
+    overrides?: {
+      agentId?: string;
+      modelId?: string | null;
+      enabledSources?: string[] | null;
+    },
+  ) => {
+    const effectiveAgentId = overrides?.agentId ?? agentId;
+    const agent = agents.find((a) => a.id === effectiveAgentId);
+    const modelId =
+      overrides?.modelId !== undefined
+        ? overrides.modelId
+        : (getState().modelByAgent[effectiveAgentId] ?? null);
+    const enabledSources = overrides?.enabledSources ?? null;
     const runId = crypto.randomUUID();
 
     addRun({
       runId,
-      agentId,
-      agentLabel: agent?.label || agentId,
+      agentId: effectiveAgentId,
+      agentLabel: agent?.label || effectiveAgentId,
       status: "running",
       progress: [],
       plan: [],
     });
 
-    // Navigate to analysis detail with agent tab active
     setState({
       activeAnalysisId: analysisId,
       selectedAnalysisId: analysisId,
@@ -63,13 +62,10 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
       analysisSubTab: "agent",
     });
 
-    // Refresh analyses list so the sidebar shows the new entry immediately
     void onDone();
 
-    // Fetch initial report so the report tab has data
     getAnalysisReport(analysisId)
       .then((report) => {
-        // Only update if we're still viewing this analysis
         if (getState().selectedAnalysisId === analysisId) {
           setSelectedReport(report);
         }
@@ -90,7 +86,7 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
 
     generateAnalysis(
       prompt,
-      agentId,
+      effectiveAgentId,
       modelId,
       runId,
       analysisId,
@@ -107,8 +103,23 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
     });
   };
 
+  const start = async (prompt: string, enabledSources: string[] | null = null) => {
+    if (!canRun) return;
+
+    setLocalError(null);
+
+    let analysisId: string;
+    try {
+      analysisId = await createAnalysis(prompt);
+    } catch (err) {
+      setLocalError(String(err));
+      return;
+    }
+
+    startWithAnalysisId(analysisId, prompt, { enabledSources });
+  };
+
   const finishRun = async (analysisId: string) => {
-    // Switch to report tab if we're still viewing this analysis
     const current = getState();
     if (current.selectedAnalysisId === analysisId) {
       setState({ analysisSubTab: "report" });
@@ -142,6 +153,7 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
   return {
     localError,
     start,
+    startWithAnalysisId,
     stop,
   };
 }

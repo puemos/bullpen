@@ -5,6 +5,8 @@ import type {
   AnalysisReport,
   AnalysisSummary,
   PlanEntry,
+  PortfolioDetail,
+  PortfolioSummary,
   ProgressItem,
   ProgressItemType,
   RunState,
@@ -13,8 +15,11 @@ import type {
 interface State {
   view: AppView;
   analyses: AnalysisSummary[];
+  portfolios: PortfolioSummary[];
   selectedAnalysisId: string | null;
   selectedReport: AnalysisReport | null;
+  selectedPortfolioId: string | null;
+  selectedPortfolio: PortfolioDetail | null;
   // Single agent selection
   agentId: string;
   modelByAgent: Record<string, string | null>;
@@ -29,8 +34,11 @@ interface State {
 const state: State = {
   view: DEFAULT_APP_VIEW,
   analyses: [],
+  portfolios: [],
   selectedAnalysisId: null,
   selectedReport: null,
+  selectedPortfolioId: null,
+  selectedPortfolio: null,
   agentId: "",
   modelByAgent: {},
   activeRuns: {},
