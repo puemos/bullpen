@@ -45,6 +45,7 @@ import {
   updateSettings,
 } from "@/shared/api/commands";
 import {
+  useAnalyses,
   useCreatePortfolio,
   useDeletePortfolio,
   useImportPortfolioCsv,
@@ -805,7 +806,7 @@ function PortfolioAnalysesSection({
   portfolioId: string;
   onSelectAnalysis: (analysisId: string) => void | Promise<void>;
 }) {
-  const analyses = useAppStore((state) => state.analyses);
+  const { data: analyses = [] } = useAnalyses();
   const linked = useMemo(
     () => analyses.filter((analysis) => analysis.portfolio_id === portfolioId),
     [analyses, portfolioId],

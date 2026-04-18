@@ -3,10 +3,8 @@ import type { AppView } from "@/app/navigation";
 import { DEFAULT_APP_VIEW } from "@/app/navigation";
 import type {
   AnalysisReport,
-  AnalysisSummary,
   PlanEntry,
   PortfolioDetail,
-  PortfolioSummary,
   ProgressItem,
   ProgressItemType,
   RunState,
@@ -14,27 +12,20 @@ import type {
 
 interface State {
   view: AppView;
-  analyses: AnalysisSummary[];
-  portfolios: PortfolioSummary[];
   selectedAnalysisId: string | null;
   selectedReport: AnalysisReport | null;
   selectedPortfolioId: string | null;
   selectedPortfolio: PortfolioDetail | null;
-  // Single agent selection
   agentId: string;
   modelByAgent: Record<string, string | null>;
-  // Per-run state — supports multiple concurrent analyses
   activeRuns: Record<string, RunState>;
   activeAnalysisId: string | null;
   selectedRunTab: string | null;
-  // Sub-tab within analysis detail view
   analysisSubTab: "report" | "agent";
 }
 
 const state: State = {
   view: DEFAULT_APP_VIEW,
-  analyses: [],
-  portfolios: [],
   selectedAnalysisId: null,
   selectedReport: null,
   selectedPortfolioId: null,
