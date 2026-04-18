@@ -72,10 +72,6 @@ export function App() {
 
   const openUpdateDialog = useCallback(() => setUpdateDialogOpen(true), []);
 
-  const refresh = useCallback(async () => {
-    // No-op: React Query handles data fetching and invalidation automatically
-  }, []);
-
   const selectAnalysis = useCallback(async (analysisId: string) => {
     setError(null);
 
@@ -219,10 +215,10 @@ export function App() {
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-hidden">
-          {view === "new-analysis" && <ResearchPage agents={agents} onDone={refresh} />}
+          {view === "new-analysis" && <ResearchPage agents={agents} />}
           {view === "analysis" && <AnalysisPage />}
           {view === "portfolio" && (
-            <PortfolioPage agents={agents} onRefresh={refresh} onSelectAnalysis={selectAnalysis} />
+            <PortfolioPage agents={agents} onSelectAnalysis={selectAnalysis} />
           )}
           {view === "settings" && <SettingsPage agents={agents} />}
         </div>

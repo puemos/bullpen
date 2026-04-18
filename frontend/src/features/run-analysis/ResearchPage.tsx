@@ -31,10 +31,9 @@ const EXAMPLE_PROMPTS: ExamplePrompt[] = [
 
 interface ResearchPageProps {
   agents: AgentCandidate[];
-  onDone: () => Promise<void>;
 }
 
-export function ResearchPage({ agents, onDone }: ResearchPageProps) {
+export function ResearchPage({ agents }: ResearchPageProps) {
   const [prompt, setPrompt] = useState("");
   const agentId = useAppStore((state) => state.agentId);
 
@@ -45,7 +44,6 @@ export function ResearchPage({ agents, onDone }: ResearchPageProps) {
     agentId,
     agents,
     canRun,
-    onDone,
   });
 
   return (

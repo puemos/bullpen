@@ -37,17 +37,19 @@ import {
 import { useRunAnalysis } from "@/features/run-analysis/useRunAnalysis";
 import { getLogoPath } from "@/lib/agents";
 import {
-  createPortfolio,
   createPortfolioAnalysis,
-  deletePortfolio,
   getPortfolioDetail,
   getPriceHistory,
   getSettings,
-  importPortfolioCsv,
   parsePortfolioCsv,
-  renamePortfolio,
   updateSettings,
 } from "@/shared/api/commands";
+import {
+  useCreatePortfolio,
+  useDeletePortfolio,
+  useImportPortfolioCsv,
+  useRenamePortfolio,
+} from "@/shared/api/queries";
 import { getState, setState, useAppStore } from "@/store";
 import type {
   AgentCandidate,
@@ -73,19 +75,18 @@ async function persistModelByAgent(map: Record<string, string | null>) {
 
 interface PortfolioPageProps {
   agents: AgentCandidate[];
-  onRefresh: () => Promise<void> | void;
   onSelectAnalysis: (analysisId: string) => void | Promise<void>;
 }
 
 const CURRENCY_OPTIONS = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD", "SEK", "NOK"] as const;
 
-export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: PortfolioPageProps) {
-  const _portfolios = useAppStore((state) => state.portfolios);
+export function PortfolioPage({ agents, onSelectAnalysis }: PortfolioPageProps) {
   const selectedPortfolioId = useAppStore((state) => state.selectedPortfolioId);
   const selectedPortfolio = useAppStore((state) => state.selectedPortfolio);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [createCurrency, setCreateCurrency] = useState<string>("USD");
+
+  const createPortfolioMutation = useCreatePortfolio();
 
   const selectPortfolio = async (portfolioId: string) => {
     setLoadingPortfolio(true);
@@ -101,23 +102,20 @@ export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: Portfolio
   };
 
   useEffect(() => {
-    // If an id is selected but the detail wasn't loaded yet, fetch it.
-    // Don't auto-select "first portfolio" here — leaving both null is how the
-    // "+ New portfolio" flow asks to show the EmptyCreate picker.
     if (selectedPortfolioId && !selectedPortfolio) {
       void selectPortfolio(selectedPortfolioId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPortfolioId, selectedPortfolio]);
 
   const handleCreate = async () => {
-    setCreating(true);
     try {
-      const portfolio = await createPortfolio("Portfolio", createCurrency);
+      const portfolio = await createPortfolioMutation.mutateAsync({
+        name: "Portfolio",
+        baseCurrency: createCurrency,
+      });
       toast.success("Portfolio created", {
         description: `${portfolio.name} · ${portfolio.base_currency}`,
       });
-      await onRefresh();
       const detail = await getPortfolioDetail(portfolio.id);
       setState({
         selectedPortfolioId: portfolio.id,
@@ -126,8 +124,6 @@ export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: Portfolio
       });
     } catch (err) {
       toast.error("Could not create portfolio", { description: String(err) });
-    } finally {
-      setCreating(false);
     }
   };
 
@@ -140,12 +136,11 @@ export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: Portfolio
               detail={selectedPortfolio}
               loading={loadingPortfolio}
               agents={agents}
-              onRefresh={onRefresh}
               onSelectAnalysis={onSelectAnalysis}
             />
           ) : (
             <EmptyCreate
-              disabled={creating}
+              disabled={createPortfolioMutation.isPending}
               currency={createCurrency}
               onCurrencyChange={setCreateCurrency}
               onCreate={handleCreate}
@@ -212,24 +207,23 @@ function PortfolioView({
   detail,
   loading,
   agents,
-  onRefresh,
   onSelectAnalysis,
 }: {
   detail: PortfolioDetail;
   loading: boolean;
   agents: AgentCandidate[];
-  onRefresh: () => Promise<void> | void;
   onSelectAnalysis: (analysisId: string) => void | Promise<void>;
 }) {
   const [snapshotText, setSnapshotText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [analysisStarting, setAnalysisStarting] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(detail.portfolio.name);
-  const [renaming, setRenaming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const lastImportAt = detail.import_batches[0]?.imported_at ?? null;
   const baseCurrency = detail.portfolio.base_currency || "USD";
+
+  const importCsvMutation = useImportPortfolioCsv();
+  const renameMutation = useRenamePortfolio();
+  const deleteMutation = useDeletePortfolio();
 
   useEffect(() => {
     if (!editingName) setDraftName(detail.portfolio.name);
@@ -243,9 +237,6 @@ function PortfolioView({
     agentId: storeAgentId,
     agents,
     canRun: hasAnyAvailableAgent,
-    onDone: async () => {
-      await onRefresh();
-    },
   });
 
   const totalsByCurrency = detail.totals_by_currency;
@@ -270,18 +261,15 @@ function PortfolioView({
       toast.error("Paste or upload a snapshot first");
       return;
     }
-    setSubmitting(true);
     let rows: PortfolioCsvRow[];
     try {
       rows = await parsePortfolioCsv(trimmed);
     } catch (err) {
       toast.error("CSV parsing failed", { description: String(err) });
-      setSubmitting(false);
       return;
     }
     if (rows.length === 0) {
       toast.error("No importable rows detected");
-      setSubmitting(false);
       return;
     }
     try {
@@ -297,7 +285,7 @@ function PortfolioView({
         import_kind: "positions",
         rows,
       };
-      const result = await importPortfolioCsv(input);
+      const result = await importCsvMutation.mutateAsync(input);
       const reviewNote =
         result.review_count > 0
           ? ` · ${result.review_count} need review: ${result.warnings.map((w) => w.message).join("; ")}`
@@ -310,8 +298,6 @@ function PortfolioView({
       setSnapshotText("");
     } catch (err) {
       toast.error("Update failed", { description: String(err) });
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -322,10 +308,8 @@ function PortfolioView({
       setDraftName(detail.portfolio.name);
       return;
     }
-    setRenaming(true);
     try {
-      await renamePortfolio(detail.portfolio.id, next);
-      // Swap in the new name immediately so the header doesn't flicker back.
+      await renameMutation.mutateAsync({ portfolioId: detail.portfolio.id, name: next });
       setState({
         selectedPortfolio: {
           ...detail,
@@ -336,12 +320,9 @@ function PortfolioView({
           },
         },
       });
-      await onRefresh();
     } catch (err) {
       setDraftName(detail.portfolio.name);
       toast.error("Rename failed", { description: String(err) });
-    } finally {
-      setRenaming(false);
     }
   };
 
@@ -365,21 +346,16 @@ function PortfolioView({
       `Delete "${detail.portfolio.name}"? This removes its holdings and snapshot history. Analyses already created from it stay.`,
     );
     if (!confirmed) return;
-    setDeleting(true);
     try {
-      await deletePortfolio(detail.portfolio.id);
+      await deleteMutation.mutateAsync(detail.portfolio.id);
       toast.success("Portfolio deleted");
-      // Clear selection; App.tsx refresh will pick a new default or show EmptyCreate.
       setState({
         selectedPortfolioId: null,
         selectedPortfolio: null,
         view: "portfolio",
       });
-      await onRefresh();
     } catch (err) {
       toast.error("Delete failed", { description: String(err) });
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -437,7 +413,7 @@ function PortfolioView({
                 onChange={(event) => setDraftName(event.target.value)}
                 onBlur={() => void commitRename()}
                 onKeyDown={handleNameKeyDown}
-                disabled={renaming}
+                disabled={renameMutation.isPending}
                 className="h-auto max-w-[640px] rounded-none border-0 border-b border-border bg-transparent p-0 text-[34px] font-semibold leading-[1.02] tracking-[-0.02em] shadow-none focus-visible:border-foreground focus-visible:ring-0 md:text-[48px]"
                 aria-label="Portfolio name"
               />
@@ -477,7 +453,7 @@ function PortfolioView({
           <PortfolioOverflowMenu
             onRename={() => setEditingName(true)}
             onDelete={() => void handleDelete()}
-            deleting={deleting}
+            deleting={deleteMutation.isPending}
           />
         </div>
       </header>
@@ -557,11 +533,11 @@ function PortfolioView({
             />
             <Button
               type="button"
-              disabled={submitting || snapshotText.trim().length === 0}
+              disabled={importCsvMutation.isPending || snapshotText.trim().length === 0}
               onClick={handleUpdate}
               className="h-9 rounded-none border border-foreground bg-foreground text-background shadow-none hover:bg-background hover:text-foreground"
             >
-              {submitting && <SpinnerGap size={14} className="animate-spin" />}
+              {importCsvMutation.isPending && <SpinnerGap size={14} className="animate-spin" />}
               Update snapshot
             </Button>
           </div>

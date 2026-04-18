@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Channel } from "@tauri-apps/api/core";
 import { useState } from "react";
 import {
@@ -6,6 +7,7 @@ import {
   getAnalysisReport,
   stopAnalysis,
 } from "@/shared/api/commands";
+import { queryKeys } from "@/shared/api/queries";
 import {
   addRun,
   addRunProgress,
@@ -21,10 +23,10 @@ interface UseRunAnalysisOptions {
   agentId: string;
   agents: AgentCandidate[];
   canRun: boolean;
-  onDone: () => Promise<void>;
 }
 
-export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalysisOptions) {
+export function useRunAnalysis({ agentId, agents, canRun }: UseRunAnalysisOptions) {
+  const queryClient = useQueryClient();
   const [localError, setLocalError] = useState<string | null>(null);
 
   const startWithAnalysisId = (
@@ -62,7 +64,7 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
       analysisSubTab: "agent",
     });
 
-    void onDone();
+    void queryClient.invalidateQueries({ queryKey: queryKeys.analyses });
 
     getAnalysisReport(analysisId)
       .then((report) => {
@@ -130,7 +132,8 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
         // non-critical
       }
     }
-    await onDone();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.analyses });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.analysis(analysisId) });
   };
 
   const stop = async (runId?: string) => {
