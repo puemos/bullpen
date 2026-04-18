@@ -109,14 +109,19 @@ export async function publishAnalysisHtml(analysisId: string): Promise<Published
   return invoke("publish_analysis_html", { analysisId });
 }
 
-export async function createAnalysis(userPrompt: string): Promise<string> {
+export interface CreateAnalysisResult {
+  analysis_id: string;
+  effective_prompt: string;
+}
+
+export async function createAnalysis(userPrompt: string): Promise<CreateAnalysisResult> {
   return invoke("create_analysis", { userPrompt, portfolioId: null });
 }
 
 export async function createPortfolioAnalysis(
   portfolioId: string,
   userPrompt: string | null,
-): Promise<string> {
+): Promise<CreateAnalysisResult> {
   return invoke("create_analysis", {
     userPrompt: userPrompt ?? "",
     portfolioId,

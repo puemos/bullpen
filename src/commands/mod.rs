@@ -6,7 +6,8 @@ pub use error::CommandError;
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
     Portfolio, PortfolioCsvImportInput, PortfolioCsvRow, PortfolioDetail, PortfolioImportResult,
-    PortfolioSummary, RunContext, stance_stale_metric_names,
+    PortfolioSummary, RunContext, portfolio_default_prompt, portfolio_default_title,
+    stance_stale_metric_names,
 };
 use crate::infra::acp::analysis_generator::{
     AcpCancelled, GenerateAnalysisInput, generate_with_acp,
@@ -422,59 +423,61 @@ pub async fn export_analysis_markdown(
     Ok(render_markdown(&report))
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateAnalysisResult {
+    pub analysis_id: String,
+    pub effective_prompt: String,
+}
+
 #[tauri::command]
 pub async fn create_analysis(
     state: State<'_, AppState>,
     user_prompt: String,
     portfolio_id: Option<String>,
-) -> Result<String, CommandError> {
+) -> Result<CreateAnalysisResult, CommandError> {
     let db = &state.db;
 
-    let (intent, title, effective_prompt, persisted_portfolio_id) = if let Some(portfolio_id) =
-        portfolio_id
-    {
-        let detail = db
-            .get_portfolio_detail(&portfolio_id)?
-            .ok_or_else(|| CommandError::new("Portfolio not found"))?;
-        let trimmed = user_prompt.trim();
-        let title = if trimmed.is_empty() {
-            format!("Portfolio review — {}", detail.portfolio.name)
-        } else {
-            derive_title(trimmed)
-        };
-        let effective_prompt = if trimmed.is_empty() {
-            format!(
-                "Review the current snapshot of portfolio \"{}\" ({}): concentration, allocation, risk, scenario/stress outcomes, expected-return model, and non-prescriptive rebalancing scenarios.",
-                detail.portfolio.name, detail.portfolio.base_currency
+    let (intent, title, effective_prompt, persisted_portfolio_id) =
+        if let Some(portfolio_id) = portfolio_id {
+            let detail = db
+                .get_portfolio_detail(&portfolio_id)?
+                .ok_or_else(|| CommandError::new("Portfolio not found"))?;
+            let trimmed = user_prompt.trim();
+            let title = if trimmed.is_empty() {
+                portfolio_default_title(&detail.portfolio.name)
+            } else {
+                derive_title(trimmed)
+            };
+            let effective_prompt = if trimmed.is_empty() {
+                portfolio_default_prompt(&detail.portfolio.name, &detail.portfolio.base_currency)
+            } else {
+                trimmed.to_string()
+            };
+            (
+                AnalysisIntent::Portfolio,
+                title,
+                effective_prompt,
+                Some(portfolio_id),
             )
         } else {
-            trimmed.to_string()
+            let trimmed = user_prompt.trim();
+            if trimmed.is_empty() {
+                return Err("Enter a research request before starting analysis.".into());
+            }
+            (
+                AnalysisIntent::GeneralResearch,
+                derive_title(trimmed),
+                trimmed.to_string(),
+                None,
+            )
         };
-        (
-            AnalysisIntent::Portfolio,
-            title,
-            effective_prompt,
-            Some(portfolio_id),
-        )
-    } else {
-        let trimmed = user_prompt.trim();
-        if trimmed.is_empty() {
-            return Err("Enter a research request before starting analysis.".into());
-        }
-        (
-            AnalysisIntent::GeneralResearch,
-            derive_title(trimmed),
-            trimmed.to_string(),
-            None,
-        )
-    };
 
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let analysis = Analysis {
         id: id.clone(),
         title,
-        user_prompt: effective_prompt,
+        user_prompt: effective_prompt.clone(),
         intent,
         status: AnalysisStatus::Running,
         active_run_id: None,
@@ -483,7 +486,10 @@ pub async fn create_analysis(
         updated_at: now,
     };
     db.save_analysis(&analysis)?;
-    Ok(id)
+    Ok(CreateAnalysisResult {
+        analysis_id: id,
+        effective_prompt,
+    })
 }
 
 #[tauri::command]

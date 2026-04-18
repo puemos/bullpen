@@ -294,6 +294,22 @@ pub struct PortfolioCsvImportInput {
     pub rows: Vec<PortfolioCsvRow>,
 }
 
+/// Default analysis prompt used when the user starts a portfolio review
+/// without typing a prompt of their own. Centralized here so UI, exports,
+/// and persisted analyses all see the same text.
+#[must_use]
+pub fn portfolio_default_prompt(name: &str, base_currency: &str) -> String {
+    format!(
+        "Review the current snapshot of portfolio \"{name}\" ({base_currency}): concentration, allocation, risk, scenario/stress outcomes, expected-return model, and non-prescriptive rebalancing scenarios."
+    )
+}
+
+/// Title for a portfolio analysis when the user supplies no prompt.
+#[must_use]
+pub fn portfolio_default_title(name: &str) -> String {
+    format!("Portfolio review — {name}")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortfolioImportResult {
     pub portfolio_id: PortfolioId,
@@ -305,4 +321,22 @@ pub struct PortfolioImportResult {
     pub review_count: usize,
     pub warnings: Vec<PortfolioImportWarning>,
     pub holdings: Vec<PortfolioHolding>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portfolio_default_prompt_embeds_name_and_currency() {
+        let prompt = portfolio_default_prompt("Core", "USD");
+        assert!(prompt.contains("\"Core\""));
+        assert!(prompt.contains("(USD)"));
+        assert!(prompt.contains("concentration"));
+    }
+
+    #[test]
+    fn portfolio_default_title_embeds_name() {
+        assert_eq!(portfolio_default_title("Core"), "Portfolio review — Core");
+    }
 }

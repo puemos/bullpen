@@ -3110,10 +3110,16 @@ fn finalize_holdings(
     }
     let mut out: Vec<PortfolioHolding> = holdings.into_values().collect();
     out.sort_by(|a, b| {
-        b.market_value
+        b.allocation_pct
             .unwrap_or_default()
-            .partial_cmp(&a.market_value.unwrap_or_default())
+            .partial_cmp(&a.allocation_pct.unwrap_or_default())
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.market_value
+                    .unwrap_or_default()
+                    .partial_cmp(&a.market_value.unwrap_or_default())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| a.symbol.cmp(&b.symbol))
     });
     out
@@ -3791,6 +3797,100 @@ pub(crate) mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].holding_count, 2);
         assert_eq!(summaries[0].total_market_value, Some(3_950.0));
+    }
+
+    #[test]
+    fn portfolio_holdings_sorted_by_allocation_pct_desc() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let input = PortfolioCsvImportInput {
+            portfolio_id: None,
+            portfolio_name: Some("Mixed currency".into()),
+            account_id: None,
+            account_name: Some("Broker".into()),
+            institution: None,
+            account_type: None,
+            base_currency: "USD".into(),
+            source_name: "positions.csv".into(),
+            import_kind: PortfolioImportKind::Positions,
+            rows: vec![
+                // Small USD position: low absolute USD value but 100% of USD bucket.
+                PortfolioCsvRow {
+                    row_index: 2,
+                    raw: HashMap::new(),
+                    symbol: Some("AAA".into()),
+                    market: None,
+                    name: None,
+                    asset_type: Some("etf".into()),
+                    quantity: Some(1.0),
+                    price: Some(100.0),
+                    market_value: None,
+                    cost_basis: None,
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("USD".into()),
+                    trade_date: None,
+                    action: None,
+                    notes: None,
+                },
+                // Large EUR position: ~80% of EUR bucket.
+                PortfolioCsvRow {
+                    row_index: 3,
+                    raw: HashMap::new(),
+                    symbol: Some("BBB".into()),
+                    market: None,
+                    name: None,
+                    asset_type: Some("etf".into()),
+                    quantity: Some(1.0),
+                    price: Some(8_000.0),
+                    market_value: None,
+                    cost_basis: None,
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("EUR".into()),
+                    trade_date: None,
+                    action: None,
+                    notes: None,
+                },
+                // Small EUR position: ~20% of EUR bucket.
+                PortfolioCsvRow {
+                    row_index: 4,
+                    raw: HashMap::new(),
+                    symbol: Some("CCC".into()),
+                    market: None,
+                    name: None,
+                    asset_type: Some("etf".into()),
+                    quantity: Some(1.0),
+                    price: Some(2_000.0),
+                    market_value: None,
+                    cost_basis: None,
+                    gross_amount: None,
+                    fees: None,
+                    taxes: None,
+                    currency: Some("EUR".into()),
+                    trade_date: None,
+                    action: None,
+                    notes: None,
+                },
+            ],
+        };
+
+        let result = db.import_portfolio_csv(&input).unwrap();
+        let detail = db
+            .get_portfolio_detail(&result.portfolio_id)
+            .unwrap()
+            .unwrap();
+
+        // Expected order by allocation_pct desc: AAA (1.0) > BBB (0.8) > CCC (0.2).
+        // A market_value-desc sort would order BBB > CCC > AAA, which is wrong
+        // because AAA has the highest allocation within its currency bucket.
+        let order: Vec<&str> = detail.holdings.iter().map(|h| h.symbol.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["AAA", "BBB", "CCC"],
+            "holdings must be sorted by allocation_pct desc"
+        );
     }
 
     #[test]

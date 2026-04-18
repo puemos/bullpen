@@ -111,14 +111,17 @@ export function useRunAnalysis({ agentId, agents, canRun }: UseRunAnalysisOption
     setLocalError(null);
 
     let analysisId: string;
+    let effectivePrompt: string;
     try {
-      analysisId = await createAnalysis(prompt);
+      const result = await createAnalysis(prompt);
+      analysisId = result.analysis_id;
+      effectivePrompt = result.effective_prompt;
     } catch (err) {
       setLocalError(String(err));
       return;
     }
 
-    startWithAnalysisId(analysisId, prompt, { enabledSources });
+    startWithAnalysisId(analysisId, effectivePrompt, { enabledSources });
   };
 
   const finishRun = async (analysisId: string) => {

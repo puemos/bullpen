@@ -375,9 +375,11 @@ function PortfolioView({
 
     setAnalysisStarting(true);
     try {
-      const analysisId = await createPortfolioAnalysis(detail.portfolio.id, null);
-      const defaultPrompt = `Review the current snapshot of portfolio "${detail.portfolio.name}" (${baseCurrency}): concentration, allocation, risk, scenario/stress outcomes, expected-return model, and non-prescriptive rebalancing scenarios.`;
-      startWithAnalysisId(analysisId, defaultPrompt, {
+      const { analysis_id, effective_prompt } = await createPortfolioAnalysis(
+        detail.portfolio.id,
+        null,
+      );
+      startWithAnalysisId(analysis_id, effective_prompt, {
         agentId: pickedAgentId,
         modelId: pickedModelId,
       });
@@ -388,15 +390,7 @@ function PortfolioView({
     }
   };
 
-  const sortedHoldings = useMemo(
-    () =>
-      [...detail.holdings].sort((a, b) => {
-        const aw = a.allocation_pct ?? 0;
-        const bw = b.allocation_pct ?? 0;
-        return bw - aw;
-      }),
-    [detail.holdings],
-  );
+  const sortedHoldings = detail.holdings;
 
   const placeholderCurrency = baseCurrency;
   const placeholder = `Paste CSV (market is optional — use it to pin a listing):\nSymbol, Market, Quantity, Price, Currency\nAAPL, NASDAQ, 10, 190, ${placeholderCurrency}`;
