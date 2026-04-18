@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Eyebrow, SectionHeader } from "@/components/ui/editorial";
 import { Input } from "@/components/ui/input";
-import { getSettings, updateSettings } from "@/shared/api/commands";
+import { useSettings, useUpdateSettings } from "@/shared/api/queries";
 import type { AgentCandidate, AppSettings } from "@/types";
 import { AgentStatusList } from "./AgentStatusList";
 import { DataSourcesSection } from "./DataSourcesSection";
@@ -11,26 +11,29 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ agents }: SettingsPageProps) {
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const { data: fetchedSettings, error: fetchError } = useSettings();
+  const updateSettingsMutation = useUpdateSettings();
+  const [localSettings, setLocalSettings] = useState<AppSettings | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSettings()
-      .then(setSettings)
-      .catch((err) => setError(String(err)));
-  }, []);
+    if (fetchedSettings && !localSettings) {
+      setLocalSettings(fetchedSettings);
+    }
+  }, [fetchedSettings, localSettings]);
+
+  const settings = localSettings;
+  const error = fetchError ? String(fetchError) : null;
 
   const save = async () => {
     if (!settings) return;
-    setError(null);
     try {
-      const next = await updateSettings(settings);
-      setSettings(next);
+      const next = await updateSettingsMutation.mutateAsync(settings);
+      setLocalSettings(next);
       setSaved("Saved");
       setTimeout(() => setSaved(null), 1300);
-    } catch (err) {
-      setError(String(err));
+    } catch {
+      // Error handled by mutation
     }
   };
 
@@ -76,7 +79,7 @@ export function SettingsPage({ agents }: SettingsPageProps) {
                 className="bg-transparent font-mono text-[13px]"
                 value={settings.custom_agent_command || ""}
                 onChange={(event) =>
-                  setSettings({
+                  setLocalSettings({
                     ...settings,
                     custom_agent_command: event.target.value || null,
                   })

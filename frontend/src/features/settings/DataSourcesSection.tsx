@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Eyebrow, HairlineDivider, SectionHeader } from "@/components/ui/editorial";
 import { Input } from "@/components/ui/input";
+import { refreshSourceKeyStatus } from "@/shared/api/commands";
 import {
-  clearSourceKey,
-  listSources,
-  refreshSourceKeyStatus,
-  setEnabledSources,
-  setSourceKey,
-  testSourceKey,
-} from "@/shared/api/commands";
+  queryKeys,
+  useClearSourceKey,
+  useSetEnabledSources,
+  useSetSourceKey,
+  useSources,
+  useTestSourceKey,
+} from "@/shared/api/queries";
 import type { SourceCategoryId, SourceDescriptor } from "@/types";
 
 const CATEGORY_ORDER: SourceCategoryId[] = [
@@ -34,24 +36,17 @@ const CATEGORY_LABEL: Record<SourceCategoryId, string> = {
 type TestState = { status: string; message: string } | null;
 
 export function DataSourcesSection() {
-  const [sources, setSources] = useState<SourceDescriptor[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { data: sources, error: fetchError } = useSources();
   const [draftKey, setDraftKey] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState<Record<string, boolean>>({});
   const [testResults, setTestResults] = useState<Record<string, TestState>>({});
 
-  const load = async () => {
-    try {
-      const list = await listSources();
-      setSources(list);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+  const setSourceKeyMutation = useSetSourceKey();
+  const clearSourceKeyMutation = useClearSourceKey();
+  const testSourceKeyMutation = useTestSourceKey();
+  const setEnabledSourcesMutation = useSetEnabledSources();
 
-  useEffect(() => {
-    void load();
-  }, []);
+  const error = fetchError ? String(fetchError) : null;
 
   const grouped = useMemo(() => {
     const out: Record<string, SourceDescriptor[]> = {};
@@ -68,46 +63,41 @@ export function DataSourcesSection() {
     [grouped],
   );
 
-  const setBusy = (id: string, busy: boolean) => setPending((prev) => ({ ...prev, [id]: busy }));
+  const isBusy = (_id: string) =>
+    setSourceKeyMutation.isPending ||
+    clearSourceKeyMutation.isPending ||
+    testSourceKeyMutation.isPending ||
+    setEnabledSourcesMutation.isPending;
 
   const onSaveKey = async (id: string) => {
     const key = draftKey[id]?.trim();
     if (!key) return;
-    setBusy(id, true);
     try {
-      await setSourceKey(id, key);
+      await setSourceKeyMutation.mutateAsync({ providerId: id, key });
       setDraftKey((prev) => ({ ...prev, [id]: "" }));
       await refreshSourceKeyStatus();
-      await load();
     } catch (err) {
       setTestResults((prev) => ({
         ...prev,
         [id]: { status: "error", message: String(err) },
       }));
-    } finally {
-      setBusy(id, false);
     }
   };
 
   const onClearKey = async (id: string) => {
-    setBusy(id, true);
     try {
-      await clearSourceKey(id);
-      await load();
+      await clearSourceKeyMutation.mutateAsync(id);
     } catch (err) {
       setTestResults((prev) => ({
         ...prev,
         [id]: { status: "error", message: String(err) },
       }));
-    } finally {
-      setBusy(id, false);
     }
   };
 
   const onTestKey = async (id: string) => {
-    setBusy(id, true);
     try {
-      const result = await testSourceKey(id);
+      const result = await testSourceKeyMutation.mutateAsync(id);
       setTestResults((prev) => ({ ...prev, [id]: result }));
       setTimeout(() => setTestResults((prev) => ({ ...prev, [id]: null })), 4000);
     } catch (err) {
@@ -115,32 +105,22 @@ export function DataSourcesSection() {
         ...prev,
         [id]: { status: "error", message: String(err) },
       }));
-    } finally {
-      setBusy(id, false);
     }
   };
 
   const onToggleEnabled = async (id: string, enabled: boolean) => {
     if (!sources) return;
     const next = sources.filter((s) => (s.id === id ? enabled : s.enabled)).map((s) => s.id);
-    setBusy(id, true);
     try {
-      await setEnabledSources(next);
-      await load();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(id, false);
+      await setEnabledSourcesMutation.mutateAsync(next);
+    } catch {
+      // Error handled by mutation
     }
   };
 
   const onRefresh = async () => {
-    try {
-      const updated = await refreshSourceKeyStatus();
-      setSources(updated);
-    } catch (err) {
-      setError(String(err));
-    }
+    await refreshSourceKeyStatus();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.sources });
   };
 
   const enabledCount = sources?.filter((s) => s.enabled).length ?? 0;
@@ -198,7 +178,7 @@ export function DataSourcesSection() {
                     <ProviderRow
                       key={src.id}
                       src={src}
-                      busy={!!pending[src.id]}
+                      busy={isBusy(src.id)}
                       draft={draftKey[src.id] ?? ""}
                       testResult={testResults[src.id]}
                       onDraftChange={(value) =>
