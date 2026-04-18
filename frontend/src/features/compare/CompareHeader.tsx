@@ -48,7 +48,6 @@ export function CompareHeader({
         const report = reports[id];
         const entity = primaryEntityFor(report);
         const stance = report?.final_stance;
-        const projection = projectionFor(report, entity?.id);
         const accent = getStanceAccent(stance?.stance ?? "insufficient_data");
         return (
           <div
@@ -78,14 +77,6 @@ export function CompareHeader({
             {stance?.horizon && (
               <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
                 {stance.horizon}
-              </span>
-            )}
-            {projection && (
-              <span
-                className="truncate font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/70"
-                title={`${projection.metric} (${projection.unit})`}
-              >
-                {projection.metric} · {projection.unit}
               </span>
             )}
           </div>

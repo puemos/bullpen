@@ -49,8 +49,18 @@ export function AppSidebar({
   updateAvailable,
   onUpdateClick,
 }: AppSidebarProps) {
-  const compareEligible = (a: AnalysisSummary) => a.active_run_status === "completed";
   const selectedSet = new Set(compareAnalysisIds);
+  // The first pick locks the intent — apples-to-apples only. Avoids
+  // the apples-to-oranges failure mode where a stock-price projection
+  // sits next to a data-center-revenue projection with identical
+  // framing.
+  const lockedIntent =
+    compareAnalysisIds.length > 0
+      ? analyses.find((a) => a.id === compareAnalysisIds[0])?.intent ?? null
+      : null;
+  const compareEligible = (a: AnalysisSummary) =>
+    a.active_run_status === "completed" &&
+    (lockedIntent === null || a.intent === lockedIntent);
   const compareReady =
     compareAnalysisIds.length >= COMPARE_MIN && compareAnalysisIds.length <= COMPARE_MAX;
 
@@ -108,8 +118,13 @@ export function AppSidebar({
             {compareMode && (
               <div className="mb-4 flex flex-col gap-2 border-y border-sidebar-border py-3">
                 <span className="text-[11.5px] leading-snug text-sidebar-foreground/70">
-                  Select {COMPARE_MIN}–{COMPARE_MAX} finalized analyses.
+                  Select {COMPARE_MIN}–{COMPARE_MAX} finalized analyses of the same type.
                 </span>
+                {lockedIntent && (
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-sidebar-foreground/50">
+                    Locked to {lockedIntent.replace(/_/g, " ")}
+                  </span>
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-[10.5px] tabular-nums text-sidebar-foreground/50">
                     {String(compareAnalysisIds.length).padStart(2, "0")} picked

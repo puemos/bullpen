@@ -1,5 +1,8 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Eyebrow } from "@/components/ui/editorial";
+import { reportMarkdownComponents } from "@/features/report-viewer/markdown-components";
 import { setCompareMode, setState, useAppStore } from "@/store";
 import type { AnalysisReport } from "@/types";
 import { CompareHeader } from "./CompareHeader";
@@ -29,7 +32,8 @@ export function CompareView() {
   };
 
   return (
-    <article className="mx-auto max-w-5xl px-8 pb-32 pt-10">
+    <div className="h-full overflow-y-auto">
+      <article className="mx-auto max-w-5xl px-8 pb-32 pt-10">
       <div className="flex items-baseline justify-between gap-4 pb-6">
         <div className="flex flex-col gap-1">
           <Eyebrow>Compare</Eyebrow>
@@ -61,7 +65,8 @@ export function CompareView() {
           Loading reports…
         </section>
       )}
-    </article>
+      </article>
+    </div>
   );
 }
 
@@ -98,9 +103,15 @@ function ThesisCell({ body, firstColumn }: { body: string; firstColumn: boolean 
   return (
     <div className={firstColumn ? "px-4 py-5" : "border-l border-border px-4 py-5"}>
       <Eyebrow>Thesis</Eyebrow>
-      <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-[1.55] text-foreground/85">
-        {shown || <span className="text-muted-foreground/60">— no thesis block —</span>}
-      </p>
+      <div className="mt-2 text-[13.5px] leading-[1.55] text-foreground/85 [&>*+*]:mt-3">
+        {shown ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={reportMarkdownComponents}>
+            {shown}
+          </ReactMarkdown>
+        ) : (
+          <span className="text-muted-foreground/60">— no thesis block —</span>
+        )}
+      </div>
       {clippable && (
         <button
           type="button"
