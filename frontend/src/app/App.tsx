@@ -8,34 +8,54 @@ import { PortfolioPage } from "@/features/portfolio/PortfolioPage";
 import { ResearchPage } from "@/features/run-analysis/ResearchPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { UpdateDialog } from "@/features/updates/UpdateDialog";
-import { useBackendEvent } from "@/hooks/useBackendEvent";
+import { useQueryInvalidation } from "@/hooks/useQueryInvalidation";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
-import {
-  getAgents,
-  getAllAnalyses,
-  getAnalysisReport,
-  getPortfolioDetail,
-  getPortfolios,
-  getSettings,
-} from "@/shared/api/commands";
+import { getAnalysisReport, getPortfolioDetail } from "@/shared/api/commands";
+import { useAgents, useAnalyses, usePortfolios, useSettings } from "@/shared/api/queries";
 import { getState, setSelectedReport, setState, useAppStore } from "@/store";
-import type { AgentCandidate, DataChangedPayload } from "@/types";
 import type { AppView } from "./navigation";
-
-const DATA_CHANGED_DEBOUNCE_MS = 400;
-const DATA_CHANGED_MAX_WAIT_MS = 1200;
 
 export function App() {
   const view = useAppStore((state) => state.view);
-  const analyses = useAppStore((state) => state.analyses);
-  const portfolios = useAppStore((state) => state.portfolios);
   const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
   const selectedPortfolioId = useAppStore((state) => state.selectedPortfolioId);
-  const [agents, setAgents] = useState<AgentCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { currentVersion, updateAvailable } = useUpdateCheck();
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const toastFiredRef = useRef(false);
+
+  const { data: agents = [] } = useAgents();
+  const { data: analyses = [] } = useAnalyses();
+  const { data: portfolios = [] } = usePortfolios();
+  const { data: settings } = useSettings();
+
+  useQueryInvalidation();
+
+  useEffect(() => {
+    if (settings) {
+      const currentAgentId = getState().agentId;
+      if (!currentAgentId && agents.length > 0) {
+        setState({
+          agentId: agents.find((agent) => agent.available)?.id || agents[0]?.id || "",
+        });
+      }
+      setState({ modelByAgent: { ...(settings.model_by_agent ?? {}) } });
+    }
+  }, [settings, agents]);
+
+  useEffect(() => {
+    const selected = getState().selectedAnalysisId;
+    if (selected && !analyses.some((a) => a.id === selected)) {
+      setState({ selectedAnalysisId: null, selectedReport: null });
+    }
+  }, [analyses]);
+
+  useEffect(() => {
+    const selected = getState().selectedPortfolioId;
+    if (selected && !portfolios.some((p) => p.id === selected)) {
+      setState({ selectedPortfolioId: null, selectedPortfolio: null });
+    }
+  }, [portfolios]);
 
   useEffect(() => {
     if (!updateAvailable || toastFiredRef.current) return;
@@ -53,121 +73,8 @@ export function App() {
   const openUpdateDialog = useCallback(() => setUpdateDialogOpen(true), []);
 
   const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      const [nextAgents, nextAnalyses, nextPortfolios, settings] = await Promise.all([
-        getAgents(),
-        getAllAnalyses(),
-        getPortfolios(),
-        getSettings(),
-      ]);
-      const selected = getState().selectedAnalysisId;
-      const selectedStillExists = selected
-        ? nextAnalyses.some((analysis) => analysis.id === selected)
-        : false;
-      const selectedPortfolio = getState().selectedPortfolioId;
-      const selectedPortfolioStillExists = selectedPortfolio
-        ? nextPortfolios.some((portfolio) => portfolio.id === selectedPortfolio)
-        : false;
-
-      setAgents(nextAgents);
-      setState({
-        analyses: nextAnalyses,
-        portfolios: nextPortfolios,
-        ...(selected && !selectedStillExists
-          ? { selectedAnalysisId: null, selectedReport: null }
-          : {}),
-        ...(selectedPortfolio && !selectedPortfolioStillExists
-          ? { selectedPortfolioId: null, selectedPortfolio: null }
-          : {}),
-        agentId:
-          getState().agentId ||
-          nextAgents.find((agent) => agent.available)?.id ||
-          nextAgents[0]?.id ||
-          "",
-        modelByAgent: { ...(settings.model_by_agent ?? {}) },
-      });
-
-      if (selected && selectedStillExists) {
-        const report = await getAnalysisReport(selected);
-        setSelectedReport(report);
-      }
-      if (selectedPortfolio && selectedPortfolioStillExists) {
-        const portfolio = await getPortfolioDetail(selectedPortfolio);
-        setState({ selectedPortfolio: portfolio });
-      }
-    } catch (err) {
-      setError(String(err));
-    }
+    // No-op: React Query handles data fetching and invalidation automatically
   }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const debounceRef = useRef<number | null>(null);
-  const maxWaitRef = useRef<number | null>(null);
-  const pendingAnalysisIdsRef = useRef<Set<string>>(new Set());
-
-  useBackendEvent<DataChangedPayload>("analysis-data-changed", (payload) => {
-    pendingAnalysisIdsRef.current.add(payload.analysis_id);
-
-    const flush = async () => {
-      if (debounceRef.current !== null) {
-        window.clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
-      if (maxWaitRef.current !== null) {
-        window.clearTimeout(maxWaitRef.current);
-        maxWaitRef.current = null;
-      }
-      const changedIds = pendingAnalysisIdsRef.current;
-      pendingAnalysisIdsRef.current = new Set();
-      try {
-        const nextAnalyses = await getAllAnalyses();
-        const selected = getState().selectedAnalysisId;
-        const selectedStillExists = selected
-          ? nextAnalyses.some((analysis) => analysis.id === selected)
-          : false;
-
-        setState({
-          analyses: nextAnalyses,
-          ...(selected && !selectedStillExists
-            ? { selectedAnalysisId: null, selectedReport: null }
-            : {}),
-        });
-
-        if (selected && selectedStillExists && changedIds.has(selected)) {
-          const report = await getAnalysisReport(selected);
-          if (getState().selectedAnalysisId === selected) {
-            setSelectedReport(report);
-          }
-        }
-      } catch (err) {
-        setError(String(err));
-      }
-    };
-
-    if (debounceRef.current !== null) {
-      window.clearTimeout(debounceRef.current);
-    }
-    debounceRef.current = window.setTimeout(flush, DATA_CHANGED_DEBOUNCE_MS);
-    if (maxWaitRef.current === null) {
-      maxWaitRef.current = window.setTimeout(flush, DATA_CHANGED_MAX_WAIT_MS);
-    }
-  });
-
-  useEffect(
-    () => () => {
-      if (debounceRef.current !== null) {
-        window.clearTimeout(debounceRef.current);
-      }
-      if (maxWaitRef.current !== null) {
-        window.clearTimeout(maxWaitRef.current);
-      }
-    },
-    [],
-  );
 
   const selectAnalysis = useCallback(async (analysisId: string) => {
     setError(null);
@@ -202,46 +109,49 @@ export function App() {
     }
   }, []);
 
-  const selectPortfolio = useCallback(async (portfolioId: string) => {
-    setError(null);
-    const summary = getState().portfolios.find((p) => p.id === portfolioId);
+  const selectPortfolio = useCallback(
+    async (portfolioId: string) => {
+      setError(null);
+      const summary = portfolios.find((p) => p.id === portfolioId);
 
-    // Optimistic: swap the header to the new portfolio's summary immediately so
-    // switching feels instant. The actual holdings arrive when the fetch
-    // resolves and we replace the shell.
-    const optimistic = summary
-      ? {
-          portfolio: {
-            id: summary.id,
-            name: summary.name,
-            base_currency: summary.base_currency,
-            created_at: summary.updated_at,
-            updated_at: summary.updated_at,
-          },
-          accounts: [],
-          holdings: [],
-          positions: [],
-          transactions: [],
-          import_batches: [],
-          totals_by_currency: [],
+      // Optimistic: swap the header to the new portfolio's summary immediately so
+      // switching feels instant. The actual holdings arrive when the fetch
+      // resolves and we replace the shell.
+      const optimistic = summary
+        ? {
+            portfolio: {
+              id: summary.id,
+              name: summary.name,
+              base_currency: summary.base_currency,
+              created_at: summary.updated_at,
+              updated_at: summary.updated_at,
+            },
+            accounts: [],
+            holdings: [],
+            positions: [],
+            transactions: [],
+            import_batches: [],
+            totals_by_currency: [],
+          }
+        : null;
+
+      setState({
+        selectedPortfolioId: portfolioId,
+        selectedPortfolio: optimistic,
+        view: "portfolio",
+      });
+
+      try {
+        const portfolio = await getPortfolioDetail(portfolioId);
+        if (getState().selectedPortfolioId === portfolioId) {
+          setState({ selectedPortfolio: portfolio });
         }
-      : null;
-
-    setState({
-      selectedPortfolioId: portfolioId,
-      selectedPortfolio: optimistic,
-      view: "portfolio",
-    });
-
-    try {
-      const portfolio = await getPortfolioDetail(portfolioId);
-      if (getState().selectedPortfolioId === portfolioId) {
-        setState({ selectedPortfolio: portfolio });
+      } catch (err) {
+        setError(String(err));
       }
-    } catch (err) {
-      setError(String(err));
-    }
-  }, []);
+    },
+    [portfolios],
+  );
 
   const newPortfolio = useCallback(() => {
     setError(null);
