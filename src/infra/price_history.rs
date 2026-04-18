@@ -68,8 +68,7 @@ fn yahoo_symbol(symbol: &str, market: Option<&str>) -> String {
     };
     let code = market.to_ascii_uppercase();
     let suffix = match code.as_str() {
-        "NASDAQ" | "NYSE" | "AMEX" | "ARCA" | "BATS" | "OTC" | "NMS" | "NYQ" | "US" => "",
-        "XETRA" | "ETR" | "FRA" | "BER" | "DE" => ".DE",
+"XETRA" | "ETR" | "FRA" | "BER" | "DE" => ".DE",
         "LSE" | "LON" | "UK" => ".L",
         "TSX" | "TOR" => ".TO",
         "TSXV" | "VEN" => ".V",
@@ -142,6 +141,7 @@ fn name_cache() -> &'static Mutex<NameCache> {
     CACHE.get_or_init(|| Mutex::new(NameCache::new()))
 }
 
+#[allow(clippy::option_option)]
 fn name_cache_get(key: &str) -> Option<Option<String>> {
     let guard = name_cache().lock().ok()?;
     let entry = guard.get(key)?;

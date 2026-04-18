@@ -3016,9 +3016,10 @@ fn derive_holdings_from_transactions(
         };
         let quantity = transaction.quantity.unwrap_or_default();
         let qty_delta = match transaction.action {
-            PortfolioTransactionAction::Buy | PortfolioTransactionAction::TransferIn => quantity,
+            PortfolioTransactionAction::Buy
+            | PortfolioTransactionAction::TransferIn
+            | PortfolioTransactionAction::Split => quantity,
             PortfolioTransactionAction::Sell | PortfolioTransactionAction::TransferOut => -quantity,
-            PortfolioTransactionAction::Split => quantity,
             _ => 0.0,
         };
         if qty_delta.abs() < f64::EPSILON {
@@ -3159,7 +3160,7 @@ fn row_fingerprint(row: &crate::domain::PortfolioCsvRow, account_id: &str) -> St
         format!("currency={}", row.currency.as_deref().unwrap_or_default()),
     ];
     let mut raw: Vec<_> = row.raw.iter().collect();
-    raw.sort_by(|(left, _), (right, _)| left.cmp(right));
+    raw.sort_by_key(|(left, _)| *left);
     for (key, value) in raw {
         parts.push(format!("raw:{key}={value}"));
     }
@@ -4857,6 +4858,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[allow(clippy::items_after_statements)]
     fn portfolio_import_multi_market_multi_currency_all_imported() {
         // Represents the international CSV use-case: VOD on LSE (GBP),
         // SAP on XETRA (EUR), SHOP on TSX (CAD). All rows must import cleanly
