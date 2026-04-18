@@ -44,7 +44,7 @@ export const MetricList = memo(function MetricList({
                     {metric.period}
                   </span>
                 )}
-                <FreshnessChip iso={metric.as_of} />
+                <FreshnessChip iso={metric.as_of} role="metric" />
               </div>
               {source && (
                 <div className="font-mono text-[10.5px] tabular-nums text-muted-foreground/80">
