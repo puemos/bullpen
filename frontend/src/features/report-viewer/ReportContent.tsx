@@ -1,11 +1,7 @@
 import { ChartLineUp } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eyebrow, SectionHeader } from "@/components/ui/editorial";
-import {
-  getAnalysisReport,
-  getStanceStaleMetrics,
-  setActiveRun,
-} from "@/shared/api/commands";
+import { getAnalysisReport, getStanceStaleMetrics, setActiveRun } from "@/shared/api/commands";
 import { setSelectedReport, useAppStore } from "@/store";
 import type {
   AllocationReview,
@@ -126,9 +122,7 @@ export function ReportContent() {
         hasMetrics ||
         hasEvidence ||
         hasAnalysis ||
-        hasSources) && (
-        <SectionJumpNav {...sectionFlags} />
-      )}
+        hasSources) && <SectionJumpNav {...sectionFlags} />}
 
       {hasPortfolioOutcomes && (
         <section className="space-y-8 pb-16">
@@ -584,10 +578,15 @@ function PortfolioOutcomesView({
           </div>
 
           <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-            <MetricPair label="Expected return" value={formatSignedPercent(model.expected_return_pct)} />
+            <MetricPair
+              label="Expected return"
+              value={formatSignedPercent(model.expected_return_pct)}
+            />
             <MetricPair
               label="Volatility"
-              value={model.volatility_pct == null ? "not modeled" : formatPercent(model.volatility_pct)}
+              value={
+                model.volatility_pct == null ? "not modeled" : formatPercent(model.volatility_pct)
+              }
             />
           </div>
 
@@ -700,9 +699,7 @@ function HoldingReviewList({
                 <span className="border border-foreground px-2 py-0.5 text-foreground">
                   {review.stance}
                 </span>
-                <span className="tabular-nums">
-                  conf {(review.confidence * 100).toFixed(0)}%
-                </span>
+                <span className="tabular-nums">conf {(review.confidence * 100).toFixed(0)}%</span>
                 <span>{review.importance}</span>
               </div>
             </header>
@@ -758,7 +755,9 @@ function ReasonRiskGrid({ reasons, risks }: { reasons: string[]; risks: string[]
 function AllocationReviewView({ review }: { review: AllocationReview }) {
   return (
     <div className="space-y-6 border-t border-border pt-5">
-      <p className="max-w-[62ch] text-[14.5px] leading-[1.6] text-foreground/85">{review.summary}</p>
+      <p className="max-w-[62ch] text-[14.5px] leading-[1.6] text-foreground/85">
+        {review.summary}
+      </p>
       <div className="space-y-8">
         {review.dimensions.map((dimension) => (
           <div key={dimension.dimension} className="space-y-3">

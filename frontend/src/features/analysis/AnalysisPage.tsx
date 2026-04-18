@@ -176,9 +176,7 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
                 </button>
                 <span aria-hidden className="h-3 w-px bg-border" />
                 <DropdownMenu>
-                  <DropdownMenuTrigger
-                    className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors outline-none hover:text-foreground data-[state=open]:text-foreground"
-                  >
+                  <DropdownMenuTrigger className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors outline-none hover:text-foreground data-[state=open]:text-foreground">
                     <DownloadSimple size={13} />
                     <span>{exportState || "Export"}</span>
                     <CaretDown size={11} />

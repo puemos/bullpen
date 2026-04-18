@@ -38,10 +38,7 @@ export async function getAnalysisReport(
   return invoke("get_analysis_report", { analysisId, runId: runId ?? null });
 }
 
-export async function getStanceStaleMetrics(
-  analysisId: string,
-  runId?: string,
-): Promise<string[]> {
+export async function getStanceStaleMetrics(analysisId: string, runId?: string): Promise<string[]> {
   return invoke("get_stance_stale_metrics", { analysisId, runId: runId ?? null });
 }
 
@@ -49,10 +46,7 @@ export async function deleteAnalysis(analysisId: string): Promise<void> {
   return invoke("delete_analysis", { analysisId });
 }
 
-export async function createPortfolio(
-  name: string,
-  baseCurrency: string,
-): Promise<Portfolio> {
+export async function createPortfolio(name: string, baseCurrency: string): Promise<Portfolio> {
   return invoke("create_portfolio", { name, baseCurrency });
 }
 
@@ -82,10 +76,7 @@ export async function stopAnalysis(runId: string): Promise<void> {
   return invoke("stop_analysis", { runId });
 }
 
-export async function getPriceHistory(
-  symbol: string,
-  market: string | null,
-): Promise<number[]> {
+export async function getPriceHistory(symbol: string, market: string | null): Promise<number[]> {
   return invoke("get_price_history", { symbol, market });
 }
 

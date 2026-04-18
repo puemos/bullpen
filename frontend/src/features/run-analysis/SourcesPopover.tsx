@@ -24,9 +24,7 @@ export function SourcesPopover({ sources, selected, onToggle }: SourcesPopoverPr
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const availableCount = sources.filter(
-    (s) => !s.requires_key || s.has_key,
-  ).length;
+  const availableCount = sources.filter((s) => !s.requires_key || s.has_key).length;
   const activeCount = sources.filter(
     (s) => selected.has(s.id) && (!s.requires_key || s.has_key),
   ).length;

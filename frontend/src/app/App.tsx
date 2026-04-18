@@ -311,11 +311,7 @@ export function App() {
           {view === "new-analysis" && <ResearchPage agents={agents} onDone={refresh} />}
           {view === "analysis" && <AnalysisPage onRefresh={refresh} />}
           {view === "portfolio" && (
-            <PortfolioPage
-              agents={agents}
-              onRefresh={refresh}
-              onSelectAnalysis={selectAnalysis}
-            />
+            <PortfolioPage agents={agents} onRefresh={refresh} onSelectAnalysis={selectAnalysis} />
           )}
           {view === "settings" && <SettingsPage agents={agents} />}
         </div>

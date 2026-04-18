@@ -71,9 +71,7 @@ export function AppSidebar({
     : filteredAnalyses.slice(0, SECTION_CAP);
   const hiddenAnalysesCount = Math.max(0, filteredAnalyses.length - SECTION_CAP);
 
-  const visiblePortfolios = portfoliosExpanded
-    ? portfolios
-    : portfolios.slice(0, SECTION_CAP);
+  const visiblePortfolios = portfoliosExpanded ? portfolios : portfolios.slice(0, SECTION_CAP);
   const hiddenPortfoliosCount = Math.max(0, portfolios.length - SECTION_CAP);
 
   return (

@@ -133,7 +133,9 @@ export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: Portfolio
     setCreating(true);
     try {
       const portfolio = await createPortfolio("Portfolio", createCurrency);
-      toast.success("Portfolio created", { description: `${portfolio.name} · ${portfolio.base_currency}` });
+      toast.success("Portfolio created", {
+        description: `${portfolio.name} · ${portfolio.base_currency}`,
+      });
       await onRefresh();
       const detail = await getPortfolioDetail(portfolio.id);
       setState({
@@ -487,9 +489,7 @@ function PortfolioView({
           <RunAnalysisMenu
             agents={agents}
             availableAgents={availableAgents}
-            disabled={
-              analysisStarting || detail.holdings.length === 0 || !hasAnyAvailableAgent
-            }
+            disabled={analysisStarting || detail.holdings.length === 0 || !hasAnyAvailableAgent}
             running={analysisStarting}
             onPick={(pickedAgentId, pickedModelId) => {
               void startAnalysisWith(pickedAgentId, pickedModelId);
@@ -617,10 +617,7 @@ function PortfolioMeta({
     );
   }
 
-  const segments: string[] = [
-    baseCurrency,
-    `${String(holdingCount).padStart(2, "0")} holdings`,
-  ];
+  const segments: string[] = [baseCurrency, `${String(holdingCount).padStart(2, "0")} holdings`];
   if (totals.length === 1) {
     segments.push(formatMoney(totals[0][1], totals[0][0]));
   } else if (totals.length > 1) {
@@ -795,9 +792,7 @@ function RunAnalysisMenu({
                 className="h-3.5 w-3.5 object-contain opacity-80"
               />
               <span className="flex-1 truncate">{agent.label}</span>
-              {isUnavailable && (
-                <span className="text-[10px] text-muted-foreground">offline</span>
-              )}
+              {isUnavailable && <span className="text-[10px] text-muted-foreground">offline</span>}
             </DropdownMenuItem>
           );
         })}
@@ -883,13 +878,7 @@ function PortfolioAnalysesSection({
   );
 }
 
-function AnalysisRow({
-  analysis,
-  onSelect,
-}: {
-  analysis: AnalysisSummary;
-  onSelect: () => void;
-}) {
+function AnalysisRow({ analysis, onSelect }: { analysis: AnalysisSummary; onSelect: () => void }) {
   const running =
     analysis.active_run_status === "running" || analysis.active_run_status === "queued";
   const statusText = running ? "RUNNING" : analysisStatusLabel(analysis);
@@ -907,15 +896,11 @@ function AnalysisRow({
           <span aria-hidden className="mx-2 text-muted-foreground/50">
             ·
           </span>
-          <span className="tabular-nums">
-            {String(analysis.block_count).padStart(2, "0")}b
-          </span>
+          <span className="tabular-nums">{String(analysis.block_count).padStart(2, "0")}b</span>
           <span aria-hidden className="mx-2 text-muted-foreground/50">
             ·
           </span>
-          <span className="tabular-nums">
-            {String(analysis.source_count).padStart(2, "0")}s
-          </span>
+          <span className="tabular-nums">{String(analysis.source_count).padStart(2, "0")}s</span>
         </div>
       </div>
       <span
@@ -970,7 +955,11 @@ function HoldingSparkline({ symbol, market }: { symbol: string; market: string |
   }, [symbol, market]);
 
   if (!series || series.length < 2) {
-    return <span aria-hidden className="block text-right text-muted-foreground/40">—</span>;
+    return (
+      <span aria-hidden className="block text-right text-muted-foreground/40">
+        —
+      </span>
+    );
   }
 
   const min = Math.min(...series);
