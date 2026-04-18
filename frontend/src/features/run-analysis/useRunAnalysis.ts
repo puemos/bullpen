@@ -27,7 +27,7 @@ interface UseRunAnalysisOptions {
 export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalysisOptions) {
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const start = async (prompt: string) => {
+  const start = async (prompt: string, enabledSources: string[] | null = null) => {
     if (!canRun) return;
 
     setLocalError(null);
@@ -88,7 +88,15 @@ export function useRunAnalysis({ agentId, agents, canRun, onDone }: UseRunAnalys
       }
     };
 
-    generateAnalysis(prompt, agentId, modelId, runId, analysisId, onProgress).catch((err) => {
+    generateAnalysis(
+      prompt,
+      agentId,
+      modelId,
+      runId,
+      analysisId,
+      onProgress,
+      enabledSources,
+    ).catch((err) => {
       const msg = String(err);
       const isCancelled = msg.includes("cancelled by user");
       updateRunStatus(runId, isCancelled ? "cancelled" : "error");

@@ -1135,7 +1135,7 @@ pub fn create_submit_decision_criterion_answer_tool(config: Arc<ServerConfig>) -
             })
         },
     )
-    .with_description("Close the loop on each decision criterion named in the research plan. Submit exactly one answer per criterion.")
+    .with_description("Close the loop on each decision criterion named in the research plan. Submit exactly one answer per criterion. `verdict` must be one of: `confirmed` (evidence supports the criterion), `refuted` (evidence contradicts it), `partially_confirmed` (evidence supports some aspects but not others), or `unresolved` (insufficient evidence either way). Do not use synonyms like `met`, `not_met`, `passed`, or `failed`.")
     .with_schema(json!({
         "type": "object",
         "required": ["criterion", "verdict", "summary", "supporting_block_ids", "supporting_evidence_ids"],
@@ -1182,6 +1182,46 @@ pub fn create_finalize_analysis_tool(config: Arc<ServerConfig>) -> impl ToolHand
     }))
 }
 
+/// Wrap a `SourceProvider` as an MCP tool. The provider's input_schema and
+/// async query are surfaced directly — we do no content transformation so
+/// that the agent sees whatever the upstream API returns. Rate-limit and
+/// missing-key errors are translated into `pmcp::Error::Validation` /
+/// `pmcp::Error::Internal` so the agent gets structured feedback.
+pub fn create_source_tool(
+    provider: &'static dyn crate::infra::sources::SourceProvider,
+    api_key: Option<String>,
+) -> impl ToolHandler {
+    let description = provider.tool_description();
+    let schema = provider.input_schema();
+    let name = provider.tool_name();
+
+    SimpleTool::new(&name, move |args: Value, _extra| {
+        let key = api_key.clone();
+        Box::pin(async move {
+            use crate::infra::sources::{ProviderCallContext, SourceError};
+            let ctx = ProviderCallContext {
+                api_key: key.as_deref(),
+            };
+            match provider.query(ctx, args).await {
+                Ok(value) => Ok(value),
+                Err(SourceError::MissingKey(_)) => Err(pmcp::Error::InvalidState(
+                    "api key not configured for this provider".into(),
+                )),
+                Err(SourceError::InvalidInput(msg)) => Err(pmcp::Error::Validation(msg)),
+                Err(SourceError::RateLimited(_)) => Err(pmcp::Error::Internal(
+                    "provider rate-limited this run".into(),
+                )),
+                Err(SourceError::Upstream { status, message }) => Err(pmcp::Error::Internal(
+                    format!("upstream {status}: {message}"),
+                )),
+                Err(err) => Err(pmcp::Error::Internal(err.to_string())),
+            }
+        })
+    })
+    .with_description(&description)
+    .with_schema(schema)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1212,12 +1252,14 @@ mod tests {
             agent_id: "fake".into(),
             user_prompt: "Analyze AAPL".into(),
             created_at: chrono::Utc::now().to_rfc3339(),
+            enabled_sources: Vec::new(),
         };
         std::fs::write(&ctx_path, serde_json::to_string(&context).unwrap()).unwrap();
 
         let config = Arc::new(ServerConfig {
             run_context: Some(ctx_path),
             db_path: Some(db_path),
+            source_keys: std::collections::HashMap::new(),
         });
         (tmp, config, db, run_id)
     }
@@ -1547,11 +1589,13 @@ mod tests {
             agent_id: "fake".into(),
             user_prompt: "Analyze AAPL".into(),
             created_at: chrono::Utc::now().to_rfc3339(),
+            enabled_sources: Vec::new(),
         };
         std::fs::write(&ctx_path, serde_json::to_string(&context).unwrap()).unwrap();
         let config = Arc::new(ServerConfig {
             run_context: Some(ctx_path),
             db_path: Some(db_path),
+            source_keys: std::collections::HashMap::new(),
         });
 
         // sanity check: validator agrees the run is finalize-ready

@@ -69,7 +69,7 @@ export function ResearchPage({ agents, onDone }: ResearchPageProps) {
           prompt={prompt}
           selectedAgent={selectedAgent}
           onPromptChange={setPrompt}
-          onRun={() => start(prompt)}
+          onRun={(enabledSources) => start(prompt, enabledSources)}
         />
 
         <div className="mt-20 space-y-5 border-t border-border pt-8">

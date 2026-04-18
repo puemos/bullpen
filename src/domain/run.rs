@@ -12,4 +12,9 @@ pub struct RunContext {
     pub agent_id: String,
     pub user_prompt: String,
     pub created_at: String,
+    /// Data-source provider ids the agent is allowed to use for this run.
+    /// The MCP server uses this to gate tool registration: a provider id
+    /// absent from the list will not appear in the agent's tool list at all.
+    #[serde(default)]
+    pub enabled_sources: Vec<String>,
 }

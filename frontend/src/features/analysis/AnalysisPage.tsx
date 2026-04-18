@@ -160,7 +160,7 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
                 className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
               >
                 Agent
-                {isRunning && <Dot className="ml-1 size-1.5 animate-pulse bg-primary" />}
+                {isRunning && <Dot className="-ml-0.5 size-1.5 animate-pulse bg-blue-500" />}
               </TabsTrigger>
             </TabsList>
 

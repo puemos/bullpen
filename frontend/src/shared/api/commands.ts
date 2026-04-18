@@ -6,6 +6,8 @@ import type {
   AnalysisSummary,
   AppSettings,
   ProgressEventPayload,
+  SourceDescriptor,
+  SourceKeyTestResult,
 } from "@/types";
 
 export async function getAgents(): Promise<AgentCandidate[]> {
@@ -97,6 +99,7 @@ export async function generateAnalysis(
   runId: string,
   analysisId: string,
   onProgress: Channel<ProgressEventPayload>,
+  enabledSources: string[] | null = null,
 ): Promise<{ analysis_id: string; run_id: string }> {
   return invoke("generate_analysis", {
     userPrompt,
@@ -104,6 +107,31 @@ export async function generateAnalysis(
     modelId,
     analysisId,
     runId,
+    enabledSources,
     onProgress,
   });
+}
+
+export async function listSources(): Promise<SourceDescriptor[]> {
+  return invoke("list_sources");
+}
+
+export async function refreshSourceKeyStatus(): Promise<SourceDescriptor[]> {
+  return invoke("refresh_source_key_status");
+}
+
+export async function setSourceKey(providerId: string, key: string): Promise<void> {
+  return invoke("set_source_key", { args: { provider_id: providerId, key } });
+}
+
+export async function clearSourceKey(providerId: string): Promise<void> {
+  return invoke("clear_source_key", { providerId });
+}
+
+export async function testSourceKey(providerId: string): Promise<SourceKeyTestResult> {
+  return invoke("test_source_key", { providerId });
+}
+
+export async function setEnabledSources(ids: string[]): Promise<string[]> {
+  return invoke("set_enabled_sources", { ids });
 }

@@ -3,13 +3,19 @@ mod tool;
 
 pub use config::ServerConfig;
 
+use crate::infra::sources;
 use pmcp::{Server, ServerCapabilities};
 use std::sync::Arc;
 
 pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
     let config = Arc::new(ServerConfig::from_args());
 
-    let server = Server::builder()
+    let enabled_sources: Vec<String> = match config.load_context() {
+        Ok(ctx) => ctx.enabled_sources,
+        Err(_) => Vec::new(),
+    };
+
+    let mut builder = Server::builder()
         .name("bullpen-analysis")
         .version(env!("CARGO_PKG_VERSION"))
         .capabilities(ServerCapabilities::tools_only())
@@ -68,8 +74,27 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
         .tool(
             "finalize_analysis",
             tool::create_finalize_analysis_tool(config.clone()),
-        )
-        .build()?;
+        );
 
+    for provider in sources::all() {
+        let d = provider.descriptor();
+        if !enabled_sources.iter().any(|id| id == d.id) {
+            continue;
+        }
+        let api_key = config.source_keys.get(d.id).cloned();
+        if d.requires_key && api_key.is_none() {
+            eprintln!(
+                "source '{}' enabled but no api key provided; skipping tool registration",
+                d.id
+            );
+            continue;
+        }
+        builder = builder.tool(
+            provider.tool_name(),
+            tool::create_source_tool(provider, api_key),
+        );
+    }
+
+    let server = builder.build()?;
     server.run(pmcp::StdioTransport::new()).await
 }

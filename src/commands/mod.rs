@@ -12,8 +12,11 @@ use crate::infra::acp::analysis_generator::{
 };
 use crate::infra::acp::{AgentCandidate, list_agent_candidates};
 use crate::infra::app_config::{AppConfig, load_config, save_config};
+use crate::infra::keystore;
+use crate::infra::sources::{self, ProviderDescriptor};
 use crate::state::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -393,6 +396,7 @@ pub async fn generate_analysis(
     model_id: Option<String>,
     analysis_id: String,
     run_id: Option<String>,
+    enabled_sources: Option<Vec<String>>,
     on_progress: Channel<ProgressEventPayload>,
 ) -> Result<GenerateAnalysisResult, CommandError> {
     let trimmed_prompt = user_prompt.trim();
@@ -431,13 +435,24 @@ pub async fn generate_analysis(
         error: None,
     };
 
+    let config = load_config();
+    let resolved_sources: Vec<String> = match enabled_sources {
+        Some(list) => list
+            .into_iter()
+            .filter(|id| sources::get(id).is_some())
+            .collect(),
+        None => config.enabled_sources.iter().cloned().collect(),
+    };
+    let enabled_sources_json =
+        serde_json::to_string(&resolved_sources).unwrap_or_else(|_| "[]".to_string());
+
     let db_path = {
         let db = &state.db;
         db.with_tx(|tx| {
             tx.execute(
                 "INSERT OR REPLACE INTO analysis_runs
-                (id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (id, analysis_id, agent_id, model_id, prompt_text, status, started_at, completed_at, error, enabled_sources)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 rusqlite::params![
                     run.id,
                     run.analysis_id,
@@ -447,7 +462,8 @@ pub async fn generate_analysis(
                     run.status.to_string(),
                     run.started_at,
                     run.completed_at,
-                    run.error
+                    run.error,
+                    enabled_sources_json,
                 ],
             )?;
             tx.execute(
@@ -471,7 +487,33 @@ pub async fn generate_analysis(
         agent_id: candidate.id.clone(),
         user_prompt: trimmed_prompt.to_string(),
         created_at: now,
+        enabled_sources: resolved_sources.clone(),
     };
+
+    let mut source_keys: HashMap<String, String> = HashMap::new();
+    for id in &resolved_sources {
+        let Some(provider) = sources::get(id) else {
+            continue;
+        };
+        if !provider.descriptor().requires_key {
+            continue;
+        }
+        match keystore::get_key(&sources::key_account(id)) {
+            Ok(Some(value)) => {
+                source_keys.insert(id.clone(), value);
+            }
+            Ok(None) => {
+                let _ = on_progress.send(ProgressEventPayload::Log(format!(
+                    "source '{id}' enabled but no API key stored; its tool will be hidden"
+                )));
+            }
+            Err(err) => {
+                let _ = on_progress.send(ProgressEventPayload::Log(format!(
+                    "source '{id}' keychain error: {err}; its tool will be hidden"
+                )));
+            }
+        }
+    }
 
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressEventPayload>();
     let progress_channel = on_progress.clone();
@@ -527,7 +569,6 @@ pub async fn generate_analysis(
         candidate.label
     )));
 
-    let config = load_config();
     let generation_result = generate_with_acp(GenerateAnalysisInput {
         run_context: context,
         agent_command: command,
@@ -539,6 +580,7 @@ pub async fn generate_analysis(
         db_path,
         timeout_secs: Some(config.timeout_secs),
         cancel_token: Some(cancel_token),
+        source_keys,
     })
     .await;
 
@@ -584,6 +626,226 @@ pub async fn generate_analysis(
         analysis_id,
         run_id,
     })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceDescriptor {
+    pub id: String,
+    pub display_name: String,
+    pub category: String,
+    pub requires_key: bool,
+    pub default_enabled: bool,
+    pub docs_url: String,
+    pub key_acquisition_url: Option<String>,
+    pub rate_limit_hint: Option<String>,
+    pub description: String,
+    pub has_key: bool,
+    pub enabled: bool,
+}
+
+fn category_str(c: crate::infra::sources::SourceCategory) -> &'static str {
+    use crate::infra::sources::SourceCategory;
+    match c {
+        SourceCategory::WebSearch => "web_search",
+        SourceCategory::Filings => "filings",
+        SourceCategory::Fundamentals => "fundamentals",
+        SourceCategory::MarketData => "market_data",
+        SourceCategory::News => "news",
+        SourceCategory::Forums => "forums",
+        SourceCategory::Screener => "screener",
+    }
+}
+
+fn describe(d: &ProviderDescriptor, has_key: bool, enabled: bool) -> SourceDescriptor {
+    SourceDescriptor {
+        id: d.id.to_string(),
+        display_name: d.display_name.to_string(),
+        category: category_str(d.category).to_string(),
+        requires_key: d.requires_key,
+        default_enabled: d.default_enabled,
+        docs_url: d.docs_url.to_string(),
+        key_acquisition_url: d.key_acquisition_url.map(str::to_string),
+        rate_limit_hint: d.rate_limit_hint.map(str::to_string),
+        description: d.description.to_string(),
+        has_key,
+        enabled,
+    }
+}
+
+#[tauri::command]
+pub async fn list_sources() -> Result<Vec<SourceDescriptor>, CommandError> {
+    let config = load_config();
+    Ok(sources::all()
+        .iter()
+        .map(|p| {
+            let d = p.descriptor();
+            let has_key = config.sources_with_keys.contains(d.id);
+            let enabled = config.enabled_sources.contains(d.id);
+            describe(&d, has_key, enabled)
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn refresh_source_key_status() -> Result<Vec<SourceDescriptor>, CommandError> {
+    let mut config = load_config();
+    let mut result = Vec::new();
+    for p in sources::all() {
+        let d = p.descriptor();
+        let id = d.id;
+        let has_key = if d.requires_key {
+            keystore::has_key(&sources::key_account(id)).unwrap_or(false)
+        } else {
+            false
+        };
+        if has_key {
+            config.sources_with_keys.insert(id.to_string());
+        } else {
+            config.sources_with_keys.remove(id);
+        }
+        let enabled = config.enabled_sources.contains(id);
+        result.push(describe(&d, has_key, enabled));
+    }
+    save_config(&config)?;
+    Ok(result)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetSourceKeyArgs {
+    pub provider_id: String,
+    pub key: String,
+}
+
+#[tauri::command]
+pub async fn set_source_key(args: SetSourceKeyArgs) -> Result<(), CommandError> {
+    let provider = sources::get(&args.provider_id)
+        .ok_or_else(|| CommandError::new(format!("unknown provider '{}'", args.provider_id)))?;
+    let d = provider.descriptor();
+    if !d.requires_key {
+        return Err(CommandError::new(format!(
+            "provider '{}' does not accept an api key",
+            d.id
+        )));
+    }
+    let trimmed = args.key.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::new("api key is empty"));
+    }
+    keystore::set_key(&sources::key_account(d.id), trimmed)
+        .map_err(|err| CommandError::new(format!("keychain error: {err}")))?;
+    let mut config = load_config();
+    config.sources_with_keys.insert(d.id.to_string());
+    save_config(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_source_key(provider_id: String) -> Result<(), CommandError> {
+    let provider = sources::get(&provider_id)
+        .ok_or_else(|| CommandError::new(format!("unknown provider '{provider_id}'")))?;
+    let d = provider.descriptor();
+    keystore::delete_key(&sources::key_account(d.id))
+        .map_err(|err| CommandError::new(format!("keychain error: {err}")))?;
+    let mut config = load_config();
+    config.sources_with_keys.remove(d.id);
+    save_config(&config)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceKeyTestResult {
+    pub status: String,
+    pub message: String,
+}
+
+#[tauri::command]
+pub async fn test_source_key(provider_id: String) -> Result<SourceKeyTestResult, CommandError> {
+    use crate::infra::sources::{ProviderCallContext, SourceError};
+
+    let provider = sources::get(&provider_id)
+        .ok_or_else(|| CommandError::new(format!("unknown provider '{provider_id}'")))?;
+    let d = provider.descriptor();
+
+    let key = if d.requires_key {
+        let stored = keystore::get_key(&sources::key_account(d.id))
+            .map_err(|err| CommandError::new(format!("keychain error: {err}")))?;
+        match stored {
+            Some(value) => Some(value),
+            None => {
+                return Ok(SourceKeyTestResult {
+                    status: "missing".into(),
+                    message: "no key stored".into(),
+                });
+            }
+        }
+    } else {
+        None
+    };
+
+    let args = test_probe_args(d.id);
+    let ctx = ProviderCallContext {
+        api_key: key.as_deref(),
+    };
+    match provider.query(ctx, args).await {
+        Ok(_) => Ok(SourceKeyTestResult {
+            status: "ok".into(),
+            message: "reached provider".into(),
+        }),
+        Err(SourceError::Upstream { status, .. }) => Ok(SourceKeyTestResult {
+            status: status.to_string(),
+            message: match status {
+                401 | 403 => "auth failed".into(),
+                429 => "rate limited".into(),
+                _ => format!("http {status}"),
+            },
+        }),
+        Err(SourceError::RateLimited(_)) => Ok(SourceKeyTestResult {
+            status: "429".into(),
+            message: "rate limited".into(),
+        }),
+        Err(SourceError::MissingKey(_)) => Ok(SourceKeyTestResult {
+            status: "missing".into(),
+            message: "no key stored".into(),
+        }),
+        Err(err) => Ok(SourceKeyTestResult {
+            status: "error".into(),
+            message: err.to_string(),
+        }),
+    }
+}
+
+/// A minimal, low-cost probe args per provider. Kept here rather than on the
+/// trait because test args are a UX-layer concern (we want the cheapest
+/// possible call, not a demonstration of capabilities).
+fn test_probe_args(id: &str) -> serde_json::Value {
+    use serde_json::json;
+    match id {
+        "tavily" => json!({ "query": "ping", "max_results": 1 }),
+        "brave_search" => json!({ "q": "ping", "count": 1 }),
+        "sec_edgar" => json!({ "endpoint": "submissions", "cik": "320193" }),
+        "alpha_vantage" => json!({ "function": "GLOBAL_QUOTE", "symbol": "IBM" }),
+        "fmp" => json!({ "endpoint": "profile", "symbol": "AAPL" }),
+        "finnhub" => json!({ "endpoint": "quote", "symbol": "AAPL" }),
+        "polygon" => json!({ "endpoint": "ticker_details", "ticker": "AAPL" }),
+        "newsapi" => json!({ "q": "markets", "page_size": 1 }),
+        "finviz" => json!({ "symbol": "AAPL" }),
+        "stocktwits" => json!({ "endpoint": "trending" }),
+        "hacker_news" => json!({ "endpoint": "topstories" }),
+        "yahoo_finance" => json!({ "endpoint": "chart", "symbol": "AAPL", "range": "5d" }),
+        _ => json!({}),
+    }
+}
+
+#[tauri::command]
+pub async fn set_enabled_sources(ids: Vec<String>) -> Result<Vec<String>, CommandError> {
+    let valid: std::collections::BTreeSet<String> = ids
+        .into_iter()
+        .filter(|id| sources::get(id).is_some())
+        .collect();
+    let mut config = load_config();
+    config.enabled_sources.clone_from(&valid);
+    save_config(&config)?;
+    Ok(valid.into_iter().collect())
 }
 
 fn derive_title(prompt: &str) -> String {

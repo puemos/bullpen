@@ -593,7 +593,9 @@ impl FromStr for CriterionVerdict {
             "refuted" => Ok(Self::Refuted),
             "partially_confirmed" => Ok(Self::PartiallyConfirmed),
             "unresolved" => Ok(Self::Unresolved),
-            other => Err(format!("unknown criterion verdict: {other}")),
+            other => Err(format!(
+                "verdict: unknown value '{other}'; expected one of confirmed, refuted, partially_confirmed, unresolved"
+            )),
         }
     }
 }

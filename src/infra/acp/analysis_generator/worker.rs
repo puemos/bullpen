@@ -3,9 +3,9 @@ use crate::domain::RunContext;
 use crate::infra::progress::ProgressEventPayload;
 use crate::prompts;
 use agent_client_protocol::{
-    Agent, ClientCapabilities, ClientSideConnection, ContentBlock, FileSystemCapability,
-    Implementation, InitializeRequest, McpServer, McpServerStdio, NewSessionRequest, PromptRequest,
-    ProtocolVersion, TextContent,
+    Agent, ClientCapabilities, ClientSideConnection, ContentBlock, EnvVariable,
+    FileSystemCapabilities, Implementation, InitializeRequest, McpServer, McpServerStdio,
+    NewSessionRequest, PromptRequest, ProtocolVersion, TextContent,
 };
 use anyhow::{Context, Result};
 use std::future::Future;
@@ -35,6 +35,10 @@ pub struct GenerateAnalysisInput {
     pub db_path: PathBuf,
     pub timeout_secs: Option<u64>,
     pub cancel_token: Option<CancellationToken>,
+    /// Keys fetched from the OS keychain for enabled data-source providers,
+    /// keyed by provider id. Injected as `BULLPEN_SRC_KEY_<ID_UPPER>` on the
+    /// MCP child's environment. The child never touches keyring directly.
+    pub source_keys: std::collections::HashMap<String, String>,
 }
 
 pub struct GenerateAnalysisResult {
@@ -125,6 +129,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         db_path,
         timeout_secs: _,
         cancel_token,
+        source_keys,
     } = input;
 
     if let Some((flag, value)) = &model_flag {
@@ -133,7 +138,20 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
     }
 
     let logs = Arc::new(Mutex::new(Vec::new()));
+    // Values we must never let leak into logs — the agent echoes stderr, and
+    // provider HTTP errors can include the full request URL (query-string
+    // keys are common on Alpha Vantage, FMP, Polygon).
+    let redactions: Vec<String> = source_keys.values().cloned().collect();
+    let redact = move |mut msg: String| {
+        for secret in &redactions {
+            if !secret.is_empty() && msg.contains(secret.as_str()) {
+                msg = msg.replace(secret.as_str(), "***");
+            }
+        }
+        msg
+    };
     let log_fn = |msg: String| {
+        let msg = redact(msg);
         if let Ok(mut guard) = logs.lock() {
             guard.push(msg.clone());
         }
@@ -185,11 +203,17 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
 
     let stderr_logs = logs.clone();
     let stderr_tx = progress_tx.clone();
+    let stderr_redactions: Vec<String> = source_keys.values().cloned().collect();
     tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let msg = format!("stderr: {line}");
+            let mut msg = format!("stderr: {line}");
+            for secret in &stderr_redactions {
+                if !secret.is_empty() && msg.contains(secret.as_str()) {
+                    msg = msg.replace(secret.as_str(), "***");
+                }
+            }
             if let Ok(mut guard) = stderr_logs.lock() {
                 guard.push(msg.clone());
             }
@@ -237,14 +261,24 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         )
         .context("write analysis context file")?;
 
+        let mut env_vars: Vec<EnvVariable> = Vec::with_capacity(source_keys.len());
+        for (id, value) in &source_keys {
+            env_vars.push(EnvVariable::new(
+                format!("BULLPEN_SRC_KEY_{}", id.to_uppercase()),
+                value.clone(),
+            ));
+        }
+
         let mcp_servers = vec![McpServer::Stdio(
-            McpServerStdio::new("bullpen-analysis", mcp_path.clone()).args(vec![
-                "--analysis-mcp-server".to_string(),
-                "--analysis-context".to_string(),
-                context_file.path().to_string_lossy().to_string(),
-                "--db-path".to_string(),
-                db_path.to_string_lossy().to_string(),
-            ]),
+            McpServerStdio::new("bullpen-analysis", mcp_path.clone())
+                .args(vec![
+                    "--analysis-mcp-server".to_string(),
+                    "--analysis-context".to_string(),
+                    context_file.path().to_string_lossy().to_string(),
+                    "--db-path".to_string(),
+                    db_path.to_string_lossy().to_string(),
+                ])
+                .env(env_vars),
         )];
 
         log_fn(format!(
@@ -323,7 +357,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
 
 fn build_client_capabilities() -> ClientCapabilities {
     ClientCapabilities::new()
-        .fs(FileSystemCapability::new()
+        .fs(FileSystemCapabilities::new()
             .read_text_file(false)
             .write_text_file(false))
         .terminal(false)

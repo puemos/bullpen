@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -13,6 +13,16 @@ pub struct AppConfig {
     pub disclaimer: String,
     #[serde(default)]
     pub model_by_agent: BTreeMap<String, String>,
+    /// Globally enabled data-source providers. Per-run overrides flow
+    /// through `RunContext` and can be a subset of this set.
+    #[serde(default)]
+    pub enabled_sources: BTreeSet<String>,
+    /// Cache of provider ids that currently have a key in the OS keychain.
+    /// Refreshed on demand via a user-initiated "Refresh keychain status"
+    /// action — we never call `keystore::has_key` during routine settings
+    /// loads because that would prompt on every app launch.
+    #[serde(default)]
+    pub sources_with_keys: BTreeSet<String>,
 }
 
 impl Default for AppConfig {
@@ -24,6 +34,8 @@ impl Default for AppConfig {
             source_freshness_days: 7,
             disclaimer: "Research only. Not investment advice.".to_string(),
             model_by_agent: BTreeMap::new(),
+            enabled_sources: BTreeSet::new(),
+            sources_with_keys: BTreeSet::new(),
         }
     }
 }
@@ -152,6 +164,11 @@ mod tests {
         let mut model_by_agent = BTreeMap::new();
         model_by_agent.insert("codex".into(), "gpt-5-codex".into());
         model_by_agent.insert("claude".into(), "claude-opus-4-7".into());
+        let mut enabled_sources = BTreeSet::new();
+        enabled_sources.insert("tavily".to_string());
+        enabled_sources.insert("sec_edgar".to_string());
+        let mut sources_with_keys = BTreeSet::new();
+        sources_with_keys.insert("tavily".to_string());
         let config = AppConfig {
             custom_agent_command: Some("/usr/local/bin/codex".to_string()),
             custom_agent_args: vec!["--mode".into(), "acp".into()],
@@ -159,6 +176,8 @@ mod tests {
             source_freshness_days: 14,
             disclaimer: "Custom disclaimer.".into(),
             model_by_agent,
+            enabled_sources,
+            sources_with_keys,
         };
 
         save_config(&config).unwrap();

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { getSettings, updateSettings } from "@/shared/api/commands";
 import type { AgentCandidate, AppSettings } from "@/types";
 import { AgentStatusList } from "./AgentStatusList";
+import { DataSourcesSection } from "./DataSourcesSection";
 
 interface SettingsPageProps {
   agents: AgentCandidate[];
@@ -99,6 +100,8 @@ export function SettingsPage({ agents }: SettingsPageProps) {
           </div>
         )}
       </section>
+
+      <DataSourcesSection />
     </div>
   );
 }

@@ -57,6 +57,12 @@ fn main() {
             commands::export_analysis_markdown,
             commands::export_analysis_html,
             commands::publish_analysis_html,
+            commands::list_sources,
+            commands::refresh_source_key_status,
+            commands::set_source_key,
+            commands::clear_source_key,
+            commands::test_source_key,
+            commands::set_enabled_sources,
             commands::update::get_app_version,
             commands::update::run_self_update,
         ])

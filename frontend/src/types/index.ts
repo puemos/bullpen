@@ -32,6 +32,36 @@ export interface AppSettings {
   source_freshness_days: number;
   disclaimer: string;
   model_by_agent: Record<string, string>;
+  enabled_sources: string[];
+  sources_with_keys: string[];
+}
+
+export type SourceCategoryId =
+  | "web_search"
+  | "filings"
+  | "fundamentals"
+  | "market_data"
+  | "news"
+  | "forums"
+  | "screener";
+
+export interface SourceDescriptor {
+  id: string;
+  display_name: string;
+  category: SourceCategoryId;
+  requires_key: boolean;
+  default_enabled: boolean;
+  docs_url: string;
+  key_acquisition_url: string | null;
+  rate_limit_hint: string | null;
+  description: string;
+  has_key: boolean;
+  enabled: boolean;
+}
+
+export interface SourceKeyTestResult {
+  status: string;
+  message: string;
 }
 
 export interface AnalysisSummary {

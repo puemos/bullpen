@@ -1,10 +1,15 @@
 use crate::domain::RunContext;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default)]
 pub struct ServerConfig {
     pub run_context: Option<PathBuf>,
     pub db_path: Option<PathBuf>,
+    /// Provider id → API key. Populated from `BULLPEN_SRC_KEY_<ID>` env
+    /// variables at startup. The MCP child never calls the OS keychain —
+    /// secrets ride in via the parent's `McpServerStdio::env(...)`.
+    pub source_keys: HashMap<String, String>,
 }
 
 impl ServerConfig {
@@ -24,6 +29,14 @@ impl ServerConfig {
         }
         if let Ok(path) = std::env::var("BULLPEN_DB_PATH") {
             config.db_path = Some(PathBuf::from(path));
+        }
+        for (name, value) in std::env::vars() {
+            if let Some(suffix) = name.strip_prefix("BULLPEN_SRC_KEY_")
+                && !suffix.is_empty()
+                && !value.is_empty()
+            {
+                config.source_keys.insert(suffix.to_lowercase(), value);
+            }
         }
 
         let args: Vec<String> = iter.into_iter().collect();

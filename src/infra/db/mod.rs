@@ -147,6 +147,7 @@ impl Database {
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
                 error TEXT,
+                enabled_sources TEXT,
                 FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE
             );
 
@@ -355,6 +356,10 @@ impl Database {
         // Add new columns to pre-existing databases. ADD COLUMN errors on a
         // duplicate column name, which we silently swallow to stay idempotent.
         let _ = conn.execute("ALTER TABLE analysis_runs ADD COLUMN model_id TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE analysis_runs ADD COLUMN enabled_sources TEXT",
+            [],
+        );
         let _ = conn.execute("ALTER TABLE sources ADD COLUMN last_verified_at TEXT", []);
         let _ = conn.execute(
             "ALTER TABLE sources ADD COLUMN last_verification_status TEXT",
