@@ -39,7 +39,6 @@ import { getLogoPath } from "@/lib/agents";
 import {
   createPortfolioAnalysis,
   getPortfolioDetail,
-  getPriceHistory,
   getSettings,
   parsePortfolioCsv,
   updateSettings,
@@ -49,6 +48,7 @@ import {
   useCreatePortfolio,
   useDeletePortfolio,
   useImportPortfolioCsv,
+  usePriceHistory,
   useRenamePortfolio,
 } from "@/shared/api/queries";
 import { getState, setState, useAppStore } from "@/store";
@@ -886,29 +886,8 @@ function analysisStatusLabel(analysis: AnalysisSummary): string {
   }
 }
 
-const priceHistoryCache = new Map<string, Promise<number[]>>();
-
-function fetchPriceHistoryCached(symbol: string, market: string | null): Promise<number[]> {
-  const key = `${symbol}|${market ?? ""}`;
-  const hit = priceHistoryCache.get(key);
-  if (hit) return hit;
-  const pending = getPriceHistory(symbol, market).catch(() => [] as number[]);
-  priceHistoryCache.set(key, pending);
-  return pending;
-}
-
 function HoldingSparkline({ symbol, market }: { symbol: string; market: string | null }) {
-  const [series, setSeries] = useState<number[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchPriceHistoryCached(symbol, market).then((values) => {
-      if (!cancelled) setSeries(values);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [symbol, market]);
+  const { data: series } = usePriceHistory(symbol, market);
 
   if (!series || series.length < 2) {
     return (
