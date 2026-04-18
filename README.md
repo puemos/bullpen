@@ -85,6 +85,26 @@ Bullpen discovers ACP agents via standard commands. You only need one.
 `BULLPEN_DB_PATH` — defaults to the OS app data directory.
 </details>
 
+## Data Sources
+
+Bullpen includes a registry of 12 financial data providers. Add API keys once in Settings — they are stored in your OS native keychain and never written to disk. Keys are redacted from logs.
+
+| Provider                  | Category      |
+| ------------------------- | ------------- |
+| Tavily                    | Web search    |
+| Brave Search              | Web search    |
+| SEC EDGAR                 | Filings       |
+| Alpha Vantage             | Fundamentals  |
+| Financial Modeling Prep   | Fundamentals  |
+| Finnhub                   | Fundamentals  |
+| Polygon                   | Market data   |
+| Yahoo Finance             | Market data   |
+| NewsAPI                   | News          |
+| StockTwits                | Forums        |
+| Finviz                    | Screener      |
+
+Providers without a configured key are excluded from the agent's MCP tool list. Use the **RUN SOURCES** button in the research composer to select which sources to activate per run.
+
 ## Screens
 
 <p align="center">

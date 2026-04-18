@@ -14,7 +14,7 @@
 
         <meta
             name="description"
-            content="Desktop app for stock research through your own ACP agent — Claude Code, Codex, Gemini. Structured reports with sources. Local SQLite, your agent's auth."
+            content="Desktop app for stock research through your own ACP agent — Claude Code, Codex, Gemini. Structured reports with sources. Local SQLite. Your keys, your keychain."
         />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href="https://bullpen.sh/" />
@@ -26,7 +26,7 @@
         />
         <meta
             property="og:description"
-            content="Stock research through your own ACP agent. Structured reports, sources you can click. Local SQLite, your agent's auth."
+            content="Stock research through your own ACP agent. Structured reports, sources you can click. Local SQLite. Your keys, your keychain."
         />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://bullpen.sh/" />
@@ -41,7 +41,7 @@
         />
         <meta
             name="twitter:description"
-            content="Stock research through your own ACP agent. Structured reports, sources you can click. Local SQLite, your agent's auth."
+            content="Stock research through your own ACP agent. Structured reports, sources you can click. Local SQLite. Your keys, your keychain."
         />
 
         <script type="application/ld+json">
@@ -329,8 +329,9 @@
                         </p>
                         <p>
                             Reports live in local SQLite. No account. No
-                            cloud sync. The only network call is your
-                            agent&rsquo;s own.
+                            cloud sync. Network calls are your agent&rsquo;s
+                            own and any data-source APIs you add &mdash; keys
+                            stored in your OS keychain, never on disk.
                         </p>
                     </div>
                 </div>
@@ -480,7 +481,7 @@
                         Why not just paste it into a chat.
                     </h2>
                     <p class="mt-5 font-serif text-[17px] md:text-[18px] leading-[1.5] text-muted max-w-[50ch]">
-                        Four things you don&rsquo;t get from a chat window.
+                        Things you don&rsquo;t get from a chat window.
                     </p>
                 </div>
 
@@ -594,8 +595,39 @@
                             class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
                         >
                             Local SQLite. No account, no telemetry, no cloud
-                            sync. Your agent&rsquo;s auth is the only network
-                            call.
+                            sync. Network calls are your agent&rsquo;s own and
+                            any data-source APIs you add &mdash; API keys live
+                            in your OS keychain.
+                        </p>
+                    </article>
+
+                    <!-- feature 5 -->
+                    <article
+                        class="p-6 md:p-10 md:border-r border-b border-rule flex flex-col gap-5"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="block w-3 h-3 bg-violet"
+                                aria-hidden="true"
+                            ></span>
+                            <span
+                                class="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted tabular-nums"
+                                >05 &middot; Sources</span
+                            >
+                        </div>
+                        <h3
+                            class="font-display font-semibold text-[24px] md:text-[28px] leading-[1.15] tracking-[-0.015em] text-ink"
+                        >
+                            12 financial data providers, built in
+                        </h3>
+                        <p
+                            class="font-serif text-[16px] leading-[1.6] text-muted max-w-[46ch]"
+                        >
+                            SEC filings, market data, news, screeners &mdash;
+                            Alpha Vantage, Polygon, Finnhub, Yahoo Finance,
+                            NewsAPI, and more. Add an API key per provider.
+                            Pick which sources to use each run. Keys stay in
+                            your OS keychain.
                         </p>
                     </article>
                 </div>
