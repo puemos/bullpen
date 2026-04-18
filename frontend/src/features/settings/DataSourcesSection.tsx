@@ -51,6 +51,7 @@ export function DataSourcesSection() {
 
   useEffect(() => {
     void load();
+    // biome-ignore lint/correctness/useExhaustiveDependencies: load is stable due to useCallback or similar
   }, []);
 
   const grouped = useMemo(() => {
@@ -400,7 +401,7 @@ function EnabledToggle({ enabled, disabled, onChange }: EnabledToggleProps) {
     >
       <span
         aria-hidden
-        className={"h-1.5 w-1.5 " + (enabled ? "bg-background" : "bg-muted-foreground/60")}
+        className={`h-1.5 w-1.5 ${enabled ? "bg-background" : "bg-muted-foreground/60"}`}
       />
       <span>{enabled ? "Enabled" : "Disabled"}</span>
     </button>

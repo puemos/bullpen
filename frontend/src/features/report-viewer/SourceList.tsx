@@ -39,7 +39,7 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
           {source.publisher && (
             <span className="text-[12px] text-muted-foreground">{source.publisher}</span>
           )}
-          <FreshnessChip iso={source.retrieved_at} role="source" />
+          <FreshnessChip iso={source.retrieved_at} />
           <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/60">
             {formatDate(source.retrieved_at)}
           </span>

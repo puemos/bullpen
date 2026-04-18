@@ -99,7 +99,7 @@ const FIELD_ALIASES: Record<CsvField, string[]> = {
 };
 
 export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: PortfolioPageProps) {
-  const portfolios = useAppStore((state) => state.portfolios);
+  const _portfolios = useAppStore((state) => state.portfolios);
   const selectedPortfolioId = useAppStore((state) => state.selectedPortfolioId);
   const selectedPortfolio = useAppStore((state) => state.selectedPortfolio);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
@@ -119,6 +119,7 @@ export function PortfolioPage({ agents, onRefresh, onSelectAnalysis }: Portfolio
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Intentionally omitted selectPortfolio - it changes every render
   useEffect(() => {
     // If an id is selected but the detail wasn't loaded yet, fetch it.
     // Don't auto-select "first portfolio" here — leaving both null is how the
@@ -1095,7 +1096,7 @@ function pickString(raw: Record<string, string>, header: string | null): string 
 function pickNumber(raw: Record<string, string>, header: string | null): number | null {
   const value = pickString(raw, header);
   if (!value) return null;
-  const stripped = value.replace(/[^0-9,.\-]/g, "");
+  const stripped = value.replace(/[^0-9,.-]/g, "");
   const lastComma = stripped.lastIndexOf(",");
   const lastDot = stripped.lastIndexOf(".");
   let normalized = stripped;

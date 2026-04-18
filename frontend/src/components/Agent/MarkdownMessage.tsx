@@ -28,7 +28,7 @@ interface MarkdownMessageProps {
   workspaceId?: string;
 }
 
-function MarkdownMessage({ text, workspaceId }: MarkdownMessageProps) {
+function MarkdownMessage({ text }: MarkdownMessageProps) {
   const components = useMemo<Components>(() => {
     return {
       a({ href, children }) {
