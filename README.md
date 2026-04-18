@@ -11,7 +11,7 @@
 <p align="center"><b>Stock and portfolio research through coding agents.</b></p>
 
 <p align="center">
-  <a href="https://github.com/puemos/bullpen/actions/workflows/ci.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/puemos/bullpen/ci.yml?style=flat-square" /></a>
+  <a href="https://github.com/puemos/bullpen/actions/workflows/rust-ci.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/puemos/bullpen/rust-ci.yml?style=flat-square" /></a>
   <a href="https://github.com/puemos/bullpen/releases"><img alt="Release" src="https://img.shields.io/github/v/release/puemos/bullpen?style=flat-square" /></a>
   <a href="LICENSE-MIT"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
 </p>
@@ -35,8 +35,8 @@ Bullpen runs your coding agent against a research prompt or portfolio. The agent
 
 ## Supported Agents
 
-| <img src="landing/assets/agents/claude.svg" width="40"><br>Claude | <img src="landing/assets/agents/codex.svg" width="40"><br>Codex | <img src="landing/assets/agents/gemini.svg" width="40"><br>Gemini | <img src="landing/assets/agents/kimi.svg" width="40"><br>Kimi | <img src="landing/assets/agents/mistral.svg" width="40"><br>Mistral | <img src="landing/assets/agents/opencode.svg" width="40"><br>OpenCode | <img src="landing/assets/agents/qwen.svg" width="40"><br>Qwen |
-| :---------------------------------------------------------------: | :-------------------------------------------------------------: | :---------------------------------------------------------------: | :-----------------------------------------------------------: | :-----------------------------------------------------------------: | :-------------------------------------------------------------------: | :-----------------------------------------------------------: |
+| <img src="assets/agents/claude.svg" width="40"><br>Claude | <img src="assets/agents/codex.svg" width="40"><br>Codex | <img src="assets/agents/gemini.svg" width="40"><br>Gemini | <img src="assets/agents/kimi.svg" width="40"><br>Kimi | <img src="assets/agents/mistral.svg" width="40"><br>Mistral | <img src="assets/agents/opencode.svg" width="40"><br>OpenCode | <img src="assets/agents/qwen.svg" width="40"><br>Qwen |
+| :-------------------------------------------------------: | :-----------------------------------------------------: | :-------------------------------------------------------: | :---------------------------------------------------: | :---------------------------------------------------------: | :-------------------------------------------------------------: | :---------------------------------------------------: |
 
 Custom agent: `BULLPEN_CUSTOM_AGENT`, `BULLPEN_CUSTOM_AGENT_ARGS`.
 
