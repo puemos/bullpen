@@ -24,15 +24,12 @@ You ask a question or load a portfolio. Pick an agent. Read the report.
 
 ---
 
-## What you get
+## Features
 
-**Thesis and risks** — with source links attached to the claims.
-
-**Scenarios** — base, upside, downside cases when the question calls for it.
-
-**Final stance** — bullish, bearish, mixed, or neutral, with confidence and what would change the view.
-
-**Export** — save any report as a standalone HTML file or Markdown. Share it, archive it, read it offline.
+- **Thesis and risks** — source links attached
+- **Scenarios** — base, upside, downside
+- **Final stance** — direction, confidence, what would change it
+- **Export** — HTML or Markdown
 
 ---
 
