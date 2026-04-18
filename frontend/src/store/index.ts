@@ -24,6 +24,11 @@ interface State {
   selectedRunTab: string | null;
   // Sub-tab within analysis detail view
   analysisSubTab: "report" | "agent";
+  // Compare view: sidebar toggle exposes per-analysis checkboxes; picking
+  // 2–4 finalized analyses opens the compare view.
+  compareMode: boolean;
+  compareAnalysisIds: string[];
+  compareReports: Record<string, AnalysisReport | null>;
 }
 
 const state: State = {
@@ -37,6 +42,9 @@ const state: State = {
   activeAnalysisId: null,
   selectedRunTab: null,
   analysisSubTab: "agent",
+  compareMode: false,
+  compareAnalysisIds: [],
+  compareReports: {},
 };
 
 const listeners = new Set<() => void>();
@@ -52,6 +60,31 @@ export function setState(partial: Partial<State>) {
 
 export function setSelectedReport(next: AnalysisReport | null) {
   state.selectedReport = stableMerge(state.selectedReport, next);
+  emit();
+}
+
+export function setCompareSelection(ids: string[]) {
+  state.compareAnalysisIds = ids;
+  // Drop stale report entries whose ids fell out of the selection.
+  const keep: Record<string, AnalysisReport | null> = {};
+  for (const id of ids) {
+    if (id in state.compareReports) keep[id] = state.compareReports[id] ?? null;
+  }
+  state.compareReports = keep;
+  emit();
+}
+
+export function setCompareReport(id: string, report: AnalysisReport | null) {
+  state.compareReports = { ...state.compareReports, [id]: report };
+  emit();
+}
+
+export function setCompareMode(next: boolean) {
+  state.compareMode = next;
+  if (!next) {
+    state.compareAnalysisIds = [];
+    state.compareReports = {};
+  }
   emit();
 }
 

@@ -1,6 +1,7 @@
 import { CircleNotch } from "@phosphor-icons/react";
 import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
 import type { AppView } from "@/app/navigation";
+import { COMPARE_MAX, COMPARE_MIN } from "@/app/navigation";
 import { Button } from "@/components/ui/button";
 import { Eyebrow } from "@/components/ui/editorial";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,8 +22,13 @@ interface AppSidebarProps {
   analyses: AnalysisSummary[];
   currentView: AppView;
   selectedAnalysisId: string | null;
+  compareMode: boolean;
+  compareAnalysisIds: string[];
   onViewChange: (view: AppView) => void;
   onSelectAnalysis: (analysisId: string) => void | Promise<void>;
+  onToggleCompareMode: () => void;
+  onToggleCompareSelection: (analysisId: string) => void;
+  onSubmitCompare: () => void;
   currentVersion: string | null;
   updateAvailable: boolean;
   onUpdateClick: () => void;
@@ -32,12 +38,22 @@ export function AppSidebar({
   analyses,
   currentView,
   selectedAnalysisId,
+  compareMode,
+  compareAnalysisIds,
   onViewChange,
   onSelectAnalysis,
+  onToggleCompareMode,
+  onToggleCompareSelection,
+  onSubmitCompare,
   currentVersion,
   updateAvailable,
   onUpdateClick,
 }: AppSidebarProps) {
+  const compareEligible = (a: AnalysisSummary) => a.active_run_status === "completed";
+  const selectedSet = new Set(compareAnalysisIds);
+  const compareReady =
+    compareAnalysisIds.length >= COMPARE_MIN && compareAnalysisIds.length <= COMPARE_MAX;
+
   return (
     <Sidebar className="border-r border-sidebar-border bg-sidebar" variant="sidebar">
       <div data-tauri-drag-region className="h-10 shrink-0" />
@@ -47,55 +63,133 @@ export function AppSidebar({
           <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
             <div className="mb-4 flex items-baseline justify-between">
               <Eyebrow>Analyses</Eyebrow>
-              {analyses.length > 0 && (
-                <span className="font-mono text-[10.5px] tabular-nums text-sidebar-foreground/40">
-                  {String(analyses.length).padStart(2, "0")}
-                </span>
-              )}
+              <div className="flex items-baseline gap-3">
+                {analyses.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onToggleCompareMode}
+                    className={cn(
+                      "font-mono text-[10.5px] uppercase tracking-[0.14em] transition-colors",
+                      compareMode
+                        ? "text-sidebar-foreground"
+                        : "text-sidebar-foreground/50 hover:text-sidebar-foreground",
+                    )}
+                  >
+                    {compareMode ? "Cancel" : "Compare"}
+                  </button>
+                )}
+                {analyses.length > 0 && (
+                  <span className="font-mono text-[10.5px] tabular-nums text-sidebar-foreground/40">
+                    {String(analyses.length).padStart(2, "0")}
+                  </span>
+                )}
+              </div>
             </div>
 
-            <SidebarMenu className="mb-5">
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === "new-analysis"}
-                  onClick={() => onViewChange("new-analysis")}
-                  className="h-8 text-[13px] font-normal"
-                >
-                  <span className="flex items-center gap-2">
-                    <span aria-hidden className="font-mono text-muted-foreground">
-                      +
+            {!compareMode && (
+              <SidebarMenu className="mb-5">
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={currentView === "new-analysis"}
+                    onClick={() => onViewChange("new-analysis")}
+                    className="h-8 text-[13px] font-normal"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span aria-hidden className="font-mono text-muted-foreground">
+                        +
+                      </span>
+                      <span>New analysis</span>
                     </span>
-                    <span>New analysis</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            )}
+
+            {compareMode && (
+              <div className="mb-4 flex flex-col gap-2 border-y border-sidebar-border py-3">
+                <span className="text-[11.5px] leading-snug text-sidebar-foreground/70">
+                  Select {COMPARE_MIN}–{COMPARE_MAX} finalized analyses.
+                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[10.5px] tabular-nums text-sidebar-foreground/50">
+                    {String(compareAnalysisIds.length).padStart(2, "0")} picked
                   </span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
+                  <button
+                    type="button"
+                    disabled={!compareReady}
+                    onClick={onSubmitCompare}
+                    className={cn(
+                      "font-mono text-[10.5px] uppercase tracking-[0.14em] transition-colors",
+                      compareReady
+                        ? "text-sidebar-foreground hover:underline"
+                        : "text-sidebar-foreground/35",
+                    )}
+                  >
+                    Open compare →
+                  </button>
+                </div>
+              </div>
+            )}
 
             {analyses.length > 0 && (
               <ScrollArea className="-mx-1 min-h-0 flex-1 px-1">
                 <SidebarMenu className="gap-1.5">
-                  {analyses.map((analysis) => (
-                    <SidebarMenuItem key={analysis.id} className="sidebar-report-row">
-                      <SidebarMenuButton
-                        asChild
-                        isActive={currentView === "analysis" && selectedAnalysisId === analysis.id}
-                        className="h-auto items-start px-2 py-2 text-[13px] font-normal data-[active=true]:font-normal data-[active=true]:bg-sidebar-accent/70"
-                      >
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          className="h-auto min-w-0 flex-col items-stretch justify-start gap-1 px-2 py-0 text-[13px]"
-                          onClick={() => {
-                            void onSelectAnalysis(analysis.id);
-                          }}
+                  {analyses.map((analysis) => {
+                    const eligible = compareEligible(analysis);
+                    const checked = selectedSet.has(analysis.id);
+                    const atCap =
+                      !checked && compareAnalysisIds.length >= COMPARE_MAX;
+                    if (compareMode) {
+                      return (
+                        <SidebarMenuItem key={analysis.id} className="sidebar-report-row">
+                          <label
+                            className={cn(
+                              "flex items-start gap-2 px-2 py-2 text-[13px]",
+                              eligible && !atCap
+                                ? "cursor-pointer hover:bg-sidebar-accent/50"
+                                : "cursor-not-allowed opacity-50",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!eligible || atCap}
+                              onChange={() => onToggleCompareSelection(analysis.id)}
+                              className="mt-[3px] size-3 shrink-0 accent-foreground"
+                            />
+                            <span className="flex min-w-0 flex-1 flex-col gap-1">
+                              <MarqueeTitle title={analysis.title} />
+                              <AnalysisMeta analysis={analysis} />
+                            </span>
+                          </label>
+                        </SidebarMenuItem>
+                      );
+                    }
+                    return (
+                      <SidebarMenuItem key={analysis.id} className="sidebar-report-row">
+                        <SidebarMenuButton
+                          asChild
+                          isActive={
+                            currentView === "analysis" && selectedAnalysisId === analysis.id
+                          }
+                          className="h-auto items-start px-2 py-2 text-[13px] font-normal data-[active=true]:font-normal data-[active=true]:bg-sidebar-accent/70"
                         >
-                          <MarqueeTitle title={analysis.title} />
-                          <AnalysisMeta analysis={analysis} />
-                        </Button>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            className="h-auto min-w-0 flex-col items-stretch justify-start gap-1 px-2 py-0 text-[13px]"
+                            onClick={() => {
+                              void onSelectAnalysis(analysis.id);
+                            }}
+                          >
+                            <MarqueeTitle title={analysis.title} />
+                            <AnalysisMeta analysis={analysis} />
+                          </Button>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </SidebarMenu>
               </ScrollArea>
             )}

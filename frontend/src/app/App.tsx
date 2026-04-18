@@ -4,14 +4,30 @@ import { toast, Toaster } from "sonner";
 import { AppSidebar } from "@/app/AppSidebar";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AnalysisPage } from "@/features/analysis/AnalysisPage";
+import { CompareView } from "@/features/compare/CompareView";
 import { ResearchPage } from "@/features/run-analysis/ResearchPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { UpdateDialog } from "@/features/updates/UpdateDialog";
 import { useBackendEvent } from "@/hooks/useBackendEvent";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
-import { getAgents, getAllAnalyses, getAnalysisReport, getSettings } from "@/shared/api/commands";
-import { getState, setSelectedReport, setState, useAppStore } from "@/store";
+import {
+  getAgents,
+  getAllAnalyses,
+  getAnalysisReport,
+  getSettings,
+  loadCompareReports,
+} from "@/shared/api/commands";
+import {
+  getState,
+  setCompareMode,
+  setCompareReport,
+  setCompareSelection,
+  setSelectedReport,
+  setState,
+  useAppStore,
+} from "@/store";
 import type { AgentCandidate, DataChangedPayload } from "@/types";
+import { COMPARE_MAX, COMPARE_MIN } from "./navigation";
 import type { AppView } from "./navigation";
 
 const DATA_CHANGED_DEBOUNCE_MS = 400;
@@ -21,6 +37,8 @@ export function App() {
   const view = useAppStore((state) => state.view);
   const analyses = useAppStore((state) => state.analyses);
   const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
+  const compareMode = useAppStore((state) => state.compareMode);
+  const compareAnalysisIds = useAppStore((state) => state.compareAnalysisIds);
   const [agents, setAgents] = useState<AgentCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { currentVersion, updateAvailable } = useUpdateCheck();
@@ -184,6 +202,35 @@ export function App() {
     setState({ view: nextView });
   }, []);
 
+  const toggleCompareMode = useCallback(() => {
+    setError(null);
+    setCompareMode(!getState().compareMode);
+  }, []);
+
+  const toggleCompareSelection = useCallback((analysisId: string) => {
+    const current = getState().compareAnalysisIds;
+    if (current.includes(analysisId)) {
+      setCompareSelection(current.filter((id) => id !== analysisId));
+      return;
+    }
+    if (current.length >= COMPARE_MAX) return;
+    setCompareSelection([...current, analysisId]);
+  }, []);
+
+  const submitCompare = useCallback(async () => {
+    const ids = getState().compareAnalysisIds;
+    if (ids.length < COMPARE_MIN || ids.length > COMPARE_MAX) return;
+    setState({ view: "compare" });
+    try {
+      const reports = await loadCompareReports(ids);
+      for (const [id, report] of Object.entries(reports)) {
+        setCompareReport(id, report);
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   return (
     <SidebarProvider
       className="h-screen min-h-0 overflow-hidden bg-background text-foreground"
@@ -193,8 +240,15 @@ export function App() {
         analyses={analyses}
         currentView={view}
         selectedAnalysisId={selectedAnalysisId}
+        compareMode={compareMode}
+        compareAnalysisIds={compareAnalysisIds}
         onViewChange={changeView}
         onSelectAnalysis={selectAnalysis}
+        onToggleCompareMode={toggleCompareMode}
+        onToggleCompareSelection={toggleCompareSelection}
+        onSubmitCompare={() => {
+          void submitCompare();
+        }}
         currentVersion={currentVersion}
         updateAvailable={Boolean(updateAvailable)}
         onUpdateClick={openUpdateDialog}
@@ -213,6 +267,7 @@ export function App() {
         <div className="min-h-0 flex-1 overflow-hidden">
           {view === "new-analysis" && <ResearchPage agents={agents} onDone={refresh} />}
           {view === "analysis" && <AnalysisPage onRefresh={refresh} />}
+          {view === "compare" && <CompareView />}
           {view === "settings" && <SettingsPage agents={agents} />}
         </div>
       </SidebarInset>

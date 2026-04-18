@@ -38,6 +38,15 @@ export async function getStanceStaleMetrics(
   return invoke("get_stance_stale_metrics", { analysisId, runId: runId ?? null });
 }
 
+export async function loadCompareReports(
+  ids: string[],
+): Promise<Record<string, AnalysisReport | null>> {
+  const entries = await Promise.all(
+    ids.map(async (id) => [id, await getAnalysisReport(id)] as const),
+  );
+  return Object.fromEntries(entries);
+}
+
 export async function deleteAnalysis(analysisId: string): Promise<void> {
   return invoke("delete_analysis", { analysisId });
 }
