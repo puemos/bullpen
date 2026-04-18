@@ -206,6 +206,34 @@ pub struct PortfolioHolding {
     pub accounts: Vec<PortfolioHoldingAccount>,
 }
 
+pub fn portfolio_holding_entity_id(symbol: &str, market: Option<&str>) -> String {
+    let mut id = String::from("holding:");
+    id.push_str(&normalize_holding_id_part(symbol));
+    if let Some(market) = market
+        && !market.trim().is_empty()
+    {
+        id.push(':');
+        id.push_str(&normalize_holding_id_part(market));
+    }
+    id
+}
+
+fn normalize_holding_id_part(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '.' | '-' | '_') {
+            out.push(ch);
+        }
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortfolioSummary {
     pub id: PortfolioId,

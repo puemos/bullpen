@@ -1,6 +1,6 @@
 # Bullpen
 
-> Local desktop workbench for ACP-powered equity research. Agents research broadly — but submit typed, source-backed blocks through app-owned MCP tools, never a single opaque markdown answer.
+> Local desktop app for equity and portfolio research through coding agents. Agents research broadly — but submit source-backed blocks through app-owned tools, never a single opaque markdown answer.
 
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-black)](#license)
 [![Rust](https://img.shields.io/badge/rust-edition%202024-black)](rust-toolchain.toml)
@@ -10,7 +10,7 @@
 <p align="center">
   <video src="assets/videos/new-analysis.mp4" width="880" controls></video>
   <br/>
-  <em>Prompt → ACP agent → typed MCP submissions → final stance, in one run.</em>
+  <em>Prompt or portfolio snapshot → coding agent → tool submissions → final stance, in one run.</em>
 </p>
 
 > ⚠️ **Research only.** Bullpen does not execute trades, prepare orders, size positions, or provide personalized investment advice.
@@ -19,13 +19,14 @@
 
 ## Why Bullpen
 
-LLM research agents default to one long markdown reply. Bullpen inverts that: the agent runs freely, but every claim lands as a **typed block** — a thesis, a metric, a source, a scenario, a stance — submitted through MCP tools Bullpen controls. The report is assembled from those blocks, not parsed from prose. Runs that lack a thesis, risks, sources, or a final stance **fail to finalize**.
+LLM research agents default to one long markdown reply. Bullpen inverts that: the agent researches freely, but every claim lands as a **source-backed block** — a thesis, a metric, a source, a scenario, a stance, or a portfolio review — submitted through tools Bullpen controls. The report is assembled from those blocks, not parsed from prose.
 
 ## How It Works
 
-1. **Ask** — free-text prompt, pick an ACP agent, watch the process stream live.
-2. **Agent submits typed blocks** — the agent calls `submit_*` tools on the `bullpen-analysis` MCP server. Each call is validated and persisted to SQLite as it arrives.
-3. **Read the report** — thesis, stance, scenarios, projections, and every source behind the call.
+1. **Ask or load a portfolio** — start from a free-text prompt, or create a portfolio and paste/upload a current holdings snapshot.
+2. **Pick a coding agent** — Bullpen starts the agent, passes it the analysis context, and streams the process live.
+3. **Agent submits report blocks** — the agent calls Bullpen's `submit_*` tools. Each call is validated and persisted to SQLite as it arrives.
+4. **Read the report** — thesis, stance, scenarios, projections, portfolio risks, holding reviews, and every source behind the call.
 
 ---
 
@@ -38,39 +39,49 @@ cd frontend && pnpm install && pnpm build && cd ..
 cargo run
 ```
 
-Bullpen auto-discovers any ACP agent on your PATH (Codex, Claude, Gemini, Qwen, Mistral, Kimi, OpenCode).
+Bullpen auto-discovers supported coding agents on your PATH (Codex, Claude, Gemini, Qwen, Mistral, Kimi, OpenCode).
 
-## The MCP Contract
+## Portfolio Workspace
+
+Create a portfolio, choose a base currency, and paste or upload a CSV snapshot of current holdings. Bullpen normalizes positions into a local SQLite workspace with holdings, allocation weights, imported batches, linked analyses, and lightweight 30-day price sparklines.
+
+Portfolio analyses use the same tool flow as single-stock research, but the prompt switches to portfolio intent. The report adds position-by-position holding reviews, allocation breakdowns, portfolio risk, and optional non-prescriptive rebalancing scenarios. Bullpen does not connect to brokerages or place trades.
+
+## Tool Contract
 
 The agent must submit through these tools. Finalization fails unless the checked requirements are met.
 
-| Tool                      | Purpose                             | Required to finalize          |
-| ------------------------- | ----------------------------------- | :---------------------------- |
-| `submit_research_plan`    | Up-front plan of attack             |                               |
-| `submit_entity_resolution`| Disambiguate tickers / entities     |                               |
-| `submit_source`           | Cite a URL + retrieval context      | ≥ 1                           |
-| `submit_metric_snapshot`  | Structured KPI / metric point       |                               |
-| `submit_analysis_block`   | Thesis, risks, scenarios, etc.      | thesis + risks, source-backed |
-| `submit_final_stance`     | Rating + confidence                 | ✓                             |
-| `finalize_analysis`       | Seal the run                        | —                             |
+| Tool                              | Purpose                                             | Required to finalize          |
+| --------------------------------- | --------------------------------------------------- | :---------------------------- |
+| `submit_research_plan`            | Up-front plan of attack                             |                               |
+| `submit_entity_resolution`        | Disambiguate tickers / entities                     |                               |
+| `submit_source`                   | Cite a URL + retrieval context                      | ≥ 1                           |
+| `submit_metric_snapshot`          | Structured KPI / metric point                       |                               |
+| `submit_analysis_block`           | Thesis, risks, scenarios, etc.                      | thesis + risks, source-backed |
+| `submit_holding_review`           | Portfolio position review with stance and evidence  | portfolio runs                |
+| `submit_allocation_review`        | Portfolio allocation breakdown by dimension         | portfolio runs                |
+| `submit_portfolio_risk`           | Factor, macro, single-name, and tail-risk review    | portfolio runs                |
+| `submit_rebalancing_suggestion`   | Optional non-prescriptive scenario rows             |                               |
+| `submit_final_stance`             | Rating + confidence                                 | ✓                             |
+| `finalize_analysis`               | Seal the run                                        | —                             |
 
 ## Agent Configuration
 
-Bullpen discovers ACP agents via standard commands. You only need one.
+Bullpen discovers coding agents via standard commands. You only need one.
 
 <details>
 <summary><strong>Built-in agents</strong> (no config needed if installed)</summary>
 
-- Codex — `npx -y @zed-industries/codex-acp@latest`
-- Claude — `npx -y @zed-industries/claude-code-acp`
-- Gemini / Qwen / Mistral / Kimi — via each CLI's `--experimental-acp`
-- OpenCode — `opencode acp`
+- Codex
+- Claude
+- Gemini / Qwen / Mistral / Kimi
+- OpenCode
 </details>
 
 <details>
 <summary><strong>Override binaries</strong></summary>
 
-`CODEX_ACP_BIN`, `CODEX_ACP_PACKAGE`, `CLAUDE_ACP_BIN`, `GEMINI_ACP_BIN`, `QWEN_ACP_BIN`, `MISTRAL_ACP_BIN`, `KIMI_ACP_BIN`, `OPENCODE_ACP_BIN`
+Agent-specific override variables are supported for each built-in agent.
 </details>
 
 <details>
@@ -102,10 +113,17 @@ Bullpen includes a registry of 12 financial data providers. Add API keys once in
 | NewsAPI                   | News          |
 | StockTwits                | Forums        |
 | Finviz                    | Screener      |
+| Hacker News               | Forums        |
 
-Providers without a configured key are excluded from the agent's MCP tool list. Use the **RUN SOURCES** button in the research composer to select which sources to activate per run.
+Providers without a configured key are excluded from the agent's tool list. Use the **RUN SOURCES** button in the research composer to select which sources to activate per run.
 
 ## Screens
+
+Portfolio screenshots are intentionally left as placeholders until the final demo data and captures are ready:
+
+- Portfolio workspace after a CSV holdings import.
+- Portfolio report with Holdings, Allocation, Risk, and Rebalancing sections.
+- Snapshot update flow with paste/upload CSV input and import results.
 
 <p align="center">
   <img width="260" src="assets/screenshots/analysis-thesis.png" alt="Thesis" />
@@ -131,7 +149,7 @@ Providers without a configured key are excluded from the agent's MCP tool list. 
 
 ## Architecture
 
-Rust/Tauri backend + Vite/React frontend. Domain types in `src/domain`, SQLite in `src/infra/db`, ACP + MCP server in `src/infra/acp`, Tauri IPC in `src/commands`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Rust/Tauri backend + Vite/React frontend. Domain types live in `src/domain`, SQLite persistence in `src/infra/db`, agent integration in the infra layer, and Tauri IPC in `src/commands`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## License
 

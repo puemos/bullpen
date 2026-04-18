@@ -418,7 +418,7 @@ function PortfolioView({
     setAnalysisStarting(true);
     try {
       const analysisId = await createPortfolioAnalysis(detail.portfolio.id, null);
-      const defaultPrompt = `Review the current snapshot of portfolio "${detail.portfolio.name}" (${baseCurrency}): concentration, allocation, risk, and non-prescriptive rebalancing scenarios.`;
+      const defaultPrompt = `Review the current snapshot of portfolio "${detail.portfolio.name}" (${baseCurrency}): concentration, allocation, risk, scenario/stress outcomes, expected-return model, and non-prescriptive rebalancing scenarios.`;
       startWithAnalysisId(analysisId, defaultPrompt, {
         agentId: pickedAgentId,
         modelId: pickedModelId,

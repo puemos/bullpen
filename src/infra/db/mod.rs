@@ -3,17 +3,21 @@ use crate::domain::{
     AnalysisStatus, AnalysisSummary, ArtifactKind, BlockKind, CounterThesis, CriterionVerdict,
     DecisionCriterionAnswer, Entity, FinalStance, HoldingReview, HoldingStance, Importance,
     MethodologyNote, MetricSnapshot, Portfolio, PortfolioAccount, PortfolioCsvImportInput,
-    PortfolioDetail, PortfolioHolding, PortfolioHoldingAccount, PortfolioImportBatch,
-    PortfolioImportKind, PortfolioImportResult, PortfolioImportWarning, PortfolioPosition,
-    PortfolioRisk, PortfolioSummary, PortfolioTransaction, PortfolioTransactionAction, Projection,
+    PortfolioDetail, PortfolioExpectedReturnModel, PortfolioHolding, PortfolioHoldingAccount,
+    PortfolioImportBatch, PortfolioImportKind, PortfolioImportResult, PortfolioImportWarning,
+    PortfolioModelType, PortfolioPosition, PortfolioRisk, PortfolioScenarioAnalysis,
+    PortfolioSummary, PortfolioTransaction, PortfolioTransactionAction, Projection,
     RebalancingSuggestion, ResearchPlan, ScenarioLabel, Source, SourceReliability,
     StanceFreshnessInputs, StanceKind, StructuredArtifact, UncertaintyEntry, VerificationStatus,
-    stale_stance_metrics,
+    portfolio_holding_entity_id, stale_stance_metrics,
 };
 use crate::infra::progress::ProgressEventPayload;
 
 #[cfg(test)]
-use crate::domain::{ArtifactColumn, PortfolioCsvRow, ProjectionScenario, RESEARCH_DISCLAIMER};
+use crate::domain::{
+    ArtifactColumn, PortfolioCsvRow, PortfolioExpectedReturnInput, PortfolioScenarioOutcome,
+    PortfolioStressCase, ProjectionScenario, RESEARCH_DISCLAIMER,
+};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
@@ -480,6 +484,43 @@ impl Database {
                 FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS portfolio_scenario_analyses (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                base_currency TEXT NOT NULL,
+                current_value REAL,
+                methodology TEXT NOT NULL,
+                key_assumptions TEXT NOT NULL,
+                scenarios TEXT NOT NULL,
+                stress_cases TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS portfolio_expected_return_models (
+                id TEXT PRIMARY KEY,
+                analysis_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                model_type TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                expected_return_pct REAL NOT NULL,
+                volatility_pct REAL,
+                inputs TEXT NOT NULL,
+                correlation_assumptions TEXT NOT NULL,
+                limitations TEXT NOT NULL,
+                evidence_ids TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_analysis_runs_analysis_id ON analysis_runs(analysis_id);
             CREATE INDEX IF NOT EXISTS idx_entities_run_id ON entities(run_id);
             CREATE INDEX IF NOT EXISTS idx_sources_run_id ON sources(run_id);
@@ -500,6 +541,8 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_allocation_reviews_run_id ON allocation_reviews(run_id);
             CREATE INDEX IF NOT EXISTS idx_portfolio_risks_run_id ON portfolio_risks(run_id);
             CREATE INDEX IF NOT EXISTS idx_rebalancing_suggestions_run_id ON rebalancing_suggestions(run_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_scenario_analyses_run_id ON portfolio_scenario_analyses(run_id);
+            CREATE INDEX IF NOT EXISTS idx_portfolio_expected_return_models_run_id ON portfolio_expected_return_models(run_id);
             ",
         )?;
 
@@ -733,6 +776,8 @@ impl Database {
                 allocation_reviews: Vec::new(),
                 portfolio_risks: Vec::new(),
                 rebalancing_suggestions: Vec::new(),
+                portfolio_scenario_analyses: Vec::new(),
+                portfolio_expected_return_models: Vec::new(),
             }));
         };
 
@@ -769,6 +814,16 @@ impl Database {
             },
             rebalancing_suggestions: if load_portfolio_sections {
                 self.get_rebalancing_suggestions_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            portfolio_scenario_analyses: if load_portfolio_sections {
+                self.get_portfolio_scenario_analyses_for_run(&run_id)?
+            } else {
+                Vec::new()
+            },
+            portfolio_expected_return_models: if load_portfolio_sections {
+                self.get_portfolio_expected_return_models_for_run(&run_id)?
             } else {
                 Vec::new()
             },
@@ -1132,6 +1187,15 @@ impl Database {
     }
 
     pub(crate) fn validate_finalization(&self, run_id: &str) -> Result<Vec<String>> {
+        let (_analysis_id, persisted_intent, portfolio_id) = {
+            let conn = self.lock_conn()?;
+            analysis_context_for_run(&conn, run_id)?
+        };
+        let effective_intent = if portfolio_id.is_some() {
+            AnalysisIntent::Portfolio
+        } else {
+            persisted_intent
+        };
         let research_plan = self.get_research_plan(run_id)?;
         let entities = self.get_entities(run_id)?;
         let blocks = self.get_blocks(run_id)?;
@@ -1148,9 +1212,7 @@ impl Database {
         let block_kinds: HashSet<BlockKind> = blocks.iter().map(|block| block.kind).collect();
         let artifact_kinds: HashSet<ArtifactKind> =
             artifacts.iter().map(|artifact| artifact.kind).collect();
-        let is_portfolio_intent = research_plan
-            .as_ref()
-            .is_some_and(|plan| plan.intent == AnalysisIntent::Portfolio);
+        let is_portfolio_intent = effective_intent == AnalysisIntent::Portfolio;
 
         if research_plan.is_none() {
             errors.push("missing research plan".to_string());
@@ -1185,18 +1247,24 @@ impl Database {
         }
 
         if let Some(plan) = &research_plan {
-            for required in required_blocks_for(plan.intent) {
+            if plan.intent != effective_intent {
+                errors.push(format!(
+                    "research plan intent '{}' does not match analysis intent '{}'",
+                    plan.intent, effective_intent
+                ));
+            }
+            for required in required_blocks_for(effective_intent) {
                 if !block_kinds.contains(&required) {
                     errors.push(format!("missing required {required} block"));
                 }
             }
-            for required in required_artifacts_for(plan.intent) {
+            for required in required_artifacts_for(effective_intent) {
                 if !artifact_kinds.contains(&required) {
                     errors.push(format!("missing required {required} artifact"));
                 }
             }
             if matches!(
-                plan.intent,
+                effective_intent,
                 AnalysisIntent::CompareEquities | AnalysisIntent::Watchlist
             ) && entities.len() < 2
             {
@@ -1318,9 +1386,9 @@ impl Database {
             }
         }
 
-        if let Some(plan) = &research_plan {
+        if research_plan.is_some() {
             let projection_intent = matches!(
-                plan.intent,
+                effective_intent,
                 AnalysisIntent::SingleEquity | AnalysisIntent::CompareEquities
             );
             if projection_intent {
@@ -1339,7 +1407,7 @@ impl Database {
                     );
                 }
             }
-            if matches!(plan.intent, AnalysisIntent::CompareEquities) && !entities.is_empty() {
+            if matches!(effective_intent, AnalysisIntent::CompareEquities) && !entities.is_empty() {
                 let mut by_entity: std::collections::HashMap<&str, usize> =
                     std::collections::HashMap::new();
                 for projection in &projections {
@@ -1359,7 +1427,7 @@ impl Database {
                     }
                 }
             }
-            if matches!(plan.intent, AnalysisIntent::SingleEquity) && entities.len() > 1 {
+            if matches!(effective_intent, AnalysisIntent::SingleEquity) && entities.len() > 1 {
                 // single equity with more than one entity is fine, but each projection
                 // should still tie back to a resolved entity
                 let entity_ids: HashSet<&str> =
@@ -1398,6 +1466,9 @@ impl Database {
             let holding_reviews = self.get_holding_reviews_for_run(run_id)?;
             let allocation_reviews = self.get_allocation_reviews_for_run(run_id)?;
             let portfolio_risks = self.get_portfolio_risks_for_run(run_id)?;
+            let scenario_analyses = self.get_portfolio_scenario_analyses_for_run(run_id)?;
+            let expected_return_models =
+                self.get_portfolio_expected_return_models_for_run(run_id)?;
 
             match allocation_reviews.len() {
                 0 => errors.push("portfolio analysis missing allocation review".to_string()),
@@ -1413,18 +1484,55 @@ impl Database {
                     "portfolio analysis must have exactly one portfolio risk review; found {n}"
                 )),
             }
+            match scenario_analyses.len() {
+                0 => errors.push("portfolio analysis missing scenario/stress analysis".to_string()),
+                1 => {}
+                n => errors.push(format!(
+                    "portfolio analysis must have exactly one scenario/stress analysis; found {n}"
+                )),
+            }
+            match expected_return_models.len() {
+                0 => errors.push("portfolio analysis missing expected-return model".to_string()),
+                1 => {}
+                n => errors.push(format!(
+                    "portfolio analysis must have exactly one expected-return model; found {n}"
+                )),
+            }
 
             let review_entity_ids: HashSet<&str> = holding_reviews
                 .iter()
                 .map(|review| review.entity_id.as_str())
                 .collect();
-            for entity in &entities {
-                if !review_entity_ids.contains(entity.id.as_str()) {
-                    errors.push(format!(
-                        "portfolio analysis missing holding_review for entity '{}'",
-                        entity.name
-                    ));
+            if let Some(portfolio_id) = portfolio_id.as_deref() {
+                match self.get_portfolio_detail(portfolio_id)? {
+                    Some(detail) => {
+                        for holding in detail
+                            .holdings
+                            .iter()
+                            .filter(|holding| holding.allocation_pct.unwrap_or_default() >= 0.02)
+                        {
+                            let entity_id = portfolio_holding_entity_id(
+                                &holding.symbol,
+                                holding.market.as_deref(),
+                            );
+                            if !review_entity_ids.contains(entity_id.as_str()) {
+                                errors.push(format!(
+                                    "portfolio analysis missing holding_review for holding entity_id '{}' ({})",
+                                    entity_id,
+                                    holding
+                                        .name
+                                        .as_deref()
+                                        .unwrap_or(holding.symbol.as_str())
+                                ));
+                            }
+                        }
+                    }
+                    None => errors.push(format!(
+                        "portfolio analysis references missing portfolio '{portfolio_id}'"
+                    )),
                 }
+            } else {
+                errors.push("portfolio analysis missing portfolio_id".to_string());
             }
         }
 
@@ -1712,6 +1820,15 @@ impl Database {
             out.insert(row?);
         }
         Ok(out)
+    }
+
+    pub(crate) fn analysis_intent_and_portfolio_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<(AnalysisIntent, Option<String>)> {
+        let conn = self.lock_conn()?;
+        let (_analysis_id, intent, portfolio_id) = analysis_context_for_run(&conn, run_id)?;
+        Ok((intent, portfolio_id))
     }
 
     pub(crate) fn save_counter_thesis(&self, thesis: &CounterThesis) -> Result<()> {
@@ -2102,6 +2219,137 @@ impl Database {
                 evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
                 confidence: row.get(7)?,
                 created_at: row.get(8)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_portfolio_scenario_analysis(
+        &self,
+        analysis: &PortfolioScenarioAnalysis,
+    ) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &analysis.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_scenario_analyses
+            (id, analysis_id, run_id, horizon, base_currency, current_value, methodology,
+             key_assumptions, scenarios, stress_cases, evidence_ids, confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                analysis.id,
+                analysis_id,
+                analysis.run_id,
+                analysis.horizon,
+                analysis.base_currency,
+                analysis.current_value,
+                analysis.methodology,
+                serde_json::to_string(&analysis.key_assumptions)?,
+                serde_json::to_string(&analysis.scenarios)?,
+                serde_json::to_string(&analysis.stress_cases)?,
+                serde_json::to_string(&analysis.evidence_ids)?,
+                analysis.confidence,
+                analysis.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_portfolio_scenario_analyses_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<PortfolioScenarioAnalysis>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, horizon, base_currency, current_value, methodology,
+                    key_assumptions, scenarios, stress_cases, evidence_ids, confidence, created_at
+             FROM portfolio_scenario_analyses WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let assumptions: String = row.get(6)?;
+            let scenarios: String = row.get(7)?;
+            let stress_cases: String = row.get(8)?;
+            let evidence: String = row.get(9)?;
+            Ok(PortfolioScenarioAnalysis {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                horizon: row.get(2)?,
+                base_currency: row.get(3)?,
+                current_value: row.get(4)?,
+                methodology: row.get(5)?,
+                key_assumptions: serde_json::from_str(&assumptions).unwrap_or_default(),
+                scenarios: serde_json::from_str(&scenarios).unwrap_or_default(),
+                stress_cases: serde_json::from_str(&stress_cases).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    pub(crate) fn insert_portfolio_expected_return_model(
+        &self,
+        model: &PortfolioExpectedReturnModel,
+    ) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let analysis_id = analysis_id_for_run(&conn, &model.run_id)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_expected_return_models
+            (id, analysis_id, run_id, horizon, model_type, summary, expected_return_pct,
+             volatility_pct, inputs, correlation_assumptions, limitations, evidence_ids,
+             confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                model.id,
+                analysis_id,
+                model.run_id,
+                model.horizon,
+                model.model_type.to_string(),
+                model.summary,
+                model.expected_return_pct,
+                model.volatility_pct,
+                serde_json::to_string(&model.inputs)?,
+                serde_json::to_string(&model.correlation_assumptions)?,
+                serde_json::to_string(&model.limitations)?,
+                serde_json::to_string(&model.evidence_ids)?,
+                model.confidence,
+                model.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn get_portfolio_expected_return_models_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<PortfolioExpectedReturnModel>> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, horizon, model_type, summary, expected_return_pct,
+                    volatility_pct, inputs, correlation_assumptions, limitations, evidence_ids,
+                    confidence, created_at
+             FROM portfolio_expected_return_models WHERE run_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            let inputs: String = row.get(7)?;
+            let correlations: String = row.get(8)?;
+            let limitations: String = row.get(9)?;
+            let evidence: String = row.get(10)?;
+            Ok(PortfolioExpectedReturnModel {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                horizon: row.get(2)?,
+                model_type: PortfolioModelType::from_str(&row.get::<_, String>(3)?)
+                    .unwrap_or_default(),
+                summary: row.get(4)?,
+                expected_return_pct: row.get(5)?,
+                volatility_pct: row.get(6)?,
+                inputs: serde_json::from_str(&inputs).unwrap_or_default(),
+                correlation_assumptions: serde_json::from_str(&correlations).unwrap_or_default(),
+                limitations: serde_json::from_str(&limitations).unwrap_or_default(),
+                evidence_ids: serde_json::from_str(&evidence).unwrap_or_default(),
+                confidence: row.get(11)?,
+                created_at: row.get(12)?,
             })
         })?;
         collect_rows(rows)
@@ -2981,6 +3229,27 @@ fn analysis_id_for_run(conn: &Connection, run_id: &str) -> Result<String> {
     .map_err(Into::into)
 }
 
+fn analysis_context_for_run(
+    conn: &Connection,
+    run_id: &str,
+) -> Result<(String, AnalysisIntent, Option<String>)> {
+    conn.query_row(
+        "SELECT a.id, a.intent, a.portfolio_id
+         FROM analysis_runs ar
+         JOIN analyses a ON a.id = ar.analysis_id
+         WHERE ar.id = ?1",
+        [run_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                AnalysisIntent::from_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+                row.get::<_, Option<String>>(2)?,
+            ))
+        },
+    )
+    .map_err(Into::into)
+}
+
 fn required_blocks_for(intent: AnalysisIntent) -> Vec<BlockKind> {
     let mut out = vec![BlockKind::Thesis, BlockKind::Risks];
     match intent {
@@ -3243,6 +3512,114 @@ pub(crate) mod tests {
             evidence_ids: vec![source_id.into()],
             confidence: 0.7,
             disclaimer: RESEARCH_DISCLAIMER.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    }
+
+    pub(crate) fn save_portfolio_scenario_analysis(db: &Database, run_id: &str, source_id: &str) {
+        db.insert_portfolio_scenario_analysis(&PortfolioScenarioAnalysis {
+            id: "portfolio-scenarios-1".into(),
+            run_id: run_id.into(),
+            horizon: "12 months".into(),
+            base_currency: "USD".into(),
+            current_value: Some(100_000.0),
+            methodology: "Holding-weighted scenario model.".into(),
+            key_assumptions: vec!["Public-market beta dominates near-term outcomes.".into()],
+            scenarios: vec![
+                PortfolioScenarioOutcome {
+                    label: ScenarioLabel::Bull,
+                    probability: 0.25,
+                    portfolio_return_pct: 0.14,
+                    projected_value: Some(114_000.0),
+                    rationale: "Risk assets rerate higher.".into(),
+                    key_drivers: vec!["Earnings growth".into()],
+                    watch_indicators: vec!["Breadth".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioScenarioOutcome {
+                    label: ScenarioLabel::Base,
+                    probability: 0.55,
+                    portfolio_return_pct: 0.06,
+                    projected_value: Some(106_000.0),
+                    rationale: "Current trend persists.".into(),
+                    key_drivers: vec!["Margins hold".into()],
+                    watch_indicators: vec!["Guidance".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioScenarioOutcome {
+                    label: ScenarioLabel::Bear,
+                    probability: 0.20,
+                    portfolio_return_pct: -0.12,
+                    projected_value: Some(88_000.0),
+                    rationale: "Growth slows and multiples compress.".into(),
+                    key_drivers: vec!["Macro shock".into()],
+                    watch_indicators: vec!["Credit spreads".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+            ],
+            stress_cases: vec![
+                PortfolioStressCase {
+                    name: "Rate shock".into(),
+                    estimated_return_pct: -0.08,
+                    rationale: "Long-duration holdings compress.".into(),
+                    affected_exposures: vec!["Growth equities".into()],
+                    mitigants: vec!["Cash buffer".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioStressCase {
+                    name: "Dollar rally".into(),
+                    estimated_return_pct: -0.04,
+                    rationale: "Foreign-currency exposure translates lower.".into(),
+                    affected_exposures: vec!["Non-USD revenue".into()],
+                    mitigants: vec!["USD base currency".into()],
+                    evidence_ids: vec![source_id.into()],
+                },
+            ],
+            evidence_ids: vec![source_id.into()],
+            confidence: 0.6,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+    }
+
+    pub(crate) fn save_portfolio_expected_return_model(
+        db: &Database,
+        run_id: &str,
+        source_id: &str,
+    ) {
+        db.insert_portfolio_expected_return_model(&PortfolioExpectedReturnModel {
+            id: "portfolio-model-1".into(),
+            run_id: run_id.into(),
+            horizon: "12 months".into(),
+            model_type: PortfolioModelType::Hybrid,
+            summary: "Weighted return assumptions imply moderate upside.".into(),
+            expected_return_pct: 0.066,
+            volatility_pct: Some(0.18),
+            inputs: vec![
+                PortfolioExpectedReturnInput {
+                    name: "Core equities".into(),
+                    input_type: "asset_class".into(),
+                    weight: 0.70,
+                    expected_return_pct: 0.08,
+                    volatility_pct: Some(0.20),
+                    rationale: "Equity risk premium plus earnings growth.".into(),
+                    evidence_ids: vec![source_id.into()],
+                },
+                PortfolioExpectedReturnInput {
+                    name: "Cash and defensives".into(),
+                    input_type: "asset_class".into(),
+                    weight: 0.30,
+                    expected_return_pct: 0.035,
+                    volatility_pct: Some(0.04),
+                    rationale: "Lower return, lower volatility ballast.".into(),
+                    evidence_ids: vec![source_id.into()],
+                },
+            ],
+            correlation_assumptions: vec!["Equity holdings remain positively correlated.".into()],
+            limitations: vec!["No tax or personal-liability modeling.".into()],
+            evidence_ids: vec![source_id.into()],
+            confidence: 0.6,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .unwrap();
@@ -4233,17 +4610,21 @@ pub(crate) mod tests {
             macro_sensitivities: Vec::new(),
             single_name_risks: Vec::new(),
             tail_risks: Vec::new(),
-            evidence_ids: vec![source_id],
+            evidence_ids: vec![source_id.clone()],
             confidence: 0.5,
             created_at: chrono::Utc::now().to_rfc3339(),
         })
         .unwrap();
+        save_portfolio_scenario_analysis(&db, &run_id, &source_id);
+        save_portfolio_expected_return_model(&db, &run_id, &source_id);
 
         let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
         assert_eq!(report.holding_reviews.len(), 1);
         assert_eq!(report.allocation_reviews.len(), 1);
         assert_eq!(report.portfolio_risks.len(), 1);
         assert_eq!(report.rebalancing_suggestions.len(), 0);
+        assert_eq!(report.portfolio_scenario_analyses.len(), 1);
+        assert_eq!(report.portfolio_expected_return_models.len(), 1);
 
         // Non-portfolio intent: vecs must be empty even if rows happened to be inserted.
         let other_db = Database::open_at(PathBuf::from(":memory:")).unwrap();
@@ -4253,6 +4634,8 @@ pub(crate) mod tests {
         assert!(other_report.allocation_reviews.is_empty());
         assert!(other_report.portfolio_risks.is_empty());
         assert!(other_report.rebalancing_suggestions.is_empty());
+        assert!(other_report.portfolio_scenario_analyses.is_empty());
+        assert!(other_report.portfolio_expected_return_models.is_empty());
     }
 
     #[test]
@@ -4291,6 +4674,128 @@ pub(crate) mod tests {
             errors.iter().any(|e| e.contains("allocation review")),
             "expected missing allocation review error, got {errors:?}"
         );
+    }
+
+    #[test]
+    fn validate_finalization_rejects_portfolio_run_missing_outcome_models() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_plan(&db, &run_id, AnalysisIntent::Portfolio);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::OpenQuestions,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
+        save_stance(&db, &run_id);
+        save_criterion_answers(&db, &run_id);
+        db.insert_allocation_review(&AllocationReview {
+            id: "ar-1".into(),
+            run_id: run_id.clone(),
+            summary: "Equity-heavy.".into(),
+            dimensions: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        db.insert_portfolio_risk(&PortfolioRisk {
+            id: "pr-1".into(),
+            run_id: run_id.clone(),
+            summary: "Concentrated.".into(),
+            factor_exposures: Vec::new(),
+            correlation_notes: None,
+            macro_sensitivities: Vec::new(),
+            single_name_risks: Vec::new(),
+            tail_risks: Vec::new(),
+            evidence_ids: vec![source_id],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("scenario/stress analysis")),
+            "expected missing scenario/stress analysis error, got {errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("expected-return model")),
+            "expected missing expected-return model error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn valid_portfolio_report_can_finalize_with_outcome_models() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_plan(&db, &run_id, AnalysisIntent::Portfolio);
+        save_methodology(&db, &run_id);
+        for kind in [
+            BlockKind::Thesis,
+            BlockKind::Risks,
+            BlockKind::OpenQuestions,
+        ] {
+            save_block(&db, &run_id, kind, &source_id);
+        }
+        save_stance(&db, &run_id);
+        save_criterion_answers(&db, &run_id);
+        db.insert_allocation_review(&AllocationReview {
+            id: "ar-1".into(),
+            run_id: run_id.clone(),
+            summary: "Equity-heavy.".into(),
+            dimensions: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        db.insert_portfolio_risk(&PortfolioRisk {
+            id: "pr-1".into(),
+            run_id: run_id.clone(),
+            summary: "Concentrated.".into(),
+            factor_exposures: Vec::new(),
+            correlation_notes: None,
+            macro_sensitivities: Vec::new(),
+            single_name_risks: Vec::new(),
+            tail_risks: Vec::new(),
+            evidence_ids: vec![source_id.clone()],
+            confidence: 0.5,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .unwrap();
+        save_portfolio_scenario_analysis(&db, &run_id, &source_id);
+        save_portfolio_expected_return_model(&db, &run_id, &source_id);
+
+        let errors = db.validate_finalization(&run_id).unwrap();
+        assert!(
+            errors.is_empty(),
+            "expected valid portfolio report, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn portfolio_outcome_models_round_trip_via_get_report() {
+        let db = Database::open_at(PathBuf::from(":memory:")).unwrap();
+        let (_pid, run_id) = seed_portfolio(&db);
+        let source_id = save_source(&db, &run_id);
+        save_portfolio_scenario_analysis(&db, &run_id, &source_id);
+        save_portfolio_expected_return_model(&db, &run_id, &source_id);
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        let scenario = &report.portfolio_scenario_analyses[0];
+        assert_eq!(scenario.scenarios.len(), 3);
+        assert_eq!(scenario.stress_cases.len(), 2);
+        let model = &report.portfolio_expected_return_models[0];
+        assert_eq!(model.model_type, PortfolioModelType::Hybrid);
+        assert!((model.expected_return_pct - 0.066).abs() < f64::EPSILON);
+        assert_eq!(model.inputs.len(), 2);
     }
 
     #[test]

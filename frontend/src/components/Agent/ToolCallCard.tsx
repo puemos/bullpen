@@ -151,20 +151,18 @@ export default function ToolCallCard({
         variant="ghost"
         onClick={() => hasDetails && setExpanded(!expanded)}
         className={cn(
-          "group h-auto w-full justify-start gap-3 px-0 py-1 text-left hover:bg-transparent hover:text-inherit",
+          "group h-auto w-full justify-start gap-2 px-0 py-1 text-left hover:bg-transparent hover:text-inherit",
           hasDetails ? "cursor-pointer" : "cursor-default",
         )}
       >
         {/* Minimal Status Indicator */}
-        <div className="shrink-0 pt-0.5">
-          {status === "running" ? (
-            <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-          ) : status === "completed" ? (
-            <div className="h-1.5 w-1.5 rounded-full bg-green-500/50" />
-          ) : (
-            <div className="h-1.5 w-1.5 rounded-full bg-red-500/50" />
-          )}
-        </div>
+        {status === "running" ? (
+          <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse" />
+        ) : status === "completed" ? (
+          <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500/50" />
+        ) : (
+          <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500/50" />
+        )}
 
         {/* Label */}
         <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">

@@ -439,7 +439,7 @@ pub async fn create_analysis(
         };
         let effective_prompt = if trimmed.is_empty() {
             format!(
-                "Review the current snapshot of portfolio \"{}\" ({}): concentration, allocation, risk, and non-prescriptive rebalancing scenarios.",
+                "Review the current snapshot of portfolio \"{}\" ({}): concentration, allocation, risk, scenario/stress outcomes, expected-return model, and non-prescriptive rebalancing scenarios.",
                 detail.portfolio.name, detail.portfolio.base_currency
             )
         } else {
@@ -1009,6 +1009,70 @@ fn render_markdown(report: &AnalysisReport) -> String {
             stance.summary
         );
     }
+    if !report.portfolio_scenario_analyses.is_empty()
+        || !report.portfolio_expected_return_models.is_empty()
+    {
+        out.push_str("## Portfolio Outcomes\n\n");
+        for analysis in &report.portfolio_scenario_analyses {
+            let _ = writeln!(
+                out,
+                "### Scenario Analysis · {} · confidence {:.0}%\n\n{}\n",
+                analysis.horizon,
+                analysis.confidence * 100.0,
+                analysis.methodology
+            );
+            for scenario in &analysis.scenarios {
+                let _ = writeln!(
+                    out,
+                    "- **{}**: {:+.1}% return, probability {:.0}% — {}",
+                    scenario.label,
+                    scenario.portfolio_return_pct * 100.0,
+                    scenario.probability * 100.0,
+                    scenario.rationale
+                );
+            }
+            if !analysis.stress_cases.is_empty() {
+                out.push_str("\n**Stress cases:**\n");
+                for stress in &analysis.stress_cases {
+                    let _ = writeln!(
+                        out,
+                        "- **{}**: {:+.1}% — {}",
+                        stress.name,
+                        stress.estimated_return_pct * 100.0,
+                        stress.rationale
+                    );
+                }
+            }
+            out.push('\n');
+        }
+        for model in &report.portfolio_expected_return_models {
+            let _ = writeln!(
+                out,
+                "### Expected-Return Model · {} · {:+.1}%\n\n{}\n",
+                model.horizon,
+                model.expected_return_pct * 100.0,
+                model.summary
+            );
+            for input in &model.inputs {
+                let _ = writeln!(
+                    out,
+                    "- {} ({}) weight {:.1}% → expected return {:+.1}% — {}",
+                    input.name,
+                    input.input_type,
+                    input.weight * 100.0,
+                    input.expected_return_pct * 100.0,
+                    input.rationale
+                );
+            }
+            if !model.limitations.is_empty() {
+                out.push_str("\n**Limitations:**\n");
+                for limitation in &model.limitations {
+                    let _ = writeln!(out, "- {limitation}");
+                }
+            }
+            out.push('\n');
+        }
+    }
     if !report.projections.is_empty() {
         out.push_str("## Projections\n\n");
         for projection in &report.projections {
@@ -1117,6 +1181,8 @@ mod tests {
             allocation_reviews: vec![],
             portfolio_risks: vec![],
             rebalancing_suggestions: vec![],
+            portfolio_scenario_analyses: vec![],
+            portfolio_expected_return_models: vec![],
         }
     }
 

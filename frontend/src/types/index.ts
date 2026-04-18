@@ -583,6 +583,73 @@ export interface RebalancingSuggestion {
   created_at: string;
 }
 
+export interface PortfolioScenarioOutcome {
+  label: ScenarioLabel;
+  probability: number;
+  portfolio_return_pct: number;
+  projected_value: number | null;
+  rationale: string;
+  key_drivers: string[];
+  watch_indicators: string[];
+  evidence_ids: string[];
+}
+
+export interface PortfolioStressCase {
+  name: string;
+  estimated_return_pct: number;
+  rationale: string;
+  affected_exposures: string[];
+  mitigants: string[];
+  evidence_ids: string[];
+}
+
+export interface PortfolioScenarioAnalysis {
+  id: string;
+  run_id: string;
+  horizon: string;
+  base_currency: string;
+  current_value: number | null;
+  methodology: string;
+  key_assumptions: string[];
+  scenarios: PortfolioScenarioOutcome[];
+  stress_cases: PortfolioStressCase[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
+export type PortfolioModelType =
+  | "holding_weighted"
+  | "asset_class_cma"
+  | "factor_overlay"
+  | "hybrid";
+
+export interface PortfolioExpectedReturnInput {
+  name: string;
+  input_type: string;
+  weight: number;
+  expected_return_pct: number;
+  volatility_pct: number | null;
+  rationale: string;
+  evidence_ids: string[];
+}
+
+export interface PortfolioExpectedReturnModel {
+  id: string;
+  run_id: string;
+  horizon: string;
+  model_type: PortfolioModelType;
+  summary: string;
+  expected_return_pct: number;
+  volatility_pct: number | null;
+  inputs: PortfolioExpectedReturnInput[];
+  correlation_assumptions: string[];
+  limitations: string[];
+  evidence_ids: string[];
+  confidence: number;
+  created_at: string;
+}
+
 export interface AnalysisReport {
   analysis: Analysis;
   runs: AnalysisRun[];
@@ -602,6 +669,8 @@ export interface AnalysisReport {
   allocation_reviews: AllocationReview[];
   portfolio_risks: PortfolioRisk[];
   rebalancing_suggestions: RebalancingSuggestion[];
+  portfolio_scenario_analyses: PortfolioScenarioAnalysis[];
+  portfolio_expected_return_models: PortfolioExpectedReturnModel[];
 }
 
 export interface PlanEntry {

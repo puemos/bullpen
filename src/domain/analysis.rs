@@ -823,6 +823,112 @@ pub struct RebalancingSuggestion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioScenarioOutcome {
+    pub label: ScenarioLabel,
+    pub probability: f64,
+    pub portfolio_return_pct: f64,
+    #[serde(default)]
+    pub projected_value: Option<f64>,
+    pub rationale: String,
+    pub key_drivers: Vec<String>,
+    pub watch_indicators: Vec<String>,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioStressCase {
+    pub name: String,
+    pub estimated_return_pct: f64,
+    pub rationale: String,
+    pub affected_exposures: Vec<String>,
+    pub mitigants: Vec<String>,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioScenarioAnalysis {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub horizon: String,
+    pub base_currency: String,
+    #[serde(default)]
+    pub current_value: Option<f64>,
+    pub methodology: String,
+    pub key_assumptions: Vec<String>,
+    pub scenarios: Vec<PortfolioScenarioOutcome>,
+    pub stress_cases: Vec<PortfolioStressCase>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: f64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PortfolioModelType {
+    HoldingWeighted,
+    AssetClassCma,
+    FactorOverlay,
+    #[default]
+    Hybrid,
+}
+
+impl fmt::Display for PortfolioModelType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::HoldingWeighted => "holding_weighted",
+            Self::AssetClassCma => "asset_class_cma",
+            Self::FactorOverlay => "factor_overlay",
+            Self::Hybrid => "hybrid",
+        };
+        write!(f, "{value}")
+    }
+}
+
+impl FromStr for PortfolioModelType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "holding_weighted" => Ok(Self::HoldingWeighted),
+            "asset_class_cma" => Ok(Self::AssetClassCma),
+            "factor_overlay" => Ok(Self::FactorOverlay),
+            "hybrid" => Ok(Self::Hybrid),
+            other => Err(format!("unknown portfolio model type: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioExpectedReturnInput {
+    pub name: String,
+    pub input_type: String,
+    pub weight: f64,
+    pub expected_return_pct: f64,
+    #[serde(default)]
+    pub volatility_pct: Option<f64>,
+    pub rationale: String,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioExpectedReturnModel {
+    pub id: String,
+    pub run_id: AnalysisRunId,
+    pub horizon: String,
+    pub model_type: PortfolioModelType,
+    pub summary: String,
+    pub expected_return_pct: f64,
+    #[serde(default)]
+    pub volatility_pct: Option<f64>,
+    pub inputs: Vec<PortfolioExpectedReturnInput>,
+    pub correlation_assumptions: Vec<String>,
+    pub limitations: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: f64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisReport {
     pub analysis: Analysis,
     pub runs: Vec<AnalysisRun>,
@@ -846,6 +952,10 @@ pub struct AnalysisReport {
     pub portfolio_risks: Vec<PortfolioRisk>,
     #[serde(default)]
     pub rebalancing_suggestions: Vec<RebalancingSuggestion>,
+    #[serde(default)]
+    pub portfolio_scenario_analyses: Vec<PortfolioScenarioAnalysis>,
+    #[serde(default)]
+    pub portfolio_expected_return_models: Vec<PortfolioExpectedReturnModel>,
 }
 
 #[cfg(test)]

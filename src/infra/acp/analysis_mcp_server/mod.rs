@@ -88,6 +88,14 @@ pub async fn run_analysis_mcp_server() -> pmcp::Result<()> {
             tool::create_submit_rebalancing_suggestion_tool(config.clone()),
         )
         .tool(
+            "submit_portfolio_scenario_analysis",
+            tool::create_submit_portfolio_scenario_analysis_tool(config.clone()),
+        )
+        .tool(
+            "submit_portfolio_expected_return_model",
+            tool::create_submit_portfolio_expected_return_model_tool(config.clone()),
+        )
+        .tool(
             "finalize_analysis",
             tool::create_finalize_analysis_tool(config.clone()),
         );

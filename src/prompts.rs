@@ -1,4 +1,6 @@
-use crate::domain::{Analysis, AnalysisIntent, PortfolioDetail, RunContext};
+use crate::domain::{
+    Analysis, AnalysisIntent, PortfolioDetail, RunContext, portfolio_holding_entity_id,
+};
 use crate::infra::db::Database;
 use handlebars::Handlebars;
 use serde_json::{Value, json};
@@ -41,6 +43,7 @@ pub fn build_portfolio_analysis_prompt(
                 _ => None,
             };
             json!({
+                "entity_id": portfolio_holding_entity_id(&h.symbol, h.market.as_deref()),
                 "symbol": h.symbol,
                 "market": h.market.clone().unwrap_or_default(),
                 "name": h.name.clone().unwrap_or_default(),

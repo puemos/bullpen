@@ -12,7 +12,9 @@ import type {
   AnalysisReport,
   Entity,
   HoldingReview,
+  PortfolioExpectedReturnModel,
   PortfolioRisk,
+  PortfolioScenarioAnalysis,
   RebalancingSuggestion,
   Source,
 } from "@/types";
@@ -77,9 +79,14 @@ export function ReportContent() {
   const hasAllocation = isPortfolio && report.allocation_reviews.length > 0;
   const hasPortfolioRisk = isPortfolio && report.portfolio_risks.length > 0;
   const hasRebalancing = isPortfolio && report.rebalancing_suggestions.length > 0;
+  const hasPortfolioOutcomes =
+    isPortfolio &&
+    (report.portfolio_scenario_analyses.length > 0 ||
+      report.portfolio_expected_return_models.length > 0);
 
   const sectionFlags: SectionFlags = {
     hasProjections,
+    hasPortfolioOutcomes,
     hasHoldingReviews,
     hasAllocation,
     hasPortfolioRisk,
@@ -114,8 +121,29 @@ export function ReportContent() {
         </section>
       ) : null}
 
-      {(hasProjections || hasMetrics || hasEvidence || hasAnalysis || hasSources) && (
+      {(hasProjections ||
+        hasPortfolioOutcomes ||
+        hasMetrics ||
+        hasEvidence ||
+        hasAnalysis ||
+        hasSources) && (
         <SectionJumpNav {...sectionFlags} />
+      )}
+
+      {hasPortfolioOutcomes && (
+        <section className="space-y-8 pb-16">
+          <SectionHeader
+            number={sectionNumber(sectionFlags, "outcomes")}
+            label="Outcomes"
+            title="Scenarios and model"
+            id="outcomes"
+            className={firstHeaderClass("outcomes")}
+          />
+          <PortfolioOutcomesView
+            scenarios={report.portfolio_scenario_analyses}
+            models={report.portfolio_expected_return_models}
+          />
+        </section>
       )}
 
       {hasProjections && (
@@ -285,6 +313,7 @@ export function ReportContent() {
 
 type SectionFlags = {
   hasProjections: boolean;
+  hasPortfolioOutcomes: boolean;
   hasHoldingReviews: boolean;
   hasAllocation: boolean;
   hasPortfolioRisk: boolean;
@@ -296,6 +325,7 @@ type SectionFlags = {
 };
 
 type SectionKey =
+  | "outcomes"
   | "projections"
   | "holdings"
   | "allocation"
@@ -307,6 +337,7 @@ type SectionKey =
   | "sources";
 
 const SECTION_ORDER: SectionKey[] = [
+  "outcomes",
   "projections",
   "holdings",
   "allocation",
@@ -320,6 +351,7 @@ const SECTION_ORDER: SectionKey[] = [
 
 function presentSections(flags: SectionFlags): SectionKey[] {
   const present = new Set<SectionKey>();
+  if (flags.hasPortfolioOutcomes) present.add("outcomes");
   if (flags.hasProjections) present.add("projections");
   if (flags.hasHoldingReviews) present.add("holdings");
   if (flags.hasAllocation) present.add("allocation");
@@ -405,6 +437,7 @@ function DecisionCriteria({ criteria }: { criteria: string[] }) {
 
 function SectionJumpNav(flags: SectionFlags) {
   const items: { href: string; label: string }[] = [];
+  if (flags.hasPortfolioOutcomes) items.push({ href: "#outcomes", label: "Outcomes" });
   if (flags.hasProjections) items.push({ href: "#projections", label: "Projection" });
   if (flags.hasHoldingReviews) items.push({ href: "#holdings", label: "Holdings" });
   if (flags.hasAllocation) items.push({ href: "#allocation", label: "Allocation" });
@@ -433,6 +466,211 @@ function SectionJumpNav(flags: SectionFlags) {
       </div>
     </nav>
   );
+}
+
+function PortfolioOutcomesView({
+  scenarios,
+  models,
+}: {
+  scenarios: PortfolioScenarioAnalysis[];
+  models: PortfolioExpectedReturnModel[];
+}) {
+  return (
+    <div className="space-y-10">
+      {scenarios.map((analysis) => (
+        <article key={analysis.id} className="space-y-6 border-t border-border pt-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div className="space-y-2">
+              <Eyebrow>Scenario analysis</Eyebrow>
+              <p className="max-w-[62ch] text-[14.5px] leading-[1.6] text-foreground/85">
+                {analysis.methodology}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+              <span>{analysis.horizon}</span>
+              <span>{analysis.base_currency}</span>
+              <span>conf {(analysis.confidence * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+
+          <div className="divide-y divide-border border-t border-border">
+            <div className="grid grid-cols-[92px_90px_100px_minmax(0,2fr)] gap-4 py-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+              <span>Case</span>
+              <span className="text-right">Prob.</span>
+              <span className="text-right">Return</span>
+              <span>Read-through</span>
+            </div>
+            {[...analysis.scenarios]
+              .sort((a, b) => scenarioRank(a.label) - scenarioRank(b.label))
+              .map((scenario) => (
+                <div
+                  key={scenario.label}
+                  className="grid grid-cols-[92px_90px_100px_minmax(0,2fr)] gap-4 py-3 text-[13.5px]"
+                >
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.14em]">
+                    {scenario.label}
+                  </span>
+                  <span className="text-right font-mono tabular-nums">
+                    {formatPercent(scenario.probability)}
+                  </span>
+                  <span className="text-right font-mono tabular-nums">
+                    {formatSignedPercent(scenario.portfolio_return_pct)}
+                  </span>
+                  <span className="space-y-2 text-foreground/80">
+                    <span className="block leading-[1.55]">{scenario.rationale}</span>
+                    {scenario.key_drivers.length > 0 && (
+                      <span className="block text-muted-foreground">
+                        Drivers: {scenario.key_drivers.join("; ")}
+                      </span>
+                    )}
+                    {scenario.watch_indicators.length > 0 && (
+                      <span className="block text-muted-foreground">
+                        Watch: {scenario.watch_indicators.join("; ")}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              ))}
+          </div>
+
+          {analysis.stress_cases.length > 0 && (
+            <div className="space-y-3">
+              <Eyebrow>Stress cases</Eyebrow>
+              <div className="divide-y divide-border border-t border-border">
+                {analysis.stress_cases.map((stress) => (
+                  <div
+                    key={stress.name}
+                    className="grid gap-4 py-3 text-[13.5px] sm:grid-cols-[minmax(160px,1fr)_90px_minmax(0,2fr)]"
+                  >
+                    <span>{stress.name}</span>
+                    <span className="font-mono tabular-nums sm:text-right">
+                      {formatSignedPercent(stress.estimated_return_pct)}
+                    </span>
+                    <span className="space-y-1 text-foreground/80">
+                      <span className="block leading-[1.55]">{stress.rationale}</span>
+                      <span className="block text-muted-foreground">
+                        Exposures: {stress.affected_exposures.join("; ")}
+                      </span>
+                      <span className="block text-muted-foreground">
+                        Mitigants: {stress.mitigants.join("; ")}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {analysis.key_assumptions.length > 0 && (
+            <CompactList label="Key assumptions" items={analysis.key_assumptions} />
+          )}
+        </article>
+      ))}
+
+      {models.map((model) => (
+        <article key={model.id} className="space-y-6 border-t border-border pt-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div className="space-y-2">
+              <Eyebrow>Expected-return model</Eyebrow>
+              <p className="max-w-[62ch] text-[14.5px] leading-[1.6] text-foreground/85">
+                {model.summary}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+              <span>{model.model_type.replaceAll("_", " ")}</span>
+              <span>{model.horizon}</span>
+              <span>conf {(model.confidence * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+
+          <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+            <MetricPair label="Expected return" value={formatSignedPercent(model.expected_return_pct)} />
+            <MetricPair
+              label="Volatility"
+              value={model.volatility_pct == null ? "not modeled" : formatPercent(model.volatility_pct)}
+            />
+          </div>
+
+          <div className="divide-y divide-border border-t border-border">
+            <div className="grid grid-cols-[minmax(150px,1fr)_80px_90px_90px_minmax(0,2fr)] gap-4 py-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+              <span>Input</span>
+              <span className="text-right">Weight</span>
+              <span className="text-right">Return</span>
+              <span className="text-right">Vol.</span>
+              <span>Rationale</span>
+            </div>
+            {model.inputs.map((input) => (
+              <div
+                key={`${input.input_type}-${input.name}`}
+                className="grid grid-cols-[minmax(150px,1fr)_80px_90px_90px_minmax(0,2fr)] gap-4 py-3 text-[13.5px]"
+              >
+                <span>
+                  {input.name}
+                  <span className="block font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                    {input.input_type}
+                  </span>
+                </span>
+                <span className="text-right font-mono tabular-nums">
+                  {formatPercent(input.weight)}
+                </span>
+                <span className="text-right font-mono tabular-nums">
+                  {formatSignedPercent(input.expected_return_pct)}
+                </span>
+                <span className="text-right font-mono tabular-nums">
+                  {input.volatility_pct == null ? "—" : formatPercent(input.volatility_pct)}
+                </span>
+                <span className="text-foreground/75">{input.rationale}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <CompactList label="Correlation assumptions" items={model.correlation_assumptions} />
+            <CompactList label="Limitations" items={model.limitations} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MetricPair({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1">
+      <Eyebrow>{label}</Eyebrow>
+      <div className="font-mono text-[18px] tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function CompactList({ label, items }: { label: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <Eyebrow>{label}</Eyebrow>
+      <ul className="space-y-1.5 text-[13.5px] leading-[1.55] text-foreground/85">
+        {items.map((item, index) => (
+          <li key={`${label}-${index}-${item.slice(0, 20)}`}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function scenarioRank(label: string) {
+  if (label === "bull") return 0;
+  if (label === "base") return 1;
+  if (label === "bear") return 2;
+  return 3;
+}
+
+function formatPercent(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatSignedPercent(value: number) {
+  const pct = value * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
 
 function HoldingReviewList({
