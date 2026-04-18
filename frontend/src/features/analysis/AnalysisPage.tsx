@@ -23,28 +23,26 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportContent } from "@/features/report-viewer/ReportContent";
 import { getTimelineBlocks } from "@/features/run-analysis/progress";
 import {
-  deleteAnalysis,
   exportAnalysisHtml,
   exportAnalysisMarkdown,
   getRunProgress,
   publishAnalysisHtml,
   stopAnalysis,
 } from "@/shared/api/commands";
+import { useAnalyses, useDeleteAnalysis } from "@/shared/api/queries";
 import { addRun, addRunProgress, setRunProgress, setState, useAppStore } from "@/store";
 import type { Analysis, AnalysisReport, AnalysisSummary, ProgressItem, RunState } from "@/types";
 
-interface AnalysisPageProps {
-  onRefresh: () => Promise<void>;
-}
-
-export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
+export function AnalysisPage() {
   const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
   const report = useAppStore((state) => state.selectedReport);
-  const analyses = useAppStore((state) => state.analyses);
   const activeRuns = useAppStore((state) => state.activeRuns);
   const subTab = useAppStore((state) => state.analysisSubTab);
   const [copyState, setCopyState] = useState<string | null>(null);
   const [exportState, setExportState] = useState<string | null>(null);
+
+  const { data: analyses = [] } = useAnalyses();
+  const deleteAnalysisMutation = useDeleteAnalysis();
 
   const selectedAnalysis = useMemo(
     () => analyses.find((analysis) => analysis.id === selectedAnalysisId) ?? null,
@@ -68,10 +66,9 @@ export function AnalysisPage({ onRefresh }: AnalysisPageProps) {
   const remove = useCallback(async () => {
     if (!report) return;
 
-    await deleteAnalysis(report.analysis.id);
+    await deleteAnalysisMutation.mutateAsync(report.analysis.id);
     setState({ selectedAnalysisId: null, selectedReport: null, view: "new-analysis" });
-    await onRefresh();
-  }, [onRefresh, report]);
+  }, [deleteAnalysisMutation, report]);
 
   const copyMarkdown = useCallback(async () => {
     if (!report) return;

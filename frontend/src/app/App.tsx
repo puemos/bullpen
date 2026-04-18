@@ -220,7 +220,7 @@ export function App() {
         )}
         <div className="min-h-0 flex-1 overflow-hidden">
           {view === "new-analysis" && <ResearchPage agents={agents} onDone={refresh} />}
-          {view === "analysis" && <AnalysisPage onRefresh={refresh} />}
+          {view === "analysis" && <AnalysisPage />}
           {view === "portfolio" && (
             <PortfolioPage agents={agents} onRefresh={refresh} onSelectAnalysis={selectAnalysis} />
           )}
