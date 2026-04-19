@@ -609,6 +609,14 @@ pub async fn generate_analysis(
         db.path().clone()
     };
 
+    let _ = app.emit(
+        "analysis-data-changed",
+        DataChangedPayload {
+            analysis_id: analysis_id.clone(),
+            kind: "run_started".to_string(),
+        },
+    );
+
     let cancel_token = CancellationToken::new();
     {
         let mut active = state.active_runs.lock()?;

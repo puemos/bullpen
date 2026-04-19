@@ -71,6 +71,11 @@ export function useQueryInvalidation() {
       });
     };
 
+    if (payload.kind === "run_started") {
+      flush();
+      return;
+    }
+
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }

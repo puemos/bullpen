@@ -62,17 +62,10 @@ export function useRunAnalysis({ agentId, agents, canRun }: UseRunAnalysisOption
       selectedRunTab: runId,
       view: "analysis",
       analysisSubTab: "agent",
+      selectedReport: null,
     });
 
     void queryClient.invalidateQueries({ queryKey: queryKeys.analyses });
-
-    getAnalysisReport(analysisId)
-      .then((report) => {
-        if (getState().selectedAnalysisId === analysisId) {
-          setSelectedReport(report);
-        }
-      })
-      .catch(() => {});
 
     const onProgress = new Channel<ProgressEventPayload>();
     onProgress.onmessage = (payload) => {
