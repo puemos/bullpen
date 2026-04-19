@@ -9,8 +9,39 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Prepare Release Notes
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.notes.outputs.body }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes from git log
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -n 1 || true)
+
+          if [ -n "$PREV_TAG" ]; then
+            log=$(git log --no-merges --pretty=format:"- %s" "${PREV_TAG}..HEAD")
+            notes="${log}"$'\n\n'"**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG}"
+          else
+            notes=$(git log --no-merges --pretty=format:"- %s")
+          fi
+
+          {
+            echo 'body<<BULLPEN_NOTES_EOF'
+            echo "$notes"
+            echo 'BULLPEN_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
   release:
     name: Release ${{ matrix.platform }}
+    needs: prepare
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
     strategy:
@@ -80,7 +111,7 @@ jobs:
           projectPath: .
           tagName: v__VERSION__
           releaseName: "Bullpen v__VERSION__"
-          releaseBody: "See the assets to download and install this version."
+          releaseBody: ${{ needs.prepare.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

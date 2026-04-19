@@ -61,8 +61,6 @@ pub async fn run_self_update(app: AppHandle) -> Result<(), CommandError> {
         }
     };
 
-    let mut already_up_to_date = false;
-
     if let Some(stdout) = child.stdout.take() {
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -75,7 +73,6 @@ pub async fn run_self_update(app: AppHandle) -> Result<(), CommandError> {
 
     if let Some(stderr) = child.stderr.take() {
         let app_clone = app.clone();
-        // Brew prints status to stderr. Watch for the "already up-to-date" hint there too.
         tauri::async_runtime::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
@@ -99,29 +96,7 @@ pub async fn run_self_update(app: AppHandle) -> Result<(), CommandError> {
         return Err(msg.into());
     }
 
-    // Best-effort detection of "already up-to-date" — brew prints this to stderr.
-    // We don't currently buffer the stream, so detection happens via a quick second probe.
-    let probe = Command::new(&brew)
-        .args(["outdated", "--cask", "bullpen"])
-        .output()
-        .await;
-    if let Ok(out) = probe
-        && out.status.success()
-        && String::from_utf8_lossy(&out.stdout).trim().is_empty()
-    {
-        already_up_to_date = true;
-    }
-
     let _ = app.emit("update:done", ());
-
-    if already_up_to_date {
-        emit_log(
-            &app,
-            "stdout",
-            "Already up to date — skipping restart.".to_string(),
-        );
-        return Ok(());
-    }
 
     // Give the frontend a beat to render the success state before relaunch.
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
