@@ -92,14 +92,15 @@ The report should help the user understand what they own and where the stress po
 `submit_portfolio_scenario_analysis` is required exactly once. Include:
 - Three scenarios labeled `bull`, `base`, and `bear`.
 - `probability` values across scenarios that sum to 1.0 within 0.02.
-- `portfolio_return_pct` as a fraction, e.g. 0.08 for +8% and -0.12 for -12%.
+- `portfolio_return_percent` in percent points, e.g. 8 for +8% and -12 for -12%.
 - `key_drivers`, `watch_indicators`, scenario-level evidence IDs, methodology, and key assumptions.
 - At least two `stress_cases` with estimated return impact, affected exposures, mitigants, and evidence IDs.
 
 `submit_portfolio_expected_return_model` is required exactly once. Include:
 - `model_type`: `holding_weighted`, `asset_class_cma`, `factor_overlay`, or `hybrid`.
 - Weighted inputs whose weights sum to 1.0 within 0.02. Use portfolio holdings, asset classes, or factors depending on the available evidence.
-- `expected_return_pct` per input as a fraction. Do not submit an aggregate expected return; the server derives it.
+- `expected_return_percent` per input in percent points. Do not submit an aggregate expected return; the server derives it.
+- `volatility_percent` in percent points when volatility is modeled.
 - `correlation_assumptions`, `limitations`, and supporting evidence IDs.
 
 The final stance, risk review, and any rebalancing scenarios should be coherent with these outcome tools.

@@ -507,7 +507,6 @@ pub struct ProjectionScenario {
     pub label: ScenarioLabel,
     pub target_value: f64,
     pub target_label: String,
-    pub upside_pct: f64,
     pub probability: f64,
     pub rationale: String,
     pub catalysts: Vec<String>,

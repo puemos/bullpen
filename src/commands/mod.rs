@@ -6,8 +6,8 @@ pub use error::{CommandError, CommandErrorKind};
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
     Portfolio, PortfolioCsvImportInput, PortfolioCsvRow, PortfolioDetail, PortfolioImportResult,
-    PortfolioSummary, RunContext, portfolio_default_prompt, portfolio_default_title,
-    stance_stale_metric_names,
+    PortfolioSummary, Projection, ProjectionScenario, RunContext, portfolio_default_prompt,
+    portfolio_default_title, stance_stale_metric_names,
 };
 use crate::infra::acp::analysis_generator::{
     AcpCancelled, GenerateAnalysisInput, generate_with_acp,
@@ -1094,25 +1094,27 @@ fn render_markdown(report: &AnalysisReport) -> String {
             );
             let _ = writeln!(out, "**Methodology:** {}\n", projection.methodology);
             for scenario in &projection.scenarios {
-                // Derive upside from target/current instead of the stored
-                // `upside_pct` field — historical rows mixed fraction and
-                // percent conventions, so computing fresh is the only way
-                // to guarantee the markdown export matches what the viewer
-                // shows.
-                let upside_fraction = if projection.current_value.abs() > f64::EPSILON {
-                    (scenario.target_value - projection.current_value) / projection.current_value
+                let target_label = projection_target_label(projection, scenario);
+                if let Some(movement) = projection_movement_label(projection, scenario) {
+                    let _ = writeln!(
+                        out,
+                        "- **{}** → {} ({}, probability {:.0}%) — {}",
+                        scenario.label,
+                        target_label,
+                        movement,
+                        scenario.probability * 100.0,
+                        scenario.rationale
+                    );
                 } else {
-                    0.0
-                };
-                let _ = writeln!(
-                    out,
-                    "- **{}** → {} ({:+.1}%, probability {:.0}%) — {}",
-                    scenario.label,
-                    scenario.target_label,
-                    upside_fraction * 100.0,
-                    scenario.probability * 100.0,
-                    scenario.rationale
-                );
+                    let _ = writeln!(
+                        out,
+                        "- **{}** → {} (probability {:.0}%) — {}",
+                        scenario.label,
+                        target_label,
+                        scenario.probability * 100.0,
+                        scenario.rationale
+                    );
+                }
             }
             if !projection.key_assumptions.is_empty() {
                 out.push_str("\n**Key assumptions:**\n");
@@ -1155,9 +1157,62 @@ fn render_markdown(report: &AnalysisReport) -> String {
     out
 }
 
+fn projection_uses_percent_points(projection: &Projection) -> bool {
+    let unit = projection.unit.trim().to_ascii_lowercase();
+    unit == "%" || unit == "percent" || unit == "percentage" || projection.metric.contains("(%)")
+}
+
+fn signed_projection_percent(metric: &str) -> bool {
+    let metric = metric.to_ascii_lowercase();
+    metric.contains("return")
+        || metric.contains("change")
+        || metric.contains("upside")
+        || metric.contains("downside")
+        || metric.contains("impact")
+}
+
+fn projection_target_label(projection: &Projection, scenario: &ProjectionScenario) -> String {
+    if scenario.target_label.chars().any(|c| c.is_ascii_digit())
+        && (!projection_uses_percent_points(projection) || scenario.target_label.contains('%'))
+    {
+        return scenario.target_label.clone();
+    }
+    if projection_uses_percent_points(projection) {
+        let sign = if signed_projection_percent(&projection.metric) && scenario.target_value >= 0.0
+        {
+            "+"
+        } else {
+            ""
+        };
+        return format!("{sign}{:.1}%", scenario.target_value);
+    }
+    match projection.unit.trim().to_ascii_uppercase().as_str() {
+        "USD" | "$" => format!("${:.2}", scenario.target_value),
+        "" => format!("{:.2}", scenario.target_value),
+        other => format!("{:.2} {other}", scenario.target_value),
+    }
+}
+
+fn projection_movement_label(
+    projection: &Projection,
+    scenario: &ProjectionScenario,
+) -> Option<String> {
+    if projection_uses_percent_points(projection)
+        || !projection.current_value.is_finite()
+        || projection.current_value.abs() < f64::EPSILON
+    {
+        return None;
+    }
+    let pct =
+        ((scenario.target_value - projection.current_value) / projection.current_value) * 100.0;
+    let sign = if pct >= 0.0 { "+" } else { "" };
+    Some(format!("{sign}{pct:.1}%"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScenarioLabel;
 
     fn sample_report(title: &str) -> AnalysisReport {
         AnalysisReport {
@@ -1345,5 +1400,63 @@ mod tests {
         let stance = report.final_stance.as_ref().unwrap();
         let percent = format!("confidence: {:.0}%", stance.confidence * 100.0);
         assert!(md.contains(&percent), "expected {percent:?} in markdown");
+    }
+
+    #[test]
+    fn render_markdown_percent_projection_uses_target_as_percent_points() {
+        let mut report = sample_report("VGWE scenario");
+        report.projections.push(Projection {
+            id: "projection-1".into(),
+            run_id: "run-1".into(),
+            entity_id: "VGWE".into(),
+            horizon: "3-5 years".into(),
+            metric: "Annualized Total Return (%)".into(),
+            current_value: 1.0,
+            current_value_label: "Index Level".into(),
+            unit: "%".into(),
+            scenarios: vec![
+                ProjectionScenario {
+                    label: ScenarioLabel::Bull,
+                    target_value: 12.0,
+                    target_label: "Target Return".into(),
+                    probability: 0.25,
+                    rationale: "Upside case.".into(),
+                    catalysts: vec![],
+                    risks: vec![],
+                },
+                ProjectionScenario {
+                    label: ScenarioLabel::Base,
+                    target_value: 8.0,
+                    target_label: "Target Return".into(),
+                    probability: 0.55,
+                    rationale: "Base case.".into(),
+                    catalysts: vec![],
+                    risks: vec![],
+                },
+                ProjectionScenario {
+                    label: ScenarioLabel::Bear,
+                    target_value: -5.0,
+                    target_label: "Target Return".into(),
+                    probability: 0.20,
+                    rationale: "Bear case.".into(),
+                    catalysts: vec![],
+                    risks: vec![],
+                },
+            ],
+            methodology: "Return bands".into(),
+            key_assumptions: vec![],
+            evidence_ids: vec![],
+            confidence: 0.7,
+            disclaimer: String::new(),
+            created_at: String::new(),
+        });
+
+        let md = render_markdown(&report);
+        assert!(md.contains("**bull** → +12.0% (probability 25%)"), "{md}");
+        assert!(md.contains("**base** → +8.0% (probability 55%)"), "{md}");
+        assert!(md.contains("**bear** → -5.0% (probability 20%)"), "{md}");
+        assert!(!md.contains("+1100.0%"), "{md}");
+        assert!(!md.contains("+700.0%"), "{md}");
+        assert!(!md.contains("-600.0%"), "{md}");
     }
 }

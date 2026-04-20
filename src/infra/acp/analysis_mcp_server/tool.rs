@@ -394,6 +394,7 @@ async fn probe_url(url: &str) -> (VerificationStatus, Option<String>) {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubmitMetricArgs {
     id: Option<String>,
     entity_id: Option<String>,
@@ -406,7 +407,7 @@ struct SubmitMetricArgs {
     #[serde(default)]
     prior_value: Option<f64>,
     #[serde(default)]
-    change_pct: Option<f64>,
+    change_percent: Option<f64>,
 }
 
 pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
@@ -441,7 +442,10 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
                 as_of: input.as_of,
                 source_id: input.source_id,
                 prior_value: input.prior_value,
-                change_pct: input.change_pct,
+                change_pct: input
+                    .change_percent
+                    .map(|value| percent_points_to_fraction("change_percent", value))
+                    .transpose()?,
             };
             database
                 .save_metric(&metric)
@@ -449,7 +453,7 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
             Ok(json!({ "status": "ok", "metric_id": metric.id }))
         })
     })
-    .with_description("Submit a normalized market, fundamental, valuation, or macro metric with source and as_of metadata. When a prior-period value is known, include prior_value and change_pct so deltas render visually.")
+    .with_description("Submit a normalized market, fundamental, valuation, or macro metric with source and as_of metadata. Percent units use percent points: numeric_value 8 means 8%. When a prior-period value is known, include prior_value and change_percent in percent points, e.g. 8 means +8%.")
     .with_schema(json!({
         "type": "object",
         "required": ["metric", "numeric_value", "as_of", "source_id"],
@@ -463,7 +467,7 @@ pub fn create_submit_metric_snapshot_tool(config: Arc<ServerConfig>) -> impl Too
             "as_of": { "type": "string" },
             "source_id": { "type": "string" },
             "prior_value": { "type": "number" },
-            "change_pct": { "type": "number" }
+            "change_percent": { "type": "number", "description": "Percent-point change. Use 8 for +8%, not 0.08." }
         }
     }))
 }
@@ -766,6 +770,7 @@ pub fn create_submit_final_stance_tool(config: Arc<ServerConfig>) -> impl ToolHa
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubmitProjectionScenarioArgs {
     label: String,
     target_value: f64,
@@ -779,6 +784,7 @@ struct SubmitProjectionScenarioArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubmitProjectionArgs {
     id: Option<String>,
     entity_id: String,
@@ -794,6 +800,43 @@ struct SubmitProjectionArgs {
     confidence: Option<f64>,
 }
 
+fn projection_uses_percent_points(metric: &str, unit: &str) -> bool {
+    let unit = unit.trim().to_ascii_lowercase();
+    unit == "%" || unit == "percent" || unit == "percentage" || metric.contains("(%)")
+}
+
+fn signed_projection_percent(metric: &str) -> bool {
+    let metric = metric.to_ascii_lowercase();
+    metric.contains("return")
+        || metric.contains("change")
+        || metric.contains("upside")
+        || metric.contains("downside")
+        || metric.contains("impact")
+}
+
+fn target_label_matches_projection_unit(label: &str, metric: &str, unit: &str) -> bool {
+    if !label.chars().any(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    !projection_uses_percent_points(metric, unit) || label.contains('%')
+}
+
+fn format_projection_target_label(metric: &str, unit: &str, target_value: f64) -> String {
+    if projection_uses_percent_points(metric, unit) {
+        let sign = if signed_projection_percent(metric) && target_value >= 0.0 {
+            "+"
+        } else {
+            ""
+        };
+        return format!("{sign}{target_value:.1}%");
+    }
+    match unit.trim().to_ascii_uppercase().as_str() {
+        "USD" | "$" => format!("${target_value:.2}"),
+        "" => format!("{target_value:.2}"),
+        other => format!("{target_value:.2} {other}"),
+    }
+}
+
 pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHandler {
     SimpleTool::new("submit_projection", move |args: Value, _extra| {
         let config = config.clone();
@@ -805,6 +848,14 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
                 .map_err(|err| pmcp::Error::InvalidState(err.to_string()))?;
             let confidence = parse_confidence("confidence", input.confidence)?;
             let current_value = input.current_value;
+            validate_finite_fraction("current_value", current_value)?;
+            if input.scenarios.len() != 3 {
+                return Err(pmcp::Error::Validation(format!(
+                    "scenarios: expected exactly bull/base/bear scenarios, got {}",
+                    input.scenarios.len()
+                )));
+            }
+            let unit = input.unit.unwrap_or_default();
 
             let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
             validate_evidence_ids(
@@ -814,38 +865,49 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
                 &input.evidence_ids,
             )?;
 
+            let mut labels = HashSet::new();
             let mut scenarios = Vec::with_capacity(input.scenarios.len());
-            for scenario in input.scenarios {
+            for (index, scenario) in input.scenarios.into_iter().enumerate() {
                 let label = ScenarioLabel::from_str(&scenario.label)
                     .map_err(pmcp::Error::Validation)?;
+                if !labels.insert(label) {
+                    return Err(pmcp::Error::Validation(format!(
+                        "scenarios[{index}].label: duplicate '{label}'"
+                    )));
+                }
                 let probability = parse_probability(
                     &format!("scenarios[{label}].probability"),
                     scenario.probability,
                 )?;
-                let target_label = scenario
-                    .target_label
-                    .unwrap_or_else(|| format!("{:.2}", scenario.target_value));
-                // `upside_pct` is derived, not user-input. The MCP schema
-                // previously accepted it; agents submitted it in mixed units
-                // (fraction vs percent) which corrupted every downstream
-                // renderer. Compute it once, server-side, from
-                // (target - current) / current and ignore anything the
-                // agent sent.
-                let upside_pct = if current_value.abs() > f64::EPSILON {
-                    (scenario.target_value - current_value) / current_value
+                validate_finite_fraction(
+                    &format!("scenarios[{label}].target_value"),
+                    scenario.target_value,
+                )?;
+                let target_label = if let Some(target_label) = scenario.target_label {
+                    if target_label_matches_projection_unit(&target_label, &input.metric, &unit) {
+                        target_label
+                    } else {
+                        format_projection_target_label(&input.metric, &unit, scenario.target_value)
+                    }
                 } else {
-                    0.0
+                    format_projection_target_label(&input.metric, &unit, scenario.target_value)
                 };
                 scenarios.push(ProjectionScenario {
                     label,
                     target_value: scenario.target_value,
                     target_label,
-                    upside_pct,
                     probability,
                     rationale: scenario.rationale,
                     catalysts: scenario.catalysts,
                     risks: scenario.risks,
                 });
+            }
+            for required in [ScenarioLabel::Bull, ScenarioLabel::Base, ScenarioLabel::Bear] {
+                if !labels.contains(&required) {
+                    return Err(pmcp::Error::Validation(format!(
+                        "scenarios: missing required '{required}' scenario"
+                    )));
+                }
             }
 
             let prob_sum: f64 = scenarios.iter().map(|s| s.probability).sum();
@@ -865,7 +927,7 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
                 current_value_label: input
                     .current_value_label
                     .unwrap_or_else(|| format!("{current_value:.2}")),
-                unit: input.unit.unwrap_or_default(),
+                unit,
                 scenarios,
                 methodology: input.methodology,
                 key_assumptions: input.key_assumptions,
@@ -880,7 +942,7 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
             Ok(json!({ "status": "ok", "projection_id": projection.id }))
         })
     })
-    .with_description("Submit a forward-looking projection for a single entity with bull/base/bear scenarios, probabilities, and evidence.")
+    .with_description("Submit a forward-looking projection for a single entity with bull/base/bear scenarios, probabilities, and evidence. If unit is %, target_value uses percent points: 8 means 8%, 800 means 800%.")
     .with_schema(json!({
         "type": "object",
         "required": ["entity_id", "horizon", "metric", "current_value", "scenarios", "methodology", "key_assumptions", "evidence_ids", "confidence"],
@@ -891,7 +953,7 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
             "metric": { "type": "string" },
             "current_value": { "type": "number" },
             "current_value_label": { "type": "string" },
-            "unit": { "type": "string" },
+            "unit": { "type": "string", "description": "Display unit. Use % for percent-point targets, USD for dollar targets, x for multiples, etc." },
             "methodology": { "type": "string" },
             "key_assumptions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -904,8 +966,8 @@ pub fn create_submit_projection_tool(config: Arc<ServerConfig>) -> impl ToolHand
                     "required": ["label", "target_value", "probability", "rationale", "catalysts", "risks"],
                     "properties": {
                         "label": { "type": "string", "enum": ["bull", "base", "bear"] },
-                        "target_value": { "type": "number" },
-                        "target_label": { "type": "string" },
+                        "target_value": { "type": "number", "description": "Scenario outcome in the projection unit. If unit is %, send percent points: 8 means 8%." },
+                        "target_label": { "type": "string", "description": "Optional numeric display label. Non-numeric labels are ignored and regenerated." },
                         "probability": { "type": "number", "minimum": 0, "maximum": 1 },
                         "rationale": { "type": "string" },
                         "catalysts": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -1714,7 +1776,13 @@ fn validate_finite_fraction(field: &str, value: f64) -> Result<(), pmcp::Error> 
     Ok(())
 }
 
+fn percent_points_to_fraction(field: &str, value: f64) -> Result<f64, pmcp::Error> {
+    validate_finite_fraction(field, value)?;
+    Ok(value / 100.0)
+}
+
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubmitPortfolioScenarioAnalysisArgs {
     id: Option<String>,
     horizon: String,
@@ -1730,10 +1798,11 @@ struct SubmitPortfolioScenarioAnalysisArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PortfolioScenarioOutcomeInput {
     label: String,
     probability: f64,
-    portfolio_return_pct: f64,
+    portfolio_return_percent: f64,
     #[serde(default)]
     projected_value: Option<f64>,
     rationale: String,
@@ -1743,9 +1812,10 @@ struct PortfolioScenarioOutcomeInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PortfolioStressCaseInput {
     name: String,
-    estimated_return_pct: f64,
+    estimated_return_percent: f64,
     rationale: String,
     affected_exposures: Vec<String>,
     mitigants: Vec<String>,
@@ -1807,9 +1877,9 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
                     let probability =
                         parse_probability(&format!("scenarios[{label}].probability"), scenario.probability)?;
                     probability_sum += probability;
-                    validate_finite_fraction(
-                        &format!("scenarios[{label}].portfolio_return_pct"),
-                        scenario.portfolio_return_pct,
+                    let portfolio_return_pct = percent_points_to_fraction(
+                        &format!("scenarios[{label}].portfolio_return_percent"),
+                        scenario.portfolio_return_percent,
                     )?;
                     if scenario.key_drivers.is_empty() {
                         return Err(pmcp::Error::Validation(format!(
@@ -1829,12 +1899,12 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
                     all_evidence.extend(scenario.evidence_ids.clone());
                     let projected_value =
                         scenario.projected_value.or_else(|| input.current_value.map(|v| {
-                            v * (1.0 + scenario.portfolio_return_pct)
+                            v * (1.0 + portfolio_return_pct)
                         }));
                     scenarios.push(PortfolioScenarioOutcome {
                         label,
                         probability,
-                        portfolio_return_pct: scenario.portfolio_return_pct,
+                        portfolio_return_pct,
                         projected_value,
                         rationale: scenario.rationale,
                         key_drivers: scenario.key_drivers,
@@ -1857,9 +1927,9 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
 
                 let mut stress_cases = Vec::with_capacity(input.stress_cases.len());
                 for (index, stress) in input.stress_cases.into_iter().enumerate() {
-                    validate_finite_fraction(
-                        &format!("stress_cases[{index}].estimated_return_pct"),
-                        stress.estimated_return_pct,
+                    let estimated_return_pct = percent_points_to_fraction(
+                        &format!("stress_cases[{index}].estimated_return_percent"),
+                        stress.estimated_return_percent,
                     )?;
                     if stress.affected_exposures.is_empty() {
                         return Err(pmcp::Error::Validation(format!(
@@ -1879,7 +1949,7 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
                     all_evidence.extend(stress.evidence_ids.clone());
                     stress_cases.push(PortfolioStressCase {
                         name: stress.name,
-                        estimated_return_pct: stress.estimated_return_pct,
+                        estimated_return_pct,
                         rationale: stress.rationale,
                         affected_exposures: stress.affected_exposures,
                         mitigants: stress.mitigants,
@@ -1909,7 +1979,7 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
             })
         },
     )
-    .with_description("Submit required portfolio-level bull/base/bear outcome scenarios plus named stress cases. Percent fields are fractions, e.g. 0.08 for 8%.")
+    .with_description("Submit required portfolio-level bull/base/bear outcome scenarios plus named stress cases. Percent fields use percent points: send 8 for +8% and 800 for +800%.")
     .with_schema(json!({
         "type": "object",
         "required": ["horizon", "base_currency", "methodology", "key_assumptions", "scenarios", "stress_cases", "evidence_ids", "confidence"],
@@ -1928,11 +1998,11 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
                 "maxItems": 3,
                 "items": {
                     "type": "object",
-                    "required": ["label", "probability", "portfolio_return_pct", "rationale", "key_drivers", "watch_indicators", "evidence_ids"],
+                    "required": ["label", "probability", "portfolio_return_percent", "rationale", "key_drivers", "watch_indicators", "evidence_ids"],
                     "properties": {
                         "label": { "type": "string", "enum": ["bull", "base", "bear"] },
                         "probability": { "type": "number", "minimum": 0, "maximum": 1 },
-                        "portfolio_return_pct": { "type": "number" },
+                        "portfolio_return_percent": { "type": "number", "description": "Percent-point return. Use 8 for +8%, not 0.08." },
                         "projected_value": { "type": "number" },
                         "rationale": { "type": "string" },
                         "key_drivers": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -1946,10 +2016,10 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
                 "minItems": 2,
                 "items": {
                     "type": "object",
-                    "required": ["name", "estimated_return_pct", "rationale", "affected_exposures", "mitigants", "evidence_ids"],
+                    "required": ["name", "estimated_return_percent", "rationale", "affected_exposures", "mitigants", "evidence_ids"],
                     "properties": {
                         "name": { "type": "string" },
-                        "estimated_return_pct": { "type": "number" },
+                        "estimated_return_percent": { "type": "number", "description": "Percent-point return impact. Use -8 for -8%, not -0.08." },
                         "rationale": { "type": "string" },
                         "affected_exposures": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
                         "mitigants": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -1962,6 +2032,7 @@ pub fn create_submit_portfolio_scenario_analysis_tool(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubmitPortfolioExpectedReturnModelArgs {
     id: Option<String>,
     horizon: String,
@@ -1969,7 +2040,7 @@ struct SubmitPortfolioExpectedReturnModelArgs {
     summary: String,
     inputs: Vec<PortfolioExpectedReturnInputArg>,
     #[serde(default)]
-    volatility_pct: Option<f64>,
+    volatility_percent: Option<f64>,
     correlation_assumptions: Vec<String>,
     limitations: Vec<String>,
     evidence_ids: Vec<String>,
@@ -1977,13 +2048,14 @@ struct SubmitPortfolioExpectedReturnModelArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PortfolioExpectedReturnInputArg {
     name: String,
     input_type: String,
     weight: f64,
-    expected_return_pct: f64,
+    expected_return_percent: f64,
     #[serde(default)]
-    volatility_pct: Option<f64>,
+    volatility_percent: Option<f64>,
     rationale: String,
     evidence_ids: Vec<String>,
 }
@@ -2019,14 +2091,18 @@ pub fn create_submit_portfolio_expected_return_model_tool(
                         "limitations: submit at least one limitation".to_string(),
                     ));
                 }
-                if let Some(volatility) = input.volatility_pct {
-                    validate_finite_fraction("volatility_pct", volatility)?;
+                let model_volatility_pct = if let Some(volatility) = input.volatility_percent {
+                    let volatility_pct =
+                        percent_points_to_fraction("volatility_percent", volatility)?;
                     if volatility < 0.0 {
                         return Err(pmcp::Error::Validation(
-                            "volatility_pct: must be non-negative".to_string(),
+                            "volatility_percent: must be non-negative".to_string(),
                         ));
                     }
-                }
+                    Some(volatility_pct)
+                } else {
+                    None
+                };
 
                 let database = db(&config).map_err(|err| pmcp::Error::Internal(err.to_string()))?;
                 let mut all_evidence = input.evidence_ids.clone();
@@ -2040,32 +2116,38 @@ pub fn create_submit_portfolio_expected_return_model_tool(
                             item.weight
                         )));
                     }
-                    validate_finite_fraction(
-                        &format!("inputs[{index}].expected_return_pct"),
-                        item.expected_return_pct,
+                    let item_expected_return_pct = percent_points_to_fraction(
+                        &format!("inputs[{index}].expected_return_percent"),
+                        item.expected_return_percent,
                     )?;
-                    if let Some(volatility) = item.volatility_pct {
-                        validate_finite_fraction(&format!("inputs[{index}].volatility_pct"), volatility)?;
+                    let item_volatility_pct = if let Some(volatility) = item.volatility_percent {
+                        let volatility_pct = percent_points_to_fraction(
+                            &format!("inputs[{index}].volatility_percent"),
+                            volatility,
+                        )?;
                         if volatility < 0.0 {
                             return Err(pmcp::Error::Validation(format!(
-                                "inputs[{index}].volatility_pct: must be non-negative"
+                                "inputs[{index}].volatility_percent: must be non-negative"
                             )));
                         }
-                    }
+                        Some(volatility_pct)
+                    } else {
+                        None
+                    };
                     if item.evidence_ids.is_empty() {
                         return Err(pmcp::Error::Validation(format!(
                             "inputs[{index}].evidence_ids: submit at least one source id"
                         )));
                     }
                     weight_sum += item.weight;
-                    expected_return_pct += item.weight * item.expected_return_pct;
+                    expected_return_pct += item.weight * item_expected_return_pct;
                     all_evidence.extend(item.evidence_ids.clone());
                     model_inputs.push(PortfolioExpectedReturnInput {
                         name: item.name,
                         input_type: item.input_type,
                         weight: item.weight,
-                        expected_return_pct: item.expected_return_pct,
-                        volatility_pct: item.volatility_pct,
+                        expected_return_pct: item_expected_return_pct,
+                        volatility_pct: item_volatility_pct,
                         rationale: item.rationale,
                         evidence_ids: item.evidence_ids,
                     });
@@ -2084,7 +2166,7 @@ pub fn create_submit_portfolio_expected_return_model_tool(
                     model_type,
                     summary: input.summary,
                     expected_return_pct,
-                    volatility_pct: input.volatility_pct,
+                    volatility_pct: model_volatility_pct,
                     inputs: model_inputs,
                     correlation_assumptions: input.correlation_assumptions,
                     limitations: input.limitations,
@@ -2095,11 +2177,11 @@ pub fn create_submit_portfolio_expected_return_model_tool(
                 database
                     .insert_portfolio_expected_return_model(&model)
                     .map_err(|err| pmcp::Error::Internal(err.to_string()))?;
-                Ok(json!({ "status": "ok", "portfolio_expected_return_model_id": model.id, "expected_return_pct": model.expected_return_pct }))
+                Ok(json!({ "status": "ok", "portfolio_expected_return_model_id": model.id, "expected_return_percent": model.expected_return_pct * 100.0 }))
             })
         },
     )
-    .with_description("Submit the required portfolio expected-return model. Percent fields are fractions, e.g. 0.08 for 8%; expected_return_pct is derived server-side from inputs.")
+    .with_description("Submit the required portfolio expected-return model. Percent fields use percent points: send 8 for +8% and 800 for +800%; expected_return_percent is derived server-side from inputs.")
     .with_schema(json!({
         "type": "object",
         "required": ["horizon", "model_type", "summary", "inputs", "correlation_assumptions", "limitations", "evidence_ids", "confidence"],
@@ -2108,7 +2190,7 @@ pub fn create_submit_portfolio_expected_return_model_tool(
             "horizon": { "type": "string" },
             "model_type": { "type": "string", "enum": ["holding_weighted", "asset_class_cma", "factor_overlay", "hybrid"] },
             "summary": { "type": "string" },
-            "volatility_pct": { "type": "number" },
+            "volatility_percent": { "type": "number", "description": "Percent-point volatility. Use 18 for 18%, not 0.18." },
             "correlation_assumptions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "limitations": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -2118,13 +2200,13 @@ pub fn create_submit_portfolio_expected_return_model_tool(
                 "minItems": 1,
                 "items": {
                     "type": "object",
-                    "required": ["name", "input_type", "weight", "expected_return_pct", "rationale", "evidence_ids"],
+                    "required": ["name", "input_type", "weight", "expected_return_percent", "rationale", "evidence_ids"],
                     "properties": {
                         "name": { "type": "string" },
                         "input_type": { "type": "string" },
                         "weight": { "type": "number", "minimum": 0, "maximum": 1 },
-                        "expected_return_pct": { "type": "number" },
-                        "volatility_pct": { "type": "number" },
+                        "expected_return_percent": { "type": "number", "description": "Percent-point expected return. Use 8 for +8%, not 0.08." },
+                        "volatility_percent": { "type": "number", "description": "Percent-point volatility. Use 20 for 20%, not 0.20." },
                         "rationale": { "type": "string" },
                         "evidence_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
                     }
@@ -2318,7 +2400,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn percent_points_to_fraction_converts_without_losing_large_values() {
+        assert!((percent_points_to_fraction("return_percent", 8.0).unwrap() - 0.08).abs() < 1e-9);
+        assert!((percent_points_to_fraction("return_percent", 800.0).unwrap() - 8.0).abs() < 1e-9);
+    }
+
     // -------- handler tests --------
+
+    #[tokio::test]
+    async fn submit_metric_snapshot_converts_change_percent() {
+        let (_tmp, config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+
+        let handler = create_submit_metric_snapshot_tool(config);
+        let result = handler
+            .handle(
+                json!({
+                    "metric": "Revenue growth",
+                    "numeric_value": 34.1,
+                    "unit": "%",
+                    "as_of": "2026-04-20",
+                    "source_id": source_id,
+                    "change_percent": 8.5
+                }),
+                extra(),
+            )
+            .await
+            .expect("metric handler succeeds");
+        assert_eq!(result["status"], "ok");
+
+        let report = db.get_report("a", Some(&run_id)).unwrap().unwrap();
+        assert_eq!(report.metrics.len(), 1);
+        assert!((report.metrics[0].change_pct.unwrap() - 0.085).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn submit_metric_snapshot_rejects_legacy_change_pct() {
+        let (_tmp, config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+
+        let handler = create_submit_metric_snapshot_tool(config);
+        let err = handler
+            .handle(
+                json!({
+                    "metric": "Revenue growth",
+                    "numeric_value": 34.1,
+                    "unit": "%",
+                    "as_of": "2026-04-20",
+                    "source_id": source_id,
+                    "change_pct": 8.5
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(_)));
+    }
 
     fn valid_portfolio_scenario_args(source_id: &str) -> Value {
         json!({
@@ -2333,7 +2471,7 @@ mod tests {
                 {
                     "label": "bull",
                     "probability": 0.25,
-                    "portfolio_return_pct": 0.14,
+                    "portfolio_return_percent": 14.0,
                     "rationale": "Risk assets rerate.",
                     "key_drivers": ["earnings"],
                     "watch_indicators": ["breadth"],
@@ -2342,7 +2480,7 @@ mod tests {
                 {
                     "label": "base",
                     "probability": 0.55,
-                    "portfolio_return_pct": 0.06,
+                    "portfolio_return_percent": 6.0,
                     "rationale": "Trend persists.",
                     "key_drivers": ["margins"],
                     "watch_indicators": ["guidance"],
@@ -2351,7 +2489,7 @@ mod tests {
                 {
                     "label": "bear",
                     "probability": 0.20,
-                    "portfolio_return_pct": -0.12,
+                    "portfolio_return_percent": -12.0,
                     "rationale": "Multiples compress.",
                     "key_drivers": ["macro"],
                     "watch_indicators": ["spreads"],
@@ -2361,7 +2499,7 @@ mod tests {
             "stress_cases": [
                 {
                     "name": "Rate shock",
-                    "estimated_return_pct": -0.08,
+                    "estimated_return_percent": -8.0,
                     "rationale": "Long-duration exposures compress.",
                     "affected_exposures": ["growth"],
                     "mitigants": ["cash"],
@@ -2369,7 +2507,7 @@ mod tests {
                 },
                 {
                     "name": "Dollar rally",
-                    "estimated_return_pct": -0.04,
+                    "estimated_return_percent": -4.0,
                     "rationale": "Currency translation lowers value.",
                     "affected_exposures": ["non-USD revenue"],
                     "mitigants": ["USD base"],
@@ -2384,7 +2522,7 @@ mod tests {
             "horizon": "12 months",
             "model_type": "hybrid",
             "summary": "Weighted assumptions imply moderate upside.",
-            "volatility_pct": 0.18,
+            "volatility_percent": 18.0,
             "correlation_assumptions": ["Equities remain positively correlated."],
             "limitations": ["No tax or personal-liability modeling."],
             "evidence_ids": [source_id],
@@ -2394,8 +2532,8 @@ mod tests {
                     "name": "Core equities",
                     "input_type": "asset_class",
                     "weight": 0.70,
-                    "expected_return_pct": 0.08,
-                    "volatility_pct": 0.20,
+                    "expected_return_percent": 8.0,
+                    "volatility_percent": 20.0,
                     "rationale": "Equity risk premium plus earnings growth.",
                     "evidence_ids": [source_id]
                 },
@@ -2403,8 +2541,8 @@ mod tests {
                     "name": "Cash and defensives",
                     "input_type": "asset_class",
                     "weight": 0.30,
-                    "expected_return_pct": 0.035,
-                    "volatility_pct": 0.04,
+                    "expected_return_percent": 3.5,
+                    "volatility_percent": 4.0,
                     "rationale": "Lower return ballast.",
                     "evidence_ids": [source_id]
                 }
@@ -2428,6 +2566,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn submit_portfolio_scenario_analysis_converts_percent_points() {
+        let (_tmp, config, db, run_id) = setup();
+        let source_id = save_source(&db, &run_id);
+
+        let handler = create_submit_portfolio_scenario_analysis_tool(config);
+        let result = handler
+            .handle(valid_portfolio_scenario_args(&source_id), extra())
+            .await
+            .expect("scenario handler succeeds");
+        assert_eq!(result["status"], "ok");
+
+        let saved = db.get_portfolio_scenario_analyses_for_run(&run_id).unwrap();
+        assert_eq!(saved.len(), 1);
+        let bull = saved[0]
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.label == ScenarioLabel::Bull)
+            .unwrap();
+        assert!((bull.portfolio_return_pct - 0.14).abs() < 1e-9);
+        assert!((bull.projected_value.unwrap() - 114_000.0).abs() < 1e-9);
+        assert!((saved[0].stress_cases[0].estimated_return_pct + 0.08).abs() < 1e-9);
+    }
+
+    #[tokio::test]
     async fn submit_portfolio_expected_return_model_derives_aggregate_return() {
         let (_tmp, config, db, run_id) = setup();
         let source_id = save_source(&db, &run_id);
@@ -2438,13 +2600,16 @@ mod tests {
             .await
             .expect("model handler succeeds");
         assert_eq!(result["status"], "ok");
-        assert!((result["expected_return_pct"].as_f64().unwrap() - 0.0665).abs() < 1e-9);
+        assert!((result["expected_return_percent"].as_f64().unwrap() - 6.65).abs() < 1e-9);
 
         let saved = db
             .get_portfolio_expected_return_models_for_run(&run_id)
             .unwrap();
         assert_eq!(saved.len(), 1);
         assert!((saved[0].expected_return_pct - 0.0665).abs() < 1e-9);
+        assert!((saved[0].volatility_pct.unwrap() - 0.18).abs() < 1e-9);
+        assert!((saved[0].inputs[0].expected_return_pct - 0.08).abs() < 1e-9);
+        assert!((saved[0].inputs[0].volatility_pct.unwrap() - 0.20).abs() < 1e-9);
     }
 
     #[tokio::test]
@@ -2604,6 +2769,122 @@ mod tests {
             ),
             other => panic!("expected Validation error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn submit_projection_regenerates_non_numeric_percent_target_labels() {
+        let (_tmp, config, db, run_id) = setup();
+        save_source(&db, &run_id);
+
+        let handler = create_submit_projection_tool(config);
+        let result = handler
+            .handle(
+                json!({
+                    "entity_id": "VGWE",
+                    "horizon": "3-5 years",
+                    "metric": "Annualized Total Return (%)",
+                    "current_value": 1.0,
+                    "current_value_label": "Index Level",
+                    "unit": "%",
+                    "scenarios": [
+                        {
+                            "label": "bull",
+                            "target_value": 12.0,
+                            "target_label": "Target Return",
+                            "probability": 0.25,
+                            "rationale": "Upside.",
+                            "catalysts": ["Value rotation"],
+                            "risks": ["Oil shock"],
+                        },
+                        {
+                            "label": "base",
+                            "target_value": 8.0,
+                            "target_label": "Target Return",
+                            "probability": 0.55,
+                            "rationale": "Steady.",
+                            "catalysts": ["Dividend stability"],
+                            "risks": ["Slow growth"],
+                        },
+                        {
+                            "label": "bear",
+                            "target_value": -5.0,
+                            "target_label": "Target Return",
+                            "probability": 0.20,
+                            "rationale": "Downside.",
+                            "catalysts": ["Recession"],
+                            "risks": ["Rate cuts"],
+                        }
+                    ],
+                    "methodology": "Return bands",
+                    "key_assumptions": ["Dividend strategy remains intact"],
+                    "evidence_ids": ["source-1"],
+                    "confidence": 0.6,
+                }),
+                extra(),
+            )
+            .await
+            .expect("projection handler succeeds");
+        assert_eq!(result["status"], "ok");
+
+        let projection = db.get_projections(&run_id).unwrap().remove(0);
+        let bull = projection
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.label == ScenarioLabel::Bull)
+            .unwrap();
+        assert_eq!(bull.target_label, "+12.0%");
+    }
+
+    #[tokio::test]
+    async fn submit_projection_rejects_legacy_upside_pct() {
+        let (_tmp, config, db, run_id) = setup();
+        save_source(&db, &run_id);
+
+        let handler = create_submit_projection_tool(config);
+        let err = handler
+            .handle(
+                json!({
+                    "entity_id": "AAPL",
+                    "horizon": "12 months",
+                    "metric": "stock_price",
+                    "current_value": 200.0,
+                    "scenarios": [
+                        {
+                            "label": "bull",
+                            "target_value": 260.0,
+                            "upside_pct": 0.3,
+                            "probability": 0.25,
+                            "rationale": "Upside.",
+                            "catalysts": ["Product cycle"],
+                            "risks": ["Macro"],
+                        },
+                        {
+                            "label": "base",
+                            "target_value": 220.0,
+                            "probability": 0.55,
+                            "rationale": "Steady.",
+                            "catalysts": ["Buybacks"],
+                            "risks": ["FX"],
+                        },
+                        {
+                            "label": "bear",
+                            "target_value": 160.0,
+                            "probability": 0.20,
+                            "rationale": "Downside.",
+                            "catalysts": ["Pricing war"],
+                            "risks": ["Demand soft"],
+                        }
+                    ],
+                    "methodology": "DCF",
+                    "key_assumptions": ["Steady growth"],
+                    "evidence_ids": ["source-1"],
+                    "confidence": 0.6,
+                }),
+                extra(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, pmcp::Error::Validation(_)));
     }
 
     #[tokio::test]

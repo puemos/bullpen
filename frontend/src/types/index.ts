@@ -430,7 +430,6 @@ export interface ProjectionScenario {
   label: ScenarioLabel;
   target_value: number;
   target_label: string;
-  upside_pct: number;
   probability: number;
   rationale: string;
   catalysts: string[];

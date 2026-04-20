@@ -3,6 +3,11 @@ import { Eyebrow } from "@/components/ui/editorial";
 import { cn } from "@/lib/utils";
 import type { Entity, Projection, ProjectionScenario, Source } from "@/types";
 import { ConfidenceRail } from "./badge-styles";
+import {
+  formatProjectionMovement,
+  formatProjectionTargetLabel,
+  projectionUsesPercentPoints,
+} from "./projection-format";
 
 interface ProjectionViewProps {
   projections: Projection[];
@@ -74,11 +79,7 @@ function ProjectionCard({
         </aside>
       </header>
 
-      <ProjectionGauge
-        scenarios={orderedScenarios}
-        currentValue={projection.current_value}
-        currentLabel={projection.current_value_label}
-      />
+      <ProjectionGauge projection={projection} scenarios={orderedScenarios} />
 
       <ProbabilityBar scenarios={orderedScenarios} />
 
@@ -86,8 +87,8 @@ function ProjectionCard({
         {orderedScenarios.map((scenario, i) => (
           <ScenarioColumn
             key={`${scenario.label}-${i}`}
+            projection={projection}
             scenario={scenario}
-            currentValue={projection.current_value}
             indexLabel={String(i + 1).padStart(2, "0")}
           />
         ))}
@@ -149,15 +150,16 @@ function assignSlots(markers: GaugeMarker[], minGap: number): number[] {
 }
 
 function ProjectionGauge({
+  projection,
   scenarios,
-  currentValue,
-  currentLabel,
 }: {
+  projection: Projection;
   scenarios: ProjectionScenario[];
-  currentValue: number;
-  currentLabel: string;
 }) {
-  const values = scenarios.map((s) => s.target_value).concat([currentValue]);
+  const showCurrentMarker = !projectionUsesPercentPoints(projection);
+  const values = showCurrentMarker
+    ? scenarios.map((s) => s.target_value).concat([projection.current_value])
+    : scenarios.map((s) => s.target_value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || Math.max(1, Math.abs(max) * 0.1);
@@ -169,23 +171,27 @@ function ProjectionGauge({
   const project = (value: number) => padX + ((value - min) / span) * (width - padX * 2);
 
   const markers: GaugeMarker[] = [
-    {
-      key: "now",
-      x: project(currentValue),
-      labelTop: "now",
-      labelBottom: currentLabel,
-      topClassName: "fill-muted-foreground text-[10px] font-mono uppercase tracking-[0.16em]",
-      bottomClassName: "fill-foreground text-[11px] font-mono tabular-nums",
-      dot: null,
-      tick: true,
-    },
+    ...(showCurrentMarker
+      ? [
+          {
+            key: "now",
+            x: project(projection.current_value),
+            labelTop: "now",
+            labelBottom: projection.current_value_label,
+            topClassName: "fill-muted-foreground text-[10px] font-mono uppercase tracking-[0.16em]",
+            bottomClassName: "fill-foreground text-[11px] font-mono tabular-nums",
+            dot: null,
+            tick: true,
+          },
+        ]
+      : []),
     ...scenarios.map((scenario, i): GaugeMarker => {
       const accent = scenarioAccent(scenario.label);
       return {
         key: `${scenario.label}-${i}`,
         x: project(scenario.target_value),
         labelTop: scenario.label,
-        labelBottom: scenario.target_label,
+        labelBottom: formatProjectionTargetLabel(projection, scenario),
         topClassName: cn("text-[10px] font-mono uppercase tracking-[0.16em]", accent.text),
         bottomClassName: "fill-foreground text-[11px] font-mono tabular-nums",
         dot: { fillClassName: accent.fill },
@@ -273,12 +279,15 @@ function ProjectionGauge({
         </svg>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground">
-        {scenarios.map((scenario, i) => (
-          <span key={`${scenario.label}-${i}`}>
-            {scenario.label} · {scenario.target_label} (
-            {formatUpside(currentValue, scenario.target_value)})
-          </span>
-        ))}
+        {scenarios.map((scenario, i) => {
+          const movement = formatProjectionMovement(projection, scenario);
+          return (
+            <span key={`${scenario.label}-${i}`}>
+              {scenario.label} · {formatProjectionTargetLabel(projection, scenario)}
+              {movement ? ` (${movement})` : ""}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -323,15 +332,16 @@ function ProbabilityBar({ scenarios }: { scenarios: ProjectionScenario[] }) {
 }
 
 function ScenarioColumn({
+  projection,
   scenario,
-  currentValue,
   indexLabel,
 }: {
+  projection: Projection;
   scenario: ProjectionScenario;
-  currentValue: number;
   indexLabel: string;
 }) {
   const accent = scenarioAccent(scenario.label);
+  const movement = formatProjectionMovement(projection, scenario);
 
   return (
     <div className="flex flex-col gap-4 px-0 py-6 md:px-6 md:first:pl-0 md:last:pr-0">
@@ -344,11 +354,13 @@ function ScenarioColumn({
         </div>
         <div className="flex items-baseline gap-3">
           <span className={cn("text-2xl font-semibold tracking-tight", accent.text)}>
-            {scenario.target_label}
+            {formatProjectionTargetLabel(projection, scenario)}
           </span>
-          <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-            {formatUpside(currentValue, scenario.target_value)}
-          </span>
+          {movement && (
+            <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+              {movement}
+            </span>
+          )}
         </div>
         <div className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
           {Math.round(scenario.probability * 100)}% probability
@@ -461,13 +473,6 @@ function scenarioAccent(label: string): {
 
 function formatMetric(metric: string) {
   return metric.replace(/_/g, " ");
-}
-
-function formatUpside(current: number, target: number): string {
-  if (!Number.isFinite(current) || Math.abs(current) < 1e-9) return "—";
-  const pct = ((target - current) / current) * 100;
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(1)}%`;
 }
 
 function Dot() {

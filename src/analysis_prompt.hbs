@@ -33,7 +33,7 @@ The tool contract is enforced. Required reasoning fields — confidence, importa
 2. Call `submit_entity_resolution` for every ticker, company, ETF, index, sector, or macro entity you rely on.
 3. Research using your available tools.
 4. Call `submit_source` for every source that supports user-facing claims.
-5. Call `submit_metric_snapshot` for numeric market/fundamental/valuation claims. When you have a prior-period value, include `prior_value` and `change_pct` so deltas render visually.
+5. Call `submit_metric_snapshot` for numeric market/fundamental/valuation claims. When `unit` is `%`, submit percent points (`8` means 8%, `800` means 800%). When you have a prior-period value, include `prior_value` and `change_percent` in percent points so deltas render visually.
 6. Call `submit_structured_artifact` for comparison matrices, metric tables, scenario matrices, and charts that help the user compare the evidence.
 7. Call `submit_analysis_block` repeatedly to build the report.
 7.2. If your stance will be `bullish` or `bearish`, call `submit_counter_thesis` with the strongest good-faith opposing case before moving on.
