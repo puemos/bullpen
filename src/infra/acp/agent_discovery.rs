@@ -80,6 +80,7 @@ pub fn list_agent_candidates() -> Vec<AgentCandidate> {
                 "claude",
                 "Claude",
                 "CLAUDE_ACP_BIN",
+                "claude",
                 "@zed-industries/claude-code-acp",
             );
             c.model_flag = Some("--model".into());
@@ -226,10 +227,11 @@ fn codex_candidate() -> AgentCandidate {
         crate::infra::shell::find_bin("npx").map(|path| path.to_string_lossy().to_string());
     let package = std::env::var("CODEX_ACP_PACKAGE")
         .unwrap_or_else(|_| "@zed-industries/codex-acp@latest".to_string());
+    let available = crate::infra::shell::find_bin("codex").is_some();
     AgentCandidate {
         id: "codex".into(),
         label: "Codex".into(),
-        available: command.is_some(),
+        available,
         command,
         args: vec!["-y".into(), package],
         models: codex_models,
@@ -239,7 +241,13 @@ fn codex_candidate() -> AgentCandidate {
     }
 }
 
-fn npx_candidate(id: &str, label: &str, env_var: &str, package: &str) -> AgentCandidate {
+fn npx_candidate(
+    id: &str,
+    label: &str,
+    env_var: &str,
+    raw_bin: &str,
+    package: &str,
+) -> AgentCandidate {
     if let Ok(path) = std::env::var(env_var)
         && !path.trim().is_empty()
     {
@@ -261,10 +269,11 @@ fn npx_candidate(id: &str, label: &str, env_var: &str, package: &str) -> AgentCa
 
     let command =
         crate::infra::shell::find_bin("npx").map(|path| path.to_string_lossy().to_string());
+    let available = crate::infra::shell::find_bin(raw_bin).is_some();
     AgentCandidate {
         id: id.into(),
         label: label.into(),
-        available: command.is_some(),
+        available,
         command,
         args: vec!["-y".into(), package.into()],
         models: Vec::new(),
