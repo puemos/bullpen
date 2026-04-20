@@ -17,6 +17,7 @@ import {
   updateRunStatus,
 } from "@/store";
 import type { AgentCandidate, ProgressEventPayload } from "@/types";
+import { normalizeError } from "./errors";
 import { handleProgressEvent } from "./progress";
 
 interface UseRunAnalysisOptions {
@@ -88,11 +89,15 @@ export function useRunAnalysis({ agentId, agents, canRun }: UseRunAnalysisOption
       onProgress,
       enabledSources,
     ).catch((err) => {
-      const msg = String(err);
-      const isCancelled = msg.includes("cancelled by user");
+      const normalized = normalizeError(err);
+      const isCancelled =
+        normalized.kind === "cancelled" || normalized.message.includes("cancelled by user");
       updateRunStatus(runId, isCancelled ? "cancelled" : "error");
-      if (!isCancelled) {
-        addRunProgress(runId, "error", msg);
+      const alreadyHasError = getState().activeRuns[runId]?.progress.some(
+        (item) => item.type === "error",
+      );
+      if (!isCancelled && !alreadyHasError) {
+        addRunProgress(runId, "error", normalized.message, normalized);
       }
       finishRun(analysisId);
     });
@@ -110,7 +115,7 @@ export function useRunAnalysis({ agentId, agents, canRun }: UseRunAnalysisOption
       analysisId = result.analysis_id;
       effectivePrompt = result.effective_prompt;
     } catch (err) {
-      setLocalError(String(err));
+      setLocalError(normalizeError(err).message);
       return;
     }
 

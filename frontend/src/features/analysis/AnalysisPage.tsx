@@ -1,12 +1,4 @@
-import {
-  CaretDown,
-  Copy,
-  DownloadSimple,
-  Stop,
-  Trash,
-  UploadSimple,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { CaretDown, Copy, DownloadSimple, Stop, Trash, UploadSimple } from "@phosphor-icons/react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -22,6 +14,7 @@ import { Dot, Eyebrow } from "@/components/ui/editorial";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportContent } from "@/features/report-viewer/ReportContent";
 import { getTimelineBlocks } from "@/features/run-analysis/progress";
+import { TimelineErrorBlock } from "@/features/run-analysis/TimelineErrorBlock";
 import { useExpandableOverflow } from "@/hooks/useExpandableOverflow";
 import {
   exportAnalysisHtml,
@@ -440,11 +433,12 @@ function AgentTimeline({
 
             if (block.type === "error") {
               return (
-                <div
-                  key={block.id}
-                  className="flex items-center gap-2 py-1 text-xs text-destructive"
-                >
-                  <WarningCircle size={14} /> {block.content}
+                <div key={block.id} className="py-2">
+                  <TimelineErrorBlock
+                    message={block.content}
+                    kind={block.kind}
+                    details={block.details}
+                  />
                 </div>
               );
             }

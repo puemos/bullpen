@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { AgentModelOptions, hasAgentModelChoices } from "@/components/Agent/AgentModelOptions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -695,7 +696,7 @@ function RunAnalysisMenu({
         )}
         {agents.map((agent) => {
           const isUnavailable = !agent.available;
-          const hasModels = agent.models.length > 0;
+          const hasModels = hasAgentModelChoices(agent);
 
           if (hasModels && !isUnavailable) {
             return (
@@ -709,21 +710,13 @@ function RunAnalysisMenu({
                   <span className="flex-1 truncate">{agent.label}</span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-[220px] p-1">
-                  <DropdownMenuItem
-                    className="gap-2 text-xs"
-                    onSelect={() => onPick(agent.id, null)}
-                  >
-                    <span className="flex-1 truncate">Default</span>
-                  </DropdownMenuItem>
-                  {agent.models.map((model) => (
-                    <DropdownMenuItem
-                      key={model.id}
-                      className="gap-2 text-xs"
-                      onSelect={() => onPick(agent.id, model.id)}
-                    >
-                      <span className="flex-1 truncate">{model.name}</span>
-                    </DropdownMenuItem>
-                  ))}
+                  <AgentModelOptions
+                    agent={agent}
+                    activeModelId={null}
+                    isSelected={false}
+                    onSelect={onPick}
+                    showChecks={false}
+                  />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             );

@@ -1,10 +1,4 @@
-import {
-  CheckCircle,
-  CircleNotch,
-  MagnifyingGlass,
-  WarningCircle,
-  XCircle,
-} from "@phosphor-icons/react";
+import { CheckCircle, CircleNotch, MagnifyingGlass, XCircle } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import MarkdownMessage from "@/components/Agent/MarkdownMessage";
 import ToolCallCard from "@/components/Agent/ToolCallCard";
@@ -14,6 +8,7 @@ import { getRunProgress } from "@/shared/api/commands";
 import { setRunProgress } from "@/store";
 import type { ProgressItem, RunState } from "@/types";
 import { getTimelineBlocks } from "./progress";
+import { TimelineErrorBlock } from "./TimelineErrorBlock";
 
 interface ProgressTimelineProps {
   activeRuns: Record<string, RunState>;
@@ -135,9 +130,12 @@ export function ProgressTimeline({
 
           if (block.type === "error") {
             return (
-              <div key={block.id} className="flex items-center gap-2 text-xs text-destructive">
-                <WarningCircle size={14} /> {block.content}
-              </div>
+              <TimelineErrorBlock
+                key={block.id}
+                message={block.content}
+                kind={block.kind}
+                details={block.details}
+              />
             );
           }
 

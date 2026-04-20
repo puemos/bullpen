@@ -2,11 +2,12 @@ use super::client::BullpenClient;
 use crate::domain::RunContext;
 use crate::infra::progress::ProgressEventPayload;
 use agent_client_protocol::{
-    Agent, ClientCapabilities, ClientSideConnection, ContentBlock, EnvVariable,
+    Agent, ClientCapabilities, ClientSideConnection, ContentBlock, EnvVariable, Error as AcpError,
     FileSystemCapabilities, Implementation, InitializeRequest, McpServer, McpServerStdio,
     NewSessionRequest, PromptRequest, ProtocolVersion, TextContent,
 };
 use anyhow::{Context, Result};
+use serde_json::Value;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -28,8 +29,7 @@ pub struct GenerateAnalysisInput {
     pub prompt_text: String,
     pub agent_command: String,
     pub agent_args: Vec<String>,
-    pub model_flag: Option<(String, String)>,
-    pub model_env: Option<(String, String)>,
+    pub model_env: Vec<(String, String)>,
     pub progress_tx: Option<ProgressTx>,
     pub mcp_server_binary: Option<PathBuf>,
     pub db_path: PathBuf,
@@ -122,8 +122,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         run_context,
         prompt_text,
         agent_command,
-        mut agent_args,
-        model_flag,
+        agent_args,
         model_env,
         progress_tx,
         mcp_server_binary,
@@ -132,11 +131,6 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         cancel_token,
         source_keys,
     } = input;
-
-    if let Some((flag, value)) = &model_flag {
-        agent_args.push(flag.clone());
-        agent_args.push(value.clone());
-    }
 
     let logs = Arc::new(Mutex::new(Vec::new()));
     // Values we must never let leak into logs — the agent echoes stderr, and
@@ -170,7 +164,7 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    if let Some((key, value)) = &model_env {
+    for (key, value) in &model_env {
         cmd.env(key, value);
     }
 
@@ -301,7 +295,10 @@ async fn generate_with_acp_inner(input: GenerateAnalysisInput) -> Result<Generat
         if let Err(err) = prompt_result
             && !*finalization_received.lock().unwrap()
         {
-            return Err(anyhow::anyhow!("ACP prompt failed: {err:?}"));
+            return Err(anyhow::anyhow!(
+                "ACP prompt failed: {}",
+                format_acp_error(&err)
+            ));
         }
 
         loop {
@@ -369,6 +366,51 @@ fn resolve_mcp_server_path(override_path: Option<&PathBuf>, current_exe: &Path) 
         .unwrap_or_else(|| current_exe.to_path_buf())
 }
 
+fn format_acp_error(err: &AcpError) -> String {
+    if let Some(message) = err.data.as_ref().and_then(extract_error_message) {
+        return message;
+    }
+    let trimmed = err.message.trim();
+    if trimmed.is_empty() {
+        i32::from(err.code).to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn extract_error_message(value: &Value) -> Option<String> {
+    match value {
+        Value::String(raw) => extract_error_message_from_str(raw),
+        Value::Object(map) => {
+            if let Some(error) = map.get("error")
+                && let Some(message) = extract_error_message(error)
+            {
+                return Some(message);
+            }
+            if let Some(message) = map.get("message")
+                && let Some(message) = extract_error_message(message)
+            {
+                return Some(message);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn extract_error_message_from_str(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed)
+        && let Some(message) = extract_error_message(&parsed)
+    {
+        return Some(message);
+    }
+    Some(trimmed.to_string())
+}
+
 #[cfg(unix)]
 fn kill_process_group(pid: u32) {
     if pid == 0 {
@@ -385,3 +427,28 @@ fn kill_process_group(pid: u32) {
 
 #[cfg(not(unix))]
 fn kill_process_group(_pid: u32) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn format_acp_error_extracts_nested_json_message() {
+        let err = AcpError::internal_error().data(json!({
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.1-codex' model is not supported when using Codex with a ChatGPT account.\"},\"codex_error_info\":\"other\"}"
+        }));
+
+        assert_eq!(
+            format_acp_error(&err),
+            "The 'gpt-5.1-codex' model is not supported when using Codex with a ChatGPT account."
+        );
+    }
+
+    #[test]
+    fn format_acp_error_falls_back_to_error_message() {
+        let err = AcpError::internal_error();
+
+        assert_eq!(format_acp_error(&err), "Internal error");
+    }
+}

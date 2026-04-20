@@ -1,7 +1,7 @@
 pub mod error;
 pub mod update;
 
-pub use error::CommandError;
+pub use error::{CommandError, CommandErrorKind};
 
 use crate::domain::{
     Analysis, AnalysisIntent, AnalysisReport, AnalysisRun, AnalysisStatus, AnalysisSummary,
@@ -12,7 +12,7 @@ use crate::domain::{
 use crate::infra::acp::analysis_generator::{
     AcpCancelled, GenerateAnalysisInput, generate_with_acp,
 };
-use crate::infra::acp::{AgentCandidate, list_agent_candidates};
+use crate::infra::acp::{AgentCandidate, list_agent_candidates, resolve_agent_launch};
 use crate::infra::app_config::{AppConfig, load_config, save_config};
 use crate::infra::keystore;
 use crate::infra::sources::{self, ProviderDescriptor};
@@ -538,21 +538,11 @@ pub async fn generate_analysis(
         return Err("Enter a research request before starting analysis.".into());
     }
 
-    let candidates = list_agent_candidates();
-    let candidate = candidates
-        .iter()
-        .find(|candidate| candidate.id == agent_id)
-        .or_else(|| candidates.iter().find(|candidate| candidate.available))
-        .ok_or_else(|| CommandError::new("No ACP agent is configured. Add one in Settings."))?;
-
-    let command = candidate.command.clone().ok_or_else(|| {
-        CommandError::new(format!(
-            "Agent '{}' is not available. Configure the binary in Settings or environment.",
-            candidate.label
-        ))
-    })?;
-    let agent_args = candidate.args.clone();
-    let (model_flag, model_env) = candidate.resolve_model(model_id.as_deref());
+    let (candidate, launch) = resolve_agent_launch(&agent_id, model_id.as_deref())
+        .map_err(|message| CommandError::with_kind(message, CommandErrorKind::Validation))?;
+    let command = launch.command;
+    let agent_args = launch.args;
+    let model_env = launch.env;
 
     let now = chrono::Utc::now().to_rfc3339();
     let run_id = run_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -724,7 +714,6 @@ pub async fn generate_analysis(
         prompt_text,
         agent_command: command,
         agent_args,
-        model_flag,
         model_env,
         progress_tx: Some(progress_tx),
         mcp_server_binary: None,

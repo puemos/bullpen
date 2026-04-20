@@ -1,4 +1,9 @@
 import { CaretDown, Check } from "@phosphor-icons/react";
+import {
+  AgentModelOptions,
+  getAgentModelLabel,
+  hasAgentModelChoices,
+} from "@/components/Agent/AgentModelOptions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,10 +35,9 @@ export default function AgentSelector({
 }: AgentSelectorProps) {
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const selectedModelId = selectedAgent ? (modelByAgent[selectedAgent.id] ?? null) : null;
-  const selectedModelName =
-    selectedAgent && selectedModelId
-      ? (selectedAgent.models.find((m) => m.id === selectedModelId)?.name ?? null)
-      : null;
+  const selectedModelName = selectedAgent
+    ? getAgentModelLabel(selectedAgent, selectedModelId)
+    : null;
 
   const triggerLabel = selectedAgent
     ? selectedModelName
@@ -75,7 +79,7 @@ export default function AgentSelector({
         {agents.map((agent) => {
           const isSelected = agent.id === selectedAgentId;
           const isUnavailable = !agent.available;
-          const hasModels = agent.models.length > 0;
+          const hasModels = hasAgentModelChoices(agent);
           const activeModelId = modelByAgent[agent.id] ?? null;
 
           if (hasModels && !isUnavailable) {
@@ -96,34 +100,12 @@ export default function AgentSelector({
                   {isSelected && <Check size={12} weight="bold" className="shrink-0" />}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-[200px] p-1">
-                  <DropdownMenuItem
-                    onSelect={() => onSelect(agent.id, null)}
-                    className={cn(
-                      "gap-2 text-xs",
-                      isSelected &&
-                        activeModelId === null &&
-                        "bg-accent/50 text-accent-foreground font-medium",
-                    )}
-                  >
-                    <span className="flex-1 truncate">Default</span>
-                    {isSelected && activeModelId === null && <Check size={12} weight="bold" />}
-                  </DropdownMenuItem>
-                  {agent.models.map((model) => {
-                    const isModelSelected = isSelected && model.id === activeModelId;
-                    return (
-                      <DropdownMenuItem
-                        key={model.id}
-                        onSelect={() => onSelect(agent.id, model.id)}
-                        className={cn(
-                          "gap-2 text-xs",
-                          isModelSelected && "bg-accent/50 text-accent-foreground font-medium",
-                        )}
-                      >
-                        <span className="flex-1 truncate">{model.name}</span>
-                        {isModelSelected && <Check size={12} weight="bold" />}
-                      </DropdownMenuItem>
-                    );
-                  })}
+                  <AgentModelOptions
+                    agent={agent}
+                    activeModelId={activeModelId}
+                    isSelected={isSelected}
+                    onSelect={onSelect}
+                  />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             );

@@ -21,9 +21,7 @@ export interface AgentCandidate {
   args: string[];
   available: boolean;
   models: AgentModel[];
-  model_flag: string | null;
-  model_value_prefix: string | null;
-  model_env: string | null;
+  supports_model_override: boolean;
 }
 
 export interface AppSettings {

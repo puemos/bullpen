@@ -5,6 +5,7 @@ import type {
   ToolCallCompleteData,
   ToolCallStartedData,
 } from "@/types";
+import type { NormalizedError } from "./errors";
 
 export type ToolTimelineStatus = "running" | "completed" | "failed";
 
@@ -28,6 +29,8 @@ export type TimelineBlock =
       type: "error";
       id: string;
       content: string;
+      kind: string | null;
+      details: string | null;
     }
   | {
       type: "system";
@@ -173,7 +176,14 @@ export function getTimelineBlocks(progress: ProgressItem[]): TimelineBlock[] {
     }
 
     if (item.type === "error") {
-      blocks.push({ type: "error", id: item.id, content: item.message });
+      const error = item.data as NormalizedError | undefined;
+      blocks.push({
+        type: "error",
+        id: item.id,
+        content: item.message,
+        kind: error?.kind ?? null,
+        details: error?.details ?? null,
+      });
       continue;
     }
 
