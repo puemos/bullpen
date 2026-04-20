@@ -10,12 +10,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Dot, Eyebrow } from "@/components/ui/editorial";
+import { Dot } from "@/components/ui/editorial";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportContent } from "@/features/report-viewer/ReportContent";
+import { ReportShell, type ReportShellAnalysis } from "@/features/report-viewer/ReportShell";
 import { getTimelineBlocks } from "@/features/run-analysis/progress";
 import { TimelineErrorBlock } from "@/features/run-analysis/TimelineErrorBlock";
-import { useExpandableOverflow } from "@/hooks/useExpandableOverflow";
 import {
   exportAnalysisHtml,
   exportAnalysisMarkdown,
@@ -25,7 +25,7 @@ import {
 } from "@/shared/api/commands";
 import { useAnalyses, useDeleteAnalysis } from "@/shared/api/queries";
 import { addRun, addRunProgress, setRunProgress, setState, useAppStore } from "@/store";
-import type { Analysis, AnalysisReport, AnalysisSummary, ProgressItem, RunState } from "@/types";
+import type { ProgressItem, RunState } from "@/types";
 
 export function AnalysisPage() {
   const selectedAnalysisId = useAppStore((state) => state.selectedAnalysisId);
@@ -56,16 +56,14 @@ export function AnalysisPage() {
   const isRunning = currentRun?.status === "running";
   const title = report?.analysis.title ?? selectedAnalysis?.title ?? "Analysis";
   const prompt = report?.analysis.user_prompt ?? selectedAnalysis?.user_prompt ?? null;
-
-  const {
-    contentRef: promptRef,
-    expanded: promptExpanded,
-    overflows: promptOverflows,
-    toggleExpanded: togglePromptExpanded,
-  } = useExpandableOverflow<HTMLParagraphElement>({
-    measureKey: prompt,
-    resetKey: selectedAnalysisId,
-  });
+  const shellAnalysis: ReportShellAnalysis = {
+    id: report?.analysis.id ?? selectedAnalysis?.id ?? selectedAnalysisId,
+    title,
+    user_prompt: prompt,
+    intent: report?.analysis.intent ?? selectedAnalysis?.intent ?? null,
+    status: report?.analysis.status ?? selectedAnalysis?.status ?? null,
+    created_at: report?.analysis.created_at ?? selectedAnalysis?.created_at ?? null,
+  };
 
   const remove = useCallback(async () => {
     if (!report) return;
@@ -135,209 +133,123 @@ export function AnalysisPage() {
       onValueChange={(value) => setState({ analysisSubTab: value as "report" | "agent" })}
       className="h-full gap-0"
     >
-      <div className="shrink-0 border-b border-border bg-background">
-        <div className="mx-auto flex max-w-5xl flex-col gap-6 px-8 pt-10 pb-5">
-          <AnalysisMetaLine analysis={selectedAnalysis} report={report} isRunning={isRunning} />
-
-          <div className="space-y-4">
-            <h1 className="text-[34px] font-semibold leading-[1.05] tracking-[-0.02em]">{title}</h1>
-            {prompt &&
-              (promptExpanded ? (
-                <p
-                  ref={promptRef}
-                  className="max-w-[62ch] whitespace-pre-wrap break-words text-[14.5px] leading-[1.55] text-muted-foreground"
+      <ReportShell
+        analysis={shellAnalysis}
+        compactLabel="Analysis"
+        introLabel="Analysis"
+        isRunning={isRunning}
+        controls={
+          <TabsList className="h-auto w-fit gap-6 rounded-none bg-transparent p-0">
+            <TabsTrigger
+              value="report"
+              className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+            >
+              Report
+            </TabsTrigger>
+            <TabsTrigger
+              value="agent"
+              className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+            >
+              Agent
+              {isRunning && <Dot className="-ml-0.5 size-1.5 animate-pulse bg-blue-500" />}
+            </TabsTrigger>
+          </TabsList>
+        }
+        actions={
+          report ? (
+            <div className="flex items-center gap-5 text-[12.5px]">
+              <button
+                type="button"
+                onClick={copyMarkdown}
+                className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Copy size={13} />
+                <span>{copyState || "Copy as markdown"}</span>
+              </button>
+              <span aria-hidden className="h-3 w-px bg-border" />
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors outline-none hover:text-foreground data-[state=open]:text-foreground">
+                  <DownloadSimple size={13} />
+                  <span>{exportState || "Export"}</span>
+                  <CaretDown size={11} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={8}
+                  className="w-[320px] min-w-[320px] rounded-none border border-border bg-background p-0 shadow-none"
                 >
-                  {prompt}
-                  <button
-                    type="button"
-                    onClick={togglePromptExpanded}
-                    className="ml-2 align-baseline font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void exportHtml();
+                    }}
+                    className="flex items-start gap-3 rounded-none border-b border-border px-3 py-3 focus:bg-muted/60"
                   >
-                    Show less
-                  </button>
-                </p>
-              ) : (
-                <div className="flex max-w-[62ch] items-baseline gap-2">
-                  <p
-                    ref={promptRef}
-                    className="min-w-0 flex-1 truncate text-[14.5px] leading-[1.55] text-muted-foreground"
+                    <DownloadSimple size={15} className="mt-[3px] shrink-0 text-foreground" />
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="text-[13px] font-medium text-foreground">Save as file…</span>
+                      <span className="text-[11px] leading-[1.45] text-muted-foreground">
+                        Local HTML — stays on your machine.
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void publishHtml();
+                    }}
+                    className="flex items-start gap-3 rounded-none px-3 py-3 focus:bg-muted/60"
                   >
-                    {prompt}
+                    <UploadSimple size={15} className="mt-[3px] shrink-0 text-foreground" />
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="text-[13px] font-medium text-foreground">
+                        Publish via PageDrop.io
+                      </span>
+                      <span className="text-[11px] leading-[1.45] text-muted-foreground">
+                        Third-party host — anyone with the link can read.
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                  <p className="border-t border-border bg-muted/30 px-3 py-2.5 text-[10.5px] leading-[1.45] text-muted-foreground">
+                    Publish uploads your report HTML to PageDrop.io, a third-party service not
+                    operated by Bullpen. The host can read the contents. Use Save if that's not
+                    acceptable.
                   </p>
-                  {promptOverflows && (
-                    <button
-                      type="button"
-                      onClick={togglePromptExpanded}
-                      className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      Show more
-                    </button>
-                  )}
-                </div>
-              ))}
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <TabsList className="h-auto w-fit gap-6 rounded-none bg-transparent p-0">
-              <TabsTrigger
-                value="report"
-                className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <span aria-hidden className="h-3 w-px bg-border" />
+              <button
+                type="button"
+                onClick={remove}
+                className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-destructive"
               >
-                Report
-              </TabsTrigger>
-              <TabsTrigger
-                value="agent"
-                className="h-auto flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-none data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
-              >
-                Agent
-                {isRunning && <Dot className="-ml-0.5 size-1.5 animate-pulse bg-blue-500" />}
-              </TabsTrigger>
-            </TabsList>
-
-            {report && (
-              <div className="flex items-center gap-5 text-[12.5px]">
-                <button
-                  type="button"
-                  onClick={copyMarkdown}
-                  className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <Copy size={13} />
-                  <span>{copyState || "Copy as markdown"}</span>
-                </button>
-                <span aria-hidden className="h-3 w-px bg-border" />
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors outline-none hover:text-foreground data-[state=open]:text-foreground">
-                    <DownloadSimple size={13} />
-                    <span>{exportState || "Export"}</span>
-                    <CaretDown size={11} />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    sideOffset={8}
-                    className="w-[320px] min-w-[320px] rounded-none border border-border bg-background p-0 shadow-none"
-                  >
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        void exportHtml();
-                      }}
-                      className="flex items-start gap-3 rounded-none border-b border-border px-3 py-3 focus:bg-muted/60"
-                    >
-                      <DownloadSimple size={15} className="mt-[3px] shrink-0 text-foreground" />
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className="text-[13px] font-medium text-foreground">
-                          Save as file…
-                        </span>
-                        <span className="text-[11px] leading-[1.45] text-muted-foreground">
-                          Local HTML — stays on your machine.
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        void publishHtml();
-                      }}
-                      className="flex items-start gap-3 rounded-none px-3 py-3 focus:bg-muted/60"
-                    >
-                      <UploadSimple size={15} className="mt-[3px] shrink-0 text-foreground" />
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className="text-[13px] font-medium text-foreground">
-                          Publish via PageDrop.io
-                        </span>
-                        <span className="text-[11px] leading-[1.45] text-muted-foreground">
-                          Third-party host — anyone with the link can read.
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                    <p className="border-t border-border bg-muted/30 px-3 py-2.5 text-[10.5px] leading-[1.45] text-muted-foreground">
-                      Publish uploads your report HTML to PageDrop.io, a third-party service not
-                      operated by Bullpen. The host can read the contents. Use Save if that's not
-                      acceptable.
-                    </p>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <span aria-hidden className="h-3 w-px bg-border" />
-                <button
-                  type="button"
-                  onClick={remove}
-                  className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-destructive"
-                >
-                  <Trash size={13} />
-                  <span>Delete</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <TabsContent value="report" className="mt-0 min-h-0 overflow-auto">
-        <ReportContent />
-      </TabsContent>
-      <TabsContent value="agent" className="mt-0 min-h-0 overflow-hidden">
-        <AgentTimeline
-          runId={runId}
-          run={currentRun}
-          isRunning={isRunning}
-          agentLabel={
-            activeRunMeta
-              ? activeRunMeta.agent_id +
-                (activeRunMeta.model_id ? ` · ${activeRunMeta.model_id}` : "")
-              : null
-          }
-        />
-      </TabsContent>
+                <Trash size={13} />
+                <span>Delete</span>
+              </button>
+            </div>
+          ) : null
+        }
+      >
+        <TabsContent value="report" className="mt-0 outline-none">
+          <ReportContent />
+        </TabsContent>
+        <TabsContent
+          value="agent"
+          className="mt-0 min-h-[calc(100vh-44px)] overflow-hidden border-t border-border outline-none"
+        >
+          <AgentTimeline
+            runId={runId}
+            run={currentRun}
+            isRunning={isRunning}
+            agentLabel={
+              activeRunMeta
+                ? activeRunMeta.agent_id +
+                  (activeRunMeta.model_id ? ` · ${activeRunMeta.model_id}` : "")
+                : null
+            }
+          />
+        </TabsContent>
+      </ReportShell>
     </Tabs>
   );
-}
-
-function AnalysisMetaLine({
-  analysis,
-  report,
-  isRunning,
-}: {
-  analysis: Analysis | AnalysisSummary | null;
-  report: AnalysisReport | null;
-  isRunning: boolean;
-}) {
-  const intent = analysis?.intent;
-  const status = report?.analysis.status ?? analysis?.status;
-  const created = report?.analysis.created_at ?? analysis?.created_at;
-
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <Eyebrow>Analysis</Eyebrow>
-      {intent && (
-        <>
-          <Dot />
-          <Eyebrow>{intent.replace(/_/g, " ")}</Eyebrow>
-        </>
-      )}
-      {status && (
-        <>
-          <Dot />
-          <Eyebrow className={isRunning ? "text-primary" : undefined}>
-            {isRunning ? "Running" : status}
-          </Eyebrow>
-        </>
-      )}
-      {created && (
-        <>
-          <Dot />
-          <Eyebrow>{formatCreated(created)}</Eyebrow>
-        </>
-      )}
-    </div>
-  );
-}
-
-function formatCreated(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
 }
 
 function AgentTimeline({

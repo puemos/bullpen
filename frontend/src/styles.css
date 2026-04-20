@@ -140,6 +140,25 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+.report-compact-bar {
+  transform: translateY(var(--report-compact-offset, -48px));
+  will-change: transform;
+}
+
+.report-compact-title {
+  backface-visibility: hidden;
+  transform: translateY(var(--report-title-offset, -10px))
+    rotateX(var(--report-title-rotate, -18deg)) scale(var(--report-title-scale, 0.96));
+  transform-origin: 50% 0%;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .report-compact-title {
+    transform: none;
+  }
+}
+
 .sidebar-report-title {
   display: block;
   min-width: 0;

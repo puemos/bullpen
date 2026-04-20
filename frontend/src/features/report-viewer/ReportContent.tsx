@@ -443,7 +443,7 @@ function SectionJumpNav(flags: SectionFlags) {
   if (flags.hasSources) items.push({ href: "#sources", label: "Sources" });
 
   return (
-    <nav className="sticky top-0 z-20 -mx-8 mb-8 flex h-12 items-center border-b border-border bg-background px-8">
+    <nav className="sticky top-11 z-20 -mx-8 mb-8 flex h-12 items-center border-b border-border bg-background px-8">
       <div className="flex items-center gap-6">
         <Eyebrow>Contents</Eyebrow>
         <div className="flex items-center gap-5 text-[12.5px]">
