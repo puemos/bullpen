@@ -22,6 +22,7 @@ import { Dot, Eyebrow } from "@/components/ui/editorial";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReportContent } from "@/features/report-viewer/ReportContent";
 import { getTimelineBlocks } from "@/features/run-analysis/progress";
+import { useExpandableOverflow } from "@/hooks/useExpandableOverflow";
 import {
   exportAnalysisHtml,
   exportAnalysisMarkdown,
@@ -62,6 +63,16 @@ export function AnalysisPage() {
   const isRunning = currentRun?.status === "running";
   const title = report?.analysis.title ?? selectedAnalysis?.title ?? "Analysis";
   const prompt = report?.analysis.user_prompt ?? selectedAnalysis?.user_prompt ?? null;
+
+  const {
+    contentRef: promptRef,
+    expanded: promptExpanded,
+    overflows: promptOverflows,
+    toggleExpanded: togglePromptExpanded,
+  } = useExpandableOverflow<HTMLParagraphElement>({
+    measureKey: prompt,
+    resetKey: selectedAnalysisId,
+  });
 
   const remove = useCallback(async () => {
     if (!report) return;
@@ -137,11 +148,40 @@ export function AnalysisPage() {
 
           <div className="space-y-4">
             <h1 className="text-[34px] font-semibold leading-[1.05] tracking-[-0.02em]">{title}</h1>
-            {prompt && (
-              <p className="max-w-[62ch] text-[14.5px] leading-[1.55] text-muted-foreground">
-                {prompt}
-              </p>
-            )}
+            {prompt &&
+              (promptExpanded ? (
+                <p
+                  ref={promptRef}
+                  className="max-w-[62ch] whitespace-pre-wrap break-words text-[14.5px] leading-[1.55] text-muted-foreground"
+                >
+                  {prompt}
+                  <button
+                    type="button"
+                    onClick={togglePromptExpanded}
+                    className="ml-2 align-baseline font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Show less
+                  </button>
+                </p>
+              ) : (
+                <div className="flex max-w-[62ch] items-baseline gap-2">
+                  <p
+                    ref={promptRef}
+                    className="min-w-0 flex-1 truncate text-[14.5px] leading-[1.55] text-muted-foreground"
+                  >
+                    {prompt}
+                  </p>
+                  {promptOverflows && (
+                    <button
+                      type="button"
+                      onClick={togglePromptExpanded}
+                      className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      Show more
+                    </button>
+                  )}
+                </div>
+              ))}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
